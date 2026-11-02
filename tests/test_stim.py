@@ -301,3 +301,42 @@ def test_loading_a_stimulus_updates_preview_and_what_fire_sends(app, win, tmp_pa
     assert win.stimulus.shape == "custom" and win.stimulus.segments == custom.segments
     x, y = sw.curve.getData()
     assert y.min() == pytest.approx(-1) and y.max() < 3
+
+
+# ---------------------------------------------------------------- units
+def test_describe_in_units():
+    s = Stimulus(shape="pulse", amplitude_v=2, width_ms=1)
+    assert s.describe() == "Pulse 2 V, 1 ms"
+    assert s.describe("µA", 100) == "Pulse 200 µA, 1 ms"
+    r = Stimulus(shape="ramp", start_v=0, end_v=0.5, duration_ms=10)
+    assert r.describe("mA", 2) == "Ramp 0→1 mA over 10 ms"
+
+
+def test_units_setting_is_saved_and_checked(tmp_path):
+    c = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")],
+                      stim_units="µA", stim_scale=100)
+    back = config.load(config.save(c, tmp_path / "u.toml"))
+    assert (back.stim_units, back.stim_scale) == ("µA", 100)
+    plain = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")])
+    stim_section = config.dumps(plain).split("[stimulator]")[1].split("[[channels]]")[0]
+    assert "units" not in stim_section                     # unchanged files for volts
+    with pytest.raises(ValueError, match="scale"):
+        config.validate(config.Config(backend="simulated", channels=[config.Channel("ai0", "A")],
+                                      stim_scale=0))
+
+
+def test_stimulator_fields_show_units_but_stimulus_stays_in_volts(win):
+    win.cfg.stim_units, win.cfg.stim_scale = "µA", 100
+    page = win.stim_page
+    page.sync()                                            # picks up the new units
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=2, width_ms=1))
+    assert page.p_amp.value() == pytest.approx(200) and page.p_amp.suffix() == " µA"
+    assert page.p_amp.maximum() == pytest.approx(1000)     # ±10 V at the output
+    page.p_amp.setValue(150)
+    assert win.stimulus.amplitude_v == pytest.approx(1.5)  # sent in volts
+    assert "150 µA" in page.message.text() and "(500 µA)" in page.info.text()
+    win.set_stimulus(Stimulus(shape="custom", segments=[{"duration_ms": 5, "start_v": 0, "end_v": 0.5}]))
+    assert page.table.item(0, 2).text() == "50"
+    assert page.table.horizontalHeaderItem(1).text() == "Start (µA)"
+    page.table.item(0, 2).setText("80")
+    assert win.stimulus.segments[0]["end_v"] == pytest.approx(0.8)

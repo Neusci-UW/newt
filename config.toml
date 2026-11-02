@@ -12,6 +12,17 @@ window_s = 10
 [recording]
 directory = "data"
 
+# Stimulator: levels are sent in volts. To set them in the units your stimulus isolator
+# delivers instead, give the units and how many of them one volt at the output makes.
+# The safety limit (max_voltage) is always in volts.
+# [stimulator]
+# units = "µA"
+# scale = 100        # µA per V, e.g. an isolator set to 100 µA/V
+
+# Only used with --backend simulated: these inputs get noise and spikes but no sine wave.
+[simulated]
+no_sine = ["ai1"]
+
 # scale/offset convert volts at the DAQ input to your units: value = volts*scale + offset.
 # Example: an amplifier with gain 1000, displaying mV at the electrode:
 #   scale = 1000 (mV per V) / 1000 (gain) = 1.0, units = "mV"

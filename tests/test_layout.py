@@ -1,6 +1,6 @@
 """Tabs, split view, hover strips, line thickness, whole-app light/dark, stimulator chip."""
 import pytest
-from pyqtgraph.Qt import QtGui, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from neusci_daq import config, style, theme
 from neusci_daq.stim import Stimulus
@@ -377,3 +377,107 @@ def test_long_comment_labels_are_shortened_on_the_plot(app, win):
     assert win._shown_comments[-1]["text"] == long             # full text is kept
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
+
+
+# ---------------------------------------------------------------- mouse wheel zoom
+class _Wheel:
+    """Just enough of a QGraphicsSceneWheelEvent for ViewBox.wheelEvent."""
+    def __init__(self, vb, delta=-120, cmd=False, shift=False, sideways=False):
+        M = QtCore.Qt.KeyboardModifier
+        self._vb, self._delta, self._sideways = vb, delta, sideways
+        self._mods = M.ControlModifier if cmd else M.ShiftModifier if shift else M.NoModifier
+    def delta(self): return self._delta
+    def modifiers(self): return self._mods
+    def orientation(self):
+        return QtCore.Qt.Orientation.Horizontal if self._sideways else QtCore.Qt.Orientation.Vertical
+    def pos(self): return self._vb.boundingRect().center()
+    def accept(self): pass
+    def ignore(self): pass
+
+
+def test_wheel_zooms_time_and_cmd_wheel_zooms_voltage(app, win):
+    win.resize(1024, 640)
+    win.show()
+    pump(app, 0.05)
+    vb = win.plots[0].vb
+    yr = vb.viewRange()[1]
+    before = win.window_box.value()
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # wheel down: zoom out in time
+    assert win.window_box.value() > before
+    assert vb.viewRange()[1] == yr                           # voltage untouched
+    vb.wheelEvent(_Wheel(vb, delta=120))
+    vb.wheelEvent(_Wheel(vb, delta=120))                     # zoom in
+    assert win.window_box.value() < before
+    vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))           # Cmd: zoom in on voltage only
+    span = lambda r: r[1] - r[0]
+    assert span(vb.viewRange()[1]) < span(yr)
+    assert not vb.autoRangeEnabled()[1]
+
+
+def test_wheel_in_review_keeps_the_time_under_the_mouse(app, win):
+    win.window_box.setValue(0.5)
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 2.0)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.open_session(win.session_dir)
+    win.window_box.setValue(0.5)
+    win.scroll.setValue(500)                                 # view 0.5-1.0 s
+    vb = win.plots[0].vb
+    x0, x1 = vb.viewRange()[0]
+    win._zoom_time(0.5, x=0.75)                              # zoom in around 0.75 s
+    assert win.window_box.value() == pytest.approx(0.25)
+    assert vb.viewRange()[0][0] == pytest.approx(0.625, abs=0.002)
+
+
+def test_wheel_zoom_works_while_acquisition_is_stopped(app, win):
+    win.resize(1024, 640)
+    win.show()
+    win.window_box.setValue(2)
+    win.btn_run.setChecked(True)
+    pump(app, 2.5)                                           # fill the 2 s window
+    win.btn_run.setChecked(False)
+    pump(app, 0.05)
+    vb = win.plots[0].vb
+    n = len(win.buf_t)
+    t_end = win.buf_t[-1] - win._axis_zero
+    win._zoom_time(0.25, x=t_end - 1.0)                      # zoom in around 1 s before the end
+    lo, hi = vb.viewRange()[0]
+    assert win.window_box.value() == pytest.approx(0.5)
+    assert hi - lo == pytest.approx(0.5) and lo < t_end - 1.0 < hi   # the view moved with it
+    assert len(win.buf_t) == n                               # the trace wasn't trimmed
+    win._zoom_time(4.0, x=t_end - 1.0)                       # and back out: all of it again
+    lo, hi = vb.viewRange()[0]
+    assert hi - lo == pytest.approx(2.0) and lo <= win.buf_t[0] - win._axis_zero + 0.01
+    yr = vb.viewRange()[1]
+    vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))           # Cmd: voltage zoom while stopped too
+    assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < yr[1] - yr[0]
+    win.window_box.setValue(1)                               # typing a Window redraws too
+    lo, hi = vb.viewRange()[0]
+    assert hi - lo == pytest.approx(1.0)
+
+
+def test_shift_wheel_moves_through_time(app, win):
+    win.resize(1024, 640)
+    win.show()
+    win.window_box.setValue(2)
+    win.btn_run.setChecked(True)
+    pump(app, 2.5)
+    vb = win.plots[0].vb
+    running = vb.viewRange()[0]
+    vb.wheelEvent(_Wheel(vb, delta=120, shift=True))         # running: the newest data stays put
+    assert vb.viewRange()[0] == running
+    win.btn_run.setChecked(False)
+    pump(app, 0.05)
+    win.window_box.setValue(0.5)
+    lo = vb.viewRange()[0][0]
+    vb.wheelEvent(_Wheel(vb, delta=120, shift=True))         # wheel up: earlier, by a tenth of Window
+    assert vb.viewRange()[0][0] == pytest.approx(lo - 0.05)
+    vb.wheelEvent(_Wheel(vb, delta=-120, sideways=True))     # sideways scroll (macOS Shift+wheel): later
+    assert vb.viewRange()[0][0] == pytest.approx(lo)
+    assert win.window_box.value() == pytest.approx(0.5)      # no zoom
+    for _ in range(100):
+        vb.wheelEvent(_Wheel(vb, delta=120, shift=True))     # stops at the start of the trace
+    assert vb.viewRange()[0][0] == pytest.approx(win.buf_t[0] - win._axis_zero)

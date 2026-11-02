@@ -105,6 +105,10 @@ class Config:
     stim_rate: float = 5000.0     # output samples per second (USB-6003 max 5,000)
     stim_max_v: float = 5.0       # safety limit: stimuli above this are refused
     stim_monitor: str = ""        # input that records the stimulus (wired from the output), or ""
+    stim_units: str = "V"         # units the Stimulator shows levels in, e.g. "µA" behind an isolator
+    stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
+    # Simulated backend only: inputs that get no sine wave (just noise and spikes)
+    sim_no_sine: tuple[str, ...] = ()
 
     @property
     def aggregate_rate(self) -> float:
@@ -124,7 +128,7 @@ def valid_inputs(cfg: Config) -> list[str]:
 def load(path: str | Path) -> Config:
     raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     dev, disp, rec = raw.get("device", {}), raw.get("display", {}), raw.get("recording", {})
-    st = raw.get("stimulator", {})
+    st, sim = raw.get("stimulator", {}), raw.get("simulated", {})
     chans = []
     for c in raw.get("channels", []):
         ch = Channel(**{k: v for k, v in c.items() if k != "range"})
@@ -145,6 +149,9 @@ def load(path: str | Path) -> Config:
         stim_rate=float(st.get("rate", 5000)),
         stim_max_v=float(st.get("max_voltage", 5.0)),
         stim_monitor=str(st.get("monitor", "")).lower(),
+        stim_units=str(st.get("units", "V")).strip() or "V",
+        stim_scale=float(st.get("scale", 1.0)),
+        sim_no_sine=tuple(str(p).lower() for p in sim.get("no_sine", [])),
     ).with_channels(chans)
     validate(cfg)
     return cfg
@@ -164,6 +171,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("[stimulator] rate must be between 0 and 5,000 S/s (USB-6003 limit).")
     if not 0 < cfg.stim_max_v <= 10:
         raise ValueError("[stimulator] max_voltage must be between 0 and 10 V.")
+    if not cfg.stim_scale > 0:
+        raise ValueError("[stimulator] scale must be positive (units per volt).")
     if cfg.sample_rate <= 0:
         raise ValueError("Sample rate must be positive.")
     if cfg.aggregate_rate > USB6003_MAX_AGGREGATE_RATE:
@@ -228,6 +237,10 @@ def dumps(cfg: Config) -> str:
         f"max_voltage = {cfg.stim_max_v:g}",
         f"monitor = {_s(cfg.stim_monitor)}",
     ]
+    if cfg.stim_units != "V" or cfg.stim_scale != 1.0:
+        lines += [f"units = {_s(cfg.stim_units)}", f"scale = {cfg.stim_scale:g}"]
+    if cfg.sim_no_sine:
+        lines += ["", "[simulated]", f"no_sine = [{', '.join(_s(p) for p in cfg.sim_no_sine)}]"]
     for c in cfg.channels + cfg.spare_channels:
         lines += ["", "[[channels]]",
                   f"physical = {_s(c.physical)}",

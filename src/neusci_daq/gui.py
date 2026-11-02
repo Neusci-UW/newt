@@ -74,6 +74,32 @@ class WindowBox(QtWidgets.QDoubleSpinBox):
         return self.sizeHint()
 
 
+class _TraceViewBox(pg.ViewBox):
+    """The mouse wheel zooms time (by changing Window, so every plot follows and live
+    mode keeps it); Shift+wheel, or scrolling sideways, moves back and forward in time;
+    Cmd+wheel (Ctrl+wheel off a Mac), or the wheel over the left axis, zooms this
+    plot's voltage axis."""
+
+    def __init__(self, zoom_time, pan_time, **kw):
+        super().__init__(**kw)
+        self._zoom_time, self._pan_time = zoom_time, pan_time
+
+    def wheelEvent(self, ev, axis=None):
+        mods = ev.modifiers()
+        # Qt reports Cmd as Control on macOS.
+        if axis == 1 or (axis is None and mods & QtCore.Qt.KeyboardModifier.ControlModifier):
+            super().wheelEvent(ev, axis=1)
+            return
+        # macOS turns Shift+wheel into a sideways scroll, so check for both.
+        if mods & QtCore.Qt.KeyboardModifier.ShiftModifier or ev.orientation() == QtCore.Qt.Orientation.Horizontal:
+            self._pan_time(ev.delta())
+            ev.accept()
+            return
+        s = 1.02 ** (ev.delta() * self.state["wheelScaleFactor"])     # same feel as pyqtgraph's zoom
+        self._zoom_time(s, self.mapToView(ev.pos()).x() if axis is None else None)
+        ev.accept()
+
+
 class _CommentEdit(QtWidgets.QLineEdit):
     """Asks the toolbar for little width, so nothing gets pushed into its overflow
     menu on a narrow screen; it still grows into any free space."""
@@ -378,7 +404,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.row_widgets = []
 
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
-        pw = pg.PlotWidget()
+        pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time))
         p = pw.getPlotItem()
         self.plot_widgets.append(pw)
         if unit in _SI_BASE:
@@ -865,13 +891,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"Channel setup saved to {path}. "
                                          f"Start with: neusci-daq -c \"{path}\"", 15000)
 
-    def _alloc_buffers(self):
+    def _alloc_buffers(self, trim: bool = True):
         n = len(self.cfg.channels)
         cap = int(self.window_box.value() * self.cfg.sample_rate)
         old_t = getattr(self, "buf_t", np.empty(0))
         old_y = getattr(self, "buf_y", np.empty((n, 0)))
         self.cap = max(cap, 2)
-        self.buf_t, self.buf_y = old_t[-self.cap:], old_y[:, -self.cap:]
+        if trim:
+            self.buf_t, self.buf_y = old_t[-self.cap:], old_y[:, -self.cap:]
+        else:
+            self.buf_t, self.buf_y = old_t, old_y
 
     # ======================================================================
     # Modes
@@ -1361,12 +1390,60 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scroll.setValue(int(max(0.0, rng[0]) * 1000))
         self.scroll.blockSignals(False)
 
+    def _zoom_time(self, s: float, x: float | None = None):
+        """Mouse wheel over a plot: scale Window by s. In review and while acquisition
+        is stopped, the time under the mouse (x) stays put; while running, the newest
+        data stays at the right edge."""
+        wb = self.window_box
+        old = wb.value()
+        new = min(max(old * s, wb.minimum()), wb.maximum())
+        if not self.plots or (self.mode == LIVE and self.btn_run.isChecked()):
+            wb.setValue(new)
+            return
+        x0 = self.plots[0].vb.viewRange()[0][0]
+        x = x0 + old / 2 if x is None else x
+        wb.setValue(new)
+        start = x - (x - x0) * wb.value() / old
+        if self.mode == REVIEW:
+            self.scroll.setValue(int(max(0.0, start) * 1000))
+        else:
+            self._show_stopped(start)
+
+    def _pan_time(self, delta: float):
+        """Shift+wheel over a plot: move a tenth of Window per wheel notch, earlier for
+        wheel up and later for wheel down. Not while acquiring, where the newest data
+        stays at the right edge."""
+        if not self.plots or (self.mode == LIVE and self.btn_run.isChecked()):
+            return
+        start = self.plots[0].vb.viewRange()[0][0] - delta / 120 * 0.1 * self.window_box.value()
+        if self.mode == REVIEW:
+            self.scroll.setValue(int(max(0.0, start) * 1000))     # the scrollbar keeps it in the block
+        else:
+            self._show_stopped(start)
+
     def _window_changed(self):
         if self.mode == REVIEW:
             self._update_scroll_range()
             self._scrolled(self.scroll.value())
-        else:
+        elif self.btn_run.isChecked():
             self._alloc_buffers()
+        else:
+            # Stopped: keep the last trace (Start clears it anyway) so zooming in
+            # and back out doesn't lose it, and redraw since no refresh will.
+            self._alloc_buffers(trim=False)
+            self._show_stopped()
+
+    def _show_stopped(self, start: float | None = None) -> None:
+        """Acquisition stopped: show Window seconds of the last trace from `start`
+        (default: keep the right edge where it is), staying within the data."""
+        if not self.plots or not len(self.buf_t):
+            return
+        win = self.window_box.value()
+        x0, x1 = self.buf_t[0] - self._axis_zero, self.buf_t[-1] - self._axis_zero
+        if start is None:
+            start = self.plots[0].vb.viewRange()[0][1] - win
+        start = min(max(start, x0), max(x0, x1 - win))
+        self.plots[0].setXRange(start, start + win, padding=0)
 
     # ======================================================================
     # Live mode
@@ -1575,7 +1652,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except ValueError as e:
             self._stim_message(str(e), error=True)
             return False
-        return self.send_wave(wave, self.stimulus.describe())
+        return self.send_wave(wave, self.stimulus.describe(self.cfg.stim_units, self.cfg.stim_scale))
 
     def send_wave(self, wave, desc: str) -> bool:
         """Send `wave` (volts at the output rate) and note it as a comment while recording."""

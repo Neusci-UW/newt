@@ -654,7 +654,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.main.settings.setValue("trials_protocol", self.protocol.dumps())
         cfg = self.main.cfg
         s = self.main.stimulus
-        self.stim_info.setText(s.describe() + f" · on {cfg.stim_output}")
+        self.stim_info.setText(s.describe(cfg.stim_units, cfg.stim_scale) + f" · on {cfg.stim_output}")
         self.chk = T.check(self.protocol, s, cfg.stim_rate, cfg.stim_max_v)
         self._show_counts()
         self._update_summary()

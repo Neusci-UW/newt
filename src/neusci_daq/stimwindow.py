@@ -6,6 +6,7 @@ be written to the output.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ class StimPage(QtWidgets.QWidget):
         super().__init__()
         self.main = main
         self._loading = False
+        self._units = None                 # (units, scale) the level fields currently show
         self._mode = style.LIGHT
         outer = QtWidgets.QHBoxLayout(self)
         outer.setContentsMargins(14, 14, 14, 14)
@@ -105,9 +107,9 @@ class StimPage(QtWidgets.QWidget):
         self.f_rate.setSpecialValueText("same as output")
         self.f_rate.setToolTip("Sample rate of a one-column file. Two-column files (time in s, volts) don't need it.")
         f.addRow("File", frow); f.addRow("File's rate", self.f_rate)
-        hint = QtWidgets.QLabel("One column: volts per sample. Two columns: time (s), volts.")
-        hint.setWordWrap(True)
-        f.addRow("", hint)
+        self.f_hint = QtWidgets.QLabel()
+        self.f_hint.setWordWrap(True)
+        f.addRow("", self.f_hint)
         self.pages.addWidget(fw)
         left.addWidget(self.pages, 1)
 
@@ -163,6 +165,7 @@ class StimPage(QtWidgets.QWidget):
         outer.addLayout(right, 1)
 
         # ---- signals -------------------------------------------------------
+        self._apply_units()
         self.set_stimulus(main.stimulus)
         self.repeat.setValue(main.stim_repeat_s)
         self.shape.currentIndexChanged.connect(self._shape_changed)
@@ -195,15 +198,16 @@ class StimPage(QtWidgets.QWidget):
         self.shape.setCurrentIndex(max(0, self.shape.findData(s.shape)))
         self.pages.setCurrentIndex(self.shape.currentIndex())
         self.delay.setValue(s.delay_ms)
-        self.p_amp.setValue(s.amplitude_v); self.p_width.setValue(s.width_ms)
+        k = self._scale
+        self.p_amp.setValue(s.amplitude_v * k); self.p_width.setValue(s.width_ms)
         self.p_count.setValue(s.count); self.p_interval.setValue(s.interval_ms); self.p_bi.setChecked(s.biphasic)
-        self.s_amp.setValue(s.amplitude_v); self.s_dur.setValue(s.duration_ms)
-        self.r_start.setValue(s.start_v); self.r_end.setValue(s.end_v); self.r_dur.setValue(s.duration_ms)
-        self.n_amp.setValue(abs(s.amplitude_v)); self.n_off.setValue(s.offset_v)
+        self.s_amp.setValue(s.amplitude_v * k); self.s_dur.setValue(s.duration_ms)
+        self.r_start.setValue(s.start_v * k); self.r_end.setValue(s.end_v * k); self.r_dur.setValue(s.duration_ms)
+        self.n_amp.setValue(abs(s.amplitude_v) * k); self.n_off.setValue(s.offset_v * k)
         self.n_freq.setValue(s.freq_hz); self.n_dur.setValue(s.duration_ms)
         self.table.setRowCount(0)
         for seg in s.segments:
-            self._append_row(seg["duration_ms"], seg["start_v"], seg["end_v"])
+            self._append_row(seg["duration_ms"], seg["start_v"] * k, seg["end_v"] * k)
         self.f_path.setText(s.file); self.f_rate.setValue(s.file_rate)
         self._loading = False
         self._changed()          # the stimulus Fire sends and the preview both follow the fields
@@ -212,15 +216,16 @@ class StimPage(QtWidgets.QWidget):
         """The stimulus the fields describe. Raises ValueError for a bad table cell."""
         shape = self.shape.currentData()
         s = Stimulus(shape=shape, delay_ms=self.delay.value())
+        v = lambda box: box.value() / self._scale          # the fields show units; Stimulus keeps volts
         if shape == "pulse":
-            s.amplitude_v, s.width_ms = self.p_amp.value(), self.p_width.value()
+            s.amplitude_v, s.width_ms = v(self.p_amp), self.p_width.value()
             s.count, s.interval_ms, s.biphasic = self.p_count.value(), self.p_interval.value(), self.p_bi.isChecked()
         elif shape == "step":
-            s.amplitude_v, s.duration_ms = self.s_amp.value(), self.s_dur.value()
+            s.amplitude_v, s.duration_ms = v(self.s_amp), self.s_dur.value()
         elif shape == "ramp":
-            s.start_v, s.end_v, s.duration_ms = self.r_start.value(), self.r_end.value(), self.r_dur.value()
+            s.start_v, s.end_v, s.duration_ms = v(self.r_start), v(self.r_end), self.r_dur.value()
         elif shape == "sine":
-            s.amplitude_v, s.offset_v = self.n_amp.value(), self.n_off.value()
+            s.amplitude_v, s.offset_v = v(self.n_amp), v(self.n_off)
             s.freq_hz, s.duration_ms = self.n_freq.value(), self.n_dur.value()
         elif shape == "file":
             s.file, s.file_rate = self.f_path.text().strip(), self.f_rate.value()
@@ -237,7 +242,8 @@ class StimPage(QtWidgets.QWidget):
                     vals.append(float((item.text() if item else "").strip()))
                 except ValueError:
                     raise ValueError(f"Segment {r + 1}: {name} must be a number.") from None
-            out.append({"duration_ms": vals[0], "start_v": vals[1], "end_v": vals[2]})
+            out.append({"duration_ms": vals[0], "start_v": vals[1] / self._scale,
+                        "end_v": vals[2] / self._scale})
         return out
 
     # -- reacting to edits ---------------------------------------------------
@@ -258,8 +264,10 @@ class StimPage(QtWidgets.QWidget):
 
     def _update_preview(self):
         cfg, s = self.main.cfg, self.main.stimulus
+        units, k = self._unit_label, self._scale
+        in_units = f" ({cfg.stim_max_v * k:g} {units})" if self._converted else ""
         self.info.setText(f"Output {cfg.stim_output} · {cfg.stim_rate:,.0f} samples/s · "
-                          f"limit ±{cfg.stim_max_v:g} V (set in the config)")
+                          f"limit ±{cfg.stim_max_v:g} V{in_units} (set in the config)")
         try:
             wave = s.waveform(cfg.stim_rate)
             stimmod.check_limit(wave, cfg.stim_max_v)
@@ -269,10 +277,10 @@ class StimPage(QtWidgets.QWidget):
             return
         t = np.arange(len(wave)) / cfg.stim_rate
         # draw each sample as a flat step, which is what the output really does
-        self.curve.setData(np.repeat(t, 2)[1:], np.repeat(wave, 2)[:-1])
-        peak = float(np.max(np.abs(wave)))
+        self.curve.setData(np.repeat(t, 2)[1:], np.repeat(wave * k, 2)[:-1])
+        peak = float(np.max(np.abs(wave))) * k
         notes = s.rounding_notes(cfg.stim_rate)
-        self.show_message(f"{s.describe()}\nPeak {peak:g} V · {len(wave) / cfg.stim_rate * 1000:g} ms · "
+        self.show_message(f"{s.describe(units, k)}\nPeak {peak:g} {units} · {len(wave) / cfg.stim_rate * 1000:g} ms · "
                           f"{len(wave):,} samples" + ("".join("\n" + n for n in notes)))
 
     def _show_problem(self, text: str):
@@ -287,6 +295,9 @@ class StimPage(QtWidgets.QWidget):
     def sync(self) -> None:
         """Show the main window's current output, monitor input and repeat state."""
         cfg = self.main.cfg
+        if self._units != (cfg.stim_units, cfg.stim_scale):
+            self._apply_units()
+            self.set_stimulus(self.main.stimulus)
         self.output.setCurrentText(cfg.stim_output)
         self.monitor.blockSignals(True)
         self.monitor.clear()
@@ -318,6 +329,45 @@ class StimPage(QtWidgets.QWidget):
             self.preview.getPlotItem().getAxis(ax).setTextPen(th.foreground)
         self.curve.setPen(pg.mkPen("#4d8dff" if mode == style.DARK else "#1a5fd0", width=2))
         self._update_preview()
+
+    # -- units ---------------------------------------------------------------
+    @property
+    def _scale(self) -> float:
+        return self._units[1] if self._units else 1.0
+
+    @property
+    def _unit_label(self) -> str:
+        return self._units[0] if self._units else "V"
+
+    @property
+    def _converted(self) -> bool:
+        return self._units not in (None, ("V", 1.0))
+
+    def _apply_units(self) -> None:
+        """Label and size the level fields for the [stimulator] units setting. The DAQ
+        output is ±10 V, so the fields go to ±10 V × scale in those units."""
+        cfg = self.main.cfg
+        self._units = (cfg.stim_units, cfg.stim_scale)
+        units, k = self._units
+        # enough decimals to step 1% of a volt, e.g. 0.01 V or 0.001 mA at 0.1 mA/V
+        decimals = max(2, min(6, 2 - math.floor(math.log10(k))))
+        for box in (self.p_amp, self.s_amp, self.r_start, self.r_end, self.n_amp, self.n_off):
+            box.blockSignals(True)
+            box.setDecimals(decimals)
+            box.setRange(0 if box is self.n_amp else -10 * k, 10 * k)
+            box.setSingleStep(0.1 * k)
+            box.setSuffix(f" {units}")
+            box.blockSignals(False)
+        self.table.setHorizontalHeaderLabels(["Duration (ms)", f"Start ({units})", f"End ({units})"])
+        self.f_hint.setText("One column: volts per sample. Two columns: time (s), volts."
+                            + (" Files are always in volts at the output." if self._converted else ""))
+        axis = self.preview.getPlotItem().getAxis("left")
+        if units == "V":
+            self.preview.getPlotItem().setLabel("left", "Output", units="V")
+        else:
+            # pyqtgraph would add a prefix to a unit that may already have one (µA -> kµA)
+            self.preview.getPlotItem().setLabel("left", f"Output ({units})")
+        axis.enableAutoSIPrefix(units == "V")
 
     # -- custom segments -----------------------------------------------------
     def _append_row(self, dur, start, end):

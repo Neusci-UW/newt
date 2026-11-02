@@ -187,7 +187,7 @@ def test_both_stylesheets_reference_existing_images():
 
 # ---------------------------------------------------------------- stimulator tab and chip
 def test_no_stimulator_menu_any_more(win):
-    assert [a.text().replace("&", "") for a in win.menuBar().actions()] == ["File", "Setup"]
+    assert [a.text().replace("&", "") for a in win.menuBar().actions()] == ["File", "Setup", "View"]
 
 
 def test_chip_shows_on_every_tab_while_repeating_and_stops_it(app, win):
@@ -481,3 +481,42 @@ def test_shift_wheel_moves_through_time(app, win):
     for _ in range(100):
         vb.wheelEvent(_Wheel(vb, delta=120, shift=True))     # stops at the start of the trace
     assert vb.viewRange()[0][0] == pytest.approx(win.buf_t[0] - win._axis_zero)
+
+
+def test_voltage_auto_scale_can_be_turned_off(app, win):
+    win.resize(1024, 640)
+    win.show()
+    assert win.act_auto_y.isChecked()                        # on by default
+    win.btn_run.setChecked(True)
+    pump(app, 0.5)
+    vb = win.plots[0].vb
+    assert vb.autoRangeEnabled()[1]
+    win.act_auto_y.trigger()                                 # View > Auto-scale voltage: off
+    held = vb.viewRange()[1]
+    pump(app, 0.5)
+    assert not win.auto_scale_y and vb.viewRange()[1] == held  # the range stays put
+    assert win.settings.value("auto_scale_y", type=bool) is False
+    win.apply_setup(sample_rate=1000)                        # rebuilt plots: fitted once, then held
+    pump(app, 0.5)
+    vb = win.plots[0].vb
+    lo, hi = vb.viewRange()[1]
+    assert not vb.autoRangeEnabled()[1] and lo < 0 < hi and hi - lo < 5
+    win.act_auto_y.trigger()                                 # back on
+    assert win.auto_scale_y and vb.autoRangeEnabled()[1]
+    win.btn_run.setChecked(False)
+
+
+def test_wheel_zoom_after_changing_the_rate_while_stopped(app, win):
+    """A rate change clears the trace and rebuilds the plots; zooming must still work."""
+    win.resize(1024, 640)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.5)
+    win.btn_run.setChecked(False)
+    win.apply_setup(sample_rate=1000)
+    pump(app, 0.05)
+    vb = win.plots[0].vb
+    assert vb.viewRange()[0] == pytest.approx([0, win.window_box.value()])
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # zoom out
+    lo, hi = vb.viewRange()[0]
+    assert win.window_box.value() > 10 and hi - lo == pytest.approx(win.window_box.value())

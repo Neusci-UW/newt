@@ -156,6 +156,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         mode = self.settings.value("plot_theme", theme.DARK)
         self.plot_mode = mode if mode in theme.THEMES else theme.DARK
+        # Off: each plot keeps its voltage range (fitted once when it first gets data).
+        self.auto_scale_y = self.settings.value("auto_scale_y", True, type=bool)
+        self._unfitted: set = set()      # plots still waiting for that first fit
         self._build_ui()
         self._build_menu()
         self._build_live_plots()
@@ -390,6 +393,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.act_wiring[mode] = a
         self.wiring_menu.setToolTipsVisible(True)
 
+        v = self.menuBar().addMenu("&View")
+        self.act_auto_y = v.addAction("&Auto-scale voltage")
+        self.act_auto_y.setCheckable(True)
+        self.act_auto_y.setChecked(self.auto_scale_y)
+        self.act_auto_y.toggled.connect(self.set_auto_scale_y)
+        self.act_auto_y.setToolTip("On: each plot's voltage axis keeps resizing to fit its trace. "
+                                   "Off: it stays where it is (Cmd+scroll to zoom it).")
+        v.setToolTipsVisible(True)
+
 
     # -- plots -------------------------------------------------------------
     def _clear_plot_area(self):
@@ -402,6 +414,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plots, self.curves, self.strips = [], [], []
         self.plot_widgets, self.curve_colors, self.curve_widths = [], [], []
         self.row_widgets = []
+        self._unfitted.clear()
 
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
         pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time))
@@ -419,8 +432,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Peak downsampling keeps spikes visible when zoomed out.
         p.setDownsampling(auto=True, mode="peak")
         p.setClipToView(True)
-        p.enableAutoRange(axis="y", enable=True)
+        p.enableAutoRange(axis="y", enable=self.auto_scale_y)
         p.setAutoVisible(y=True)
+        if not self.auto_scale_y:
+            self._unfitted.add(p)
         if self.plots:
             p.setXLink(self.plots[0])
         self.plots.append(p)
@@ -431,10 +446,36 @@ class MainWindow(QtWidgets.QMainWindow):
         self._style_plot(pw)
         return pw
 
+    def set_auto_scale_y(self, on: bool) -> None:
+        """View › Auto-scale voltage. Turning it off holds every plot's current range."""
+        self.auto_scale_y = bool(on)
+        self.settings.setValue("auto_scale_y", self.auto_scale_y)
+        self.act_auto_y.blockSignals(True)
+        self.act_auto_y.setChecked(self.auto_scale_y)
+        self.act_auto_y.blockSignals(False)
+        self._unfitted.clear()
+        for p in self.plots:
+            p.enableAutoRange(axis="y", enable=self.auto_scale_y)
+
+    def _fit_new_plots(self) -> None:
+        """With auto-scale off, give a plot that has just got its first data a range
+        that fits it, then leave it alone."""
+        for p, curve in zip(self.plots, self.curves):
+            if p not in self._unfitted:
+                continue
+            y = curve.yData
+            if y is None or not len(y) or not np.isfinite(y).any():
+                continue
+            lo, hi = float(np.nanmin(y)), float(np.nanmax(y))
+            p.setYRange(lo, hi if hi > lo else lo + 1, padding=0.05)
+            self._unfitted.discard(p)
+
     def _finish_plots(self):
         if self.plots:
             self.plots[-1].setLabel("bottom", "time", units="s")
             self.plots[0].sigXRangeChanged.connect(self._xrange_changed)
+            if getattr(self, "mode", LIVE) == LIVE and not self.btn_run.isChecked():
+                self._show_stopped()     # new plots (e.g. after a rate change) start at Window
 
     def _build_live_plots(self):
         """One row per channel: its controls on the left, its plot on the right.
@@ -1356,6 +1397,7 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.set_color(color)
         for curve, y in zip(self.curves, blk["data"]):
             curve.setData(blk["t"], y)
+        self._fit_new_plots()
         self.refresh_comments()
         self._update_scroll_range()
         self._update_wiring_label()
@@ -1436,10 +1478,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _show_stopped(self, start: float | None = None) -> None:
         """Acquisition stopped: show Window seconds of the last trace from `start`
         (default: keep the right edge where it is), staying within the data."""
-        if not self.plots or not len(self.buf_t):
+        if not self.plots:
             return
         win = self.window_box.value()
-        x0, x1 = self.buf_t[0] - self._axis_zero, self.buf_t[-1] - self._axis_zero
+        buf_t = getattr(self, "buf_t", np.empty(0))
+        if not len(buf_t):
+            # No trace (e.g. a rate change cleared it): show Window from 0 s,
+            # where the next run starts, so zooming still visibly does something.
+            self.plots[0].setXRange(0, win, padding=0)
+            return
+        x0, x1 = buf_t[0] - self._axis_zero, buf_t[-1] - self._axis_zero
         if start is None:
             start = self.plots[0].vb.viewRange()[0][1] - win
         start = min(max(start, x0), max(x0, x1 - win))
@@ -1577,6 +1625,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.buf_t.size and self.buf_y.shape[0] == len(self.curves):
             for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
                 curve.setData(self.buf_t - self._axis_zero, ch.to_units(y))
+            self._fit_new_plots()
 
     def _set_axis_zero(self, zero: float) -> None:
         """Change which stream time the live axis shows as 0; comment lines move with it."""
@@ -1925,6 +1974,7 @@ class MainWindow(QtWidgets.QMainWindow):
         t_end = x[-1]
         for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
             curve.setData(x, ch.to_units(y))
+        self._fit_new_plots()
         self.plots[0].setXRange(t_end - self.window_box.value(), t_end, padding=0)
         # drop markers that scrolled off
         t_min = x[0]

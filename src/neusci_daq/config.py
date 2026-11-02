@@ -93,8 +93,8 @@ class Channel:
 class Config:
     backend: str = "nidaqmx"      # "nidaqmx" | "multichannelio" | "simulated"
     device: str = "Dev1"
-    sample_rate: float = 1000.0   # per channel
-    chunk_size: int = 100         # samples per channel per read
+    sample_rate: float = 20000.0  # per channel; fast enough to see action potential shapes
+    chunk_size: int = 1000        # samples per channel per read (50 ms at 20 kHz)
     terminal_config: str = "RSE"  # "RSE" | "DIFF"
     channels: list[Channel] = field(default_factory=list)        # switched on: acquired and shown
     spare_channels: list[Channel] = field(default_factory=list)  # switched off: kept so they can be switched back on
@@ -140,8 +140,8 @@ def load(path: str | Path) -> Config:
     cfg = Config(
         backend=dev.get("backend", "nidaqmx"),
         device=dev.get("device", "Dev1"),
-        sample_rate=float(dev.get("sample_rate", 1000)),
-        chunk_size=int(dev.get("chunk_size", 100)),
+        sample_rate=float(dev.get("sample_rate", 20000)),
+        chunk_size=int(dev.get("chunk_size", auto_chunk_size(float(dev.get("sample_rate", 20000))))),
         terminal_config=dev.get("terminal_config", "RSE").upper(),
         window_s=float(disp.get("window_s", 10)),
         data_dir=rec.get("directory", "data"),

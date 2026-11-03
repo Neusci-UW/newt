@@ -520,3 +520,23 @@ def test_wheel_zoom_after_changing_the_rate_while_stopped(app, win):
     vb.wheelEvent(_Wheel(vb, delta=-120))                    # zoom out
     lo, hi = vb.viewRange()[0]
     assert win.window_box.value() > 10 and hi - lo == pytest.approx(win.window_box.value())
+
+
+def test_wheel_zoom_never_gets_stuck(app, win):
+    """Zoomed all the way in, or with a trackpad's small scrolls, zoom must still move."""
+    win.resize(1024, 640)
+    win.show()
+    vb = win.plots[0].vb
+    for _ in range(40):
+        vb.wheelEvent(_Wheel(vb, delta=120))                 # all the way in
+    assert win.window_box.value() == pytest.approx(0.01)
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # one notch back out
+    assert win.window_box.value() == pytest.approx(0.0135)
+    for w in (0.01, 0.1, 1.0, 13.5):                         # trackpad-sized scrolls, both ways
+        win.window_box.setValue(w)
+        vb.wheelEvent(_Wheel(vb, delta=-2))
+        assert win.window_box.value() > w
+        win.window_box.setValue(w)
+        vb.wheelEvent(_Wheel(vb, delta=2))
+        assert win.window_box.value() < w or w == 0.01
+    assert win.window_box.text().strip() in ("13.4 s",)      # stays readable

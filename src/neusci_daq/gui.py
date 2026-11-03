@@ -194,7 +194,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rate_box.lineEdit().editingFinished.connect(self._rate_entered)
         self.rate_box.activated.connect(lambda *_: self._rate_entered())
         self.window_box = WindowBox(minimum=0.01, maximum=600, value=self.cfg.window_s,
-                                    suffix=" s", decimals=2)
+                                    suffix=" s", decimals=4)    # 4: wheel zoom at 0.01 s needs 0.0135
         self.window_box.setToolTip("How many seconds the plots show")
         self.window_box.setMinimumWidth(76)
         self.window_box.valueChanged.connect(self._window_changed)
@@ -1438,7 +1438,14 @@ class MainWindow(QtWidgets.QMainWindow):
         data stays at the right edge."""
         wb = self.window_box
         old = wb.value()
-        new = min(max(old * s, wb.minimum()), wb.maximum())
+        # Three significant figures keeps the box readable ("13.5 s"). Always move at
+        # least one step, or small scrolls (a trackpad, or 0.01 s × 1.35 before) round
+        # back to the same value and zoom gets stuck.
+        new = float(f"{old * s:.3g}")
+        if new == old and s != 1:
+            step = 10.0 ** (np.floor(np.log10(old)) - 2)
+            new = old + (step if s > 1 else -step)
+        new = min(max(new, wb.minimum()), wb.maximum())
         if not self.plots or (self.mode == LIVE and self.btn_run.isChecked()):
             wb.setValue(new)
             return

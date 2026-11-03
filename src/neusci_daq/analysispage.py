@@ -1,6 +1,6 @@
 """The Analysis tab: every block of the session, the action potentials in them,
 and how the channels compare. A bar at the top picks the highlighted block (slider,
-◀ ▶, or the ← → keys); two sub-tabs:
+◀ ▶, or the ← → keys); three sub-tabs:
 
 - Raw Data Visualization: the chosen blocks overlaid with their average and the
   highlighted block; Find action potentials (threshold or bimodal, sorted into
@@ -10,6 +10,11 @@ and how the channels compare. A bar at the top picks the highlighted block (slid
 - Comparison: for the highlighted block, any channels on one time axis as V,
   dV/dt or d²V/dt², with the spike rate; and over the chosen blocks, the
   stimulus-triggered spike rate (PSTH) and the spike-triggered average of a channel.
+- DataPad: a table of measurements (mean, peak, area, slope, spike rate…) in a time
+  window, of single blocks, stimulus averages, or mean ± SD/SEM per stimulus
+  (see datapadview.py).
+
+Averages can be shaded with their SD or SEM across trials (Spread, at the top).
 
 The blocks are the ones being reviewed, or those recorded so far in live mode.
 """
@@ -25,47 +30,18 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
 from . import config as cfgmod
+from . import dsp
 from . import pages
-from . import session
 from . import style, theme
+from .datapadview import DataPadView
 from .plotzoom import OverlayCurve, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
+from .viewkit import View, label_axis, style_plot, unit_color, with_unit
 
 _SHOW = (("Blocks and average", "both"), ("Blocks", "blocks"), ("Average", "average"))
 MAX_WAVES = 150                    # per unit in the waveform plot
 _SERIES = (("V", 0), ("dV/dt", 1), ("d²V/dt²", 2))
-
-
-def _unit_color(u: int) -> str:
-    return cfgmod.PALETTE[u % len(cfgmod.PALETTE)]
-
-
-def _style_plot(pw: pg.PlotWidget, th) -> None:
-    pw.setBackground(th.background)
-    p = pw.getPlotItem()
-    p.setTitle(p.titleLabel.text, color=th.foreground)
-    for ax in ("left", "bottom"):
-        p.getAxis(ax).setPen(th.foreground)
-        p.getAxis(ax).setTextPen(th.foreground)
-
-
-def _with_unit(v: float, unit: str) -> str:
-    """12.3 mV/s: the prefix goes on the part before any '/'."""
-    head, _, tail = unit.partition("/")
-    if head in ("V", "A"):
-        n, head = best_prefix(v, head)
-        return f"{n:.3g} {head}" + (f"/{tail}" if tail else "")
-    return f"{v:.3g} {unit}"
-
-
-def _label(p: pg.PlotItem, side: str, text: str, unit: str) -> None:
-    """Label an axis with `unit`, letting pyqtgraph add prefixes (mV, µV/s) when it's SI."""
-    si = unit.split("/")[0] in ("V", "A", "s")
-    p.setLabel(side, text, units=unit if si else None)
-    if not si and unit:
-        p.setLabel(side, f"{text} ({unit})")
-    p.getAxis(side).enableAutoSIPrefix(si)
 
 
 class AnalysisPage(QtWidgets.QWidget):
@@ -75,7 +51,6 @@ class AnalysisPage(QtWidgets.QWidget):
         super().__init__()
         self.main = main
         self._mode = style.LIGHT
-        self._cache: dict[Path, tuple[float, dict]] = {}
         self._paths: list[Path] = []
         self.blocks: list[dict | None] = []
         self._dirty = True
@@ -116,6 +91,15 @@ class AnalysisPage(QtWidgets.QWidget):
         grp.addWidget(self.stim_channel)
         grp.addWidget(QtWidgets.QLabel("Show"))
         grp.addWidget(self.group)
+        grp.addSpacing(12)
+        grp.addWidget(QtWidgets.QLabel("Spread"))
+        self.spread_box = QtWidgets.QComboBox()
+        for label, key in (("None", ""), ("± SD", "sd"), ("± SEM", "sem")):
+            self.spread_box.addItem(label, key)
+        self.spread_box.setToolTip("Shade every average with its standard deviation or standard error "
+                                   "across the trials (blocks or stimuli) it's made of")
+        self.spread_box.currentIndexChanged.connect(lambda *_: self.spread_changed())
+        grp.addWidget(self.spread_box)
         grp.addWidget(self.group_note, 1)
         lay.addLayout(grp)
         self.groups: list[tuple[str, list[int]]] = []
@@ -128,6 +112,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.compare = CompareView(self)
         self.tabs.addTab(self.raw, "Raw Data Visualization")
         self.tabs.addTab(self.compare, "Comparison")
+        self.datapad = DataPadView(self)
+        self.tabs.addTab(self.datapad, "DataPad")
         lay.addWidget(self.tabs, 1)
 
         self.btn_prev.clicked.connect(lambda: self.step(-1))
@@ -150,6 +136,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.raw.draw_current()
         if self.compare.isVisible():
             self.compare.redraw_traces()
+        if self.datapad.isVisible():
+            self.datapad.redraw()
 
     # -- the blocks --------------------------------------------------------------------------
     @property
@@ -168,12 +156,12 @@ class AnalysisPage(QtWidgets.QWidget):
             self.refresh()
 
     def _read(self, path: Path) -> dict:
-        mtime = path.stat().st_mtime
-        hit = self._cache.get(path)
-        if hit is None or hit[0] != mtime:
-            hit = (mtime, session.read_block(path))
-            self._cache[path] = hit
-        return hit[1]
+        return self.main.store.read(path)            # shared with review and the Blocks panel
+
+    def _signature_of(self, paths: list[Path], how: str):
+        """sig(i, trace, fs): block i's stimulus on channel `how`, worked out once per file."""
+        store = self.main.store
+        return lambda i, y, fs: store.memo(paths[i], ("stimulus", how), lambda: A.stimulus_signature(y, fs))
 
     def refresh(self) -> None:
         self._dirty = False
@@ -199,23 +187,53 @@ class AnalysisPage(QtWidgets.QWidget):
             w.setMaximum(max(1, n))
             w.blockSignals(False)
         self.n_label.setText(f"of {n}")
-        names = good[0]["channel_names"] if good else []
-        self._fill_stim_channel(names)
+        recorded = good[0]["channel_names"] if good else []
+        self._calcs = {}
+        for c in self.main.cfg.calculations:          # calculated channels these blocks can have
+            try:
+                f = dsp.Formula(c.formula, recorded)
+                f.check(good[0]["sample_rate"])
+                self._calcs[c.name] = (c, f)
+            except (ValueError, IndexError):
+                pass
+        names = self.names()
+        self._fill_stim_channel(recorded)             # the stimulus is a recorded channel
         self.raw.set_channels(names)
         self.compare.set_channels(names)
+        self.datapad.set_channels(names)
         self.compare.stimulus_channel_changed()
 
     def names(self) -> list[str]:
+        """The recorded channels, then the calculated ones."""
         good = [b for b in self.blocks if b is not None]
-        return good[0]["channel_names"] if good else []
+        return (list(good[0]["channel_names"]) if good else []) + list(getattr(self, "_calcs", {}))
+
+    def has(self, i: int, name: str) -> bool:
+        b = self.blocks[i] if 0 <= i < len(self.blocks) else None
+        if b is None:
+            return False
+        calc = getattr(self, "_calcs", {}).get(name)
+        return name in b["channel_names"] or (calc is not None and calc[1].refs <= set(b["channel_names"]))
 
     def trace(self, i: int, name: str) -> np.ndarray | None:
         b = self.blocks[i] if 0 <= i < len(self.blocks) else None
-        if b is None or name not in b["channel_names"]:
+        if b is None:
             return None
-        return b["data"][b["channel_names"].index(name)]
+        if name in b["channel_names"]:
+            return b["data"][b["channel_names"].index(name)]
+        calc = getattr(self, "_calcs", {}).get(name)
+        if calc is None or not calc[1].refs <= set(b["channel_names"]):
+            return None
+        c, f = calc
+        env = dict(zip(b["channel_names"], b["data"]))
+        # worked out once per block file (zero-phase), shared with the Acquisition tab
+        return self.main.store.memo(self._paths[i], ("calc", c.formula),
+                                    lambda: f.offline(env, b["sample_rate"]))
 
     def unit_of(self, name: str) -> str:
+        calc = getattr(self, "_calcs", {}).get(name)
+        if calc is not None:
+            return calc[0].unit
         for b in self.blocks:
             if b is not None and name in b["channel_names"]:
                 return b["units"][b["channel_names"].index(name)]
@@ -266,9 +284,11 @@ class AnalysisPage(QtWidgets.QWidget):
         return "notes" if has_notes else ""
 
     @staticmethod
-    def _group(blocks: list[dict | None], how: str) -> list[tuple[str, list[int]]]:
+    def _group(blocks: list[dict | None], how: str, sig=None) -> list[tuple[str, list[int]]]:
         """Blocks with the same stimulus together: [(label, block indices)]. `how` is a
-        stimulus channel's name, "notes", or "" (no groups)."""
+        stimulus channel's name, "notes", or "" (no groups). sig(i, trace, fs) reads a
+        block's stimulus (default: analysis.stimulus_signature, every time)."""
+        sig = sig or (lambda i, y, fs: A.stimulus_signature(y, fs))
         if not how:
             return []
         keys, labels = {}, {}
@@ -282,7 +302,7 @@ class AnalysisPage(QtWidgets.QWidget):
             else:
                 # you said this channel is the stimulus: whatever it shows is the stimulus
                 y = b["data"][b["channel_names"].index(how)] if how in b["channel_names"] else None
-                k = A.stimulus_signature(y, b["sample_rate"]) if y is not None else None
+                k = sig(i, y, b["sample_rate"]) if y is not None else None
             keys[i] = k
         if how != "notes":
             # a block where the channel is nearly flat, next to the others, had no stimulus
@@ -314,12 +334,12 @@ class AnalysisPage(QtWidgets.QWidget):
         how = ch if ch in names else ""
         if not how and any(A.stimulus_notes(b["comments"]) for b in good):
             how = "notes"
-        return self._group(blocks, how)
+        return self._group(blocks, how, self._signature_of(list(paths), how))
 
     def _compute_groups(self) -> None:
         """Group the blocks by their stimulus (see Stimulus channel) and list the groups."""
         how = self.how()
-        auto = self._group(self.blocks, how)
+        auto = self._group(self.blocks, how, self._signature_of(self._paths, how))
         # the pages of the Blocks panel: your names, and blocks you moved
         folder = self.main.review_dir if self.main.mode == "review" else self.main.session_dir
         d = pages.load(folder)
@@ -368,12 +388,21 @@ class AnalysisPage(QtWidgets.QWidget):
         y = self.trace(i, how)
         if y is None:
             return None
-        sig = A.stimulus_signature(y, b["sample_rate"])
+        sig = self._signature_of(self._paths, how)(i, y, b["sample_rate"])
         if sig is not None and sig[0] == "wave":
             # a wave starts where the channel first leaves its middle level
             moved = np.flatnonzero(np.abs(np.nan_to_num(y) - sig[3]) > 0.1 * sig[2])
             return np.array([moved[0] / b["sample_rate"]]) if len(moved) else np.empty(0)
         return A.train_starts(A.stimulus_times(y, b["sample_rate"]))
+
+    def spread(self) -> str:
+        """"" (none), "sd" or "sem": the spread shown around averages."""
+        return self.spread_box.currentData() or ""
+
+    def spread_changed(self) -> None:
+        self.raw._draw_overlay()
+        if self.compare.isVisible():
+            self.compare.redraw_averages()
 
     def groups_changed(self) -> None:
         self.raw._settings_changed()
@@ -389,14 +418,12 @@ class AnalysisPage(QtWidgets.QWidget):
         self._mode = mode
         self.raw.apply_theme(mode)
         self.compare.apply_theme(mode)
+        self.datapad.apply_theme(mode)
 
 
-class RawView(QtWidgets.QWidget):
+class RawView(View):
     def __init__(self, page: AnalysisPage):
-        super().__init__()
-        self.page = page
-        self.main = page.main
-        self._mode = style.LIGHT
+        super().__init__(page)
         self.events: A.Events | None = None
         outer = QtWidgets.QHBoxLayout(self)
         outer.setContentsMargins(0, 8, 0, 0)
@@ -489,10 +516,17 @@ class RawView(QtWidgets.QWidget):
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
         left.addWidget(self.message)
+        self.btn_export_avg = QtWidgets.QPushButton("Export averages…")
+        self.btn_export_avg.setToolTip("Save the average of the chosen blocks (each stimulus group's, when "
+                                       "grouped) with its SD, SEM and n at every point, as a CSV file")
+        self.btn_export_avg.clicked.connect(self._export_averages_dialog)
         self.btn_export = QtWidgets.QPushButton("Export events…")
         self.btn_export.setToolTip("Save every event (block, time, unit, amplitude) as a CSV file")
         self.btn_export.setEnabled(False)
-        left.addWidget(self.btn_export)
+        exports = QtWidgets.QHBoxLayout()
+        exports.addWidget(self.btn_export)
+        exports.addWidget(self.btn_export_avg)
+        left.addLayout(exports)
         outer.addWidget(side)
 
         # ---- middle: the blocks, the raster, the rate ----------------------------------
@@ -560,6 +594,7 @@ class RawView(QtWidgets.QWidget):
         self.group_marks.setZValue(5)
         self.raster.getPlotItem().addItem(self.group_marks)
         self.group_avgs: list[TraceCurve] = []
+        self.bands: list = []                     # ± SD / SEM shading (Spread, at the top)
         self.overlay_legend = op.addLegend(offset=(-10, 10))
         self.cur_band = pg.LinearRegionItem(movable=False, orientation="horizontal")
         self.cur_band.setZValue(-10)
@@ -605,8 +640,7 @@ class RawView(QtWidgets.QWidget):
         name = self.channel.currentText()
         good = [b for b in self.blocks if b is not None]
         fs = good[0]["sample_rate"] if good else 0
-        return [i for i in idx if self.blocks[i] is not None and name in self.blocks[i]["channel_names"]
-                and self.blocks[i]["sample_rate"] == fs]
+        return [i for i in idx if self.page.has(i, name) and self.blocks[i]["sample_rate"] == fs]
 
     def chosen_or_none(self) -> list[int]:
         try:
@@ -624,11 +658,44 @@ class RawView(QtWidgets.QWidget):
         self._draw_overlay()
         self.page.events_changed()
 
+    def _averages(self, chosen: list[int], Y: np.ndarray):
+        """[(group, label, mean, SD, SEM, n blocks)] across the chosen blocks (rows of Y):
+        one per stimulus group when all blocks are shown grouped, else one (group None)."""
+        if self.page.group.currentIndex() == 0 and len(self.page.groups) > 1:
+            sets = [(g, label, [r for r, i in enumerate(chosen) if i in blocks])
+                    for g, (label, blocks) in enumerate(self.page.groups)]
+        else:
+            sets = [(None, "All chosen blocks", list(range(len(chosen))))]
+        out = []
+        for g, label, rows in sets:
+            if rows:
+                mean, sd, sem, _ = A.mean_spread(Y[rows])
+                out.append((g, label, mean, sd, sem, len(rows)))
+        return out
+
+    def _band(self, x: np.ndarray, mean: np.ndarray, spread: np.ndarray, color: str) -> None:
+        """A shaded band from mean − spread to mean + spread."""
+        p = self.overlay.getPlotItem()
+        edges = []
+        for sign in (1, -1):
+            c = TraceCurve()
+            c.setPen(pg.mkPen(None))
+            c.setZValue(4)
+            p.addItem(c)
+            c.setData(x, mean + sign * np.nan_to_num(spread))
+            edges.append(c)
+        fill = QtGui.QColor(color)
+        fill.setAlpha(55)
+        band = pg.FillBetweenItem(edges[0], edges[1], brush=pg.mkBrush(fill))
+        band.setZValue(4)
+        p.addItem(band)
+        self.bands += edges + [band]
+
     def _draw_overlay(self) -> None:
         self._show_message("")
-        for item in self.group_avgs:
+        for item in self.group_avgs + self.bands:
             self.overlay.getPlotItem().removeItem(item)
-        self.group_avgs = []
+        self.group_avgs, self.bands = [], []
         self.overlay_legend.clear()
         try:
             chosen = self._chosen() if self.blocks else []
@@ -644,31 +711,25 @@ class RawView(QtWidgets.QWidget):
                 y = self._trace(i)
                 Y[r, :len(y)] = y
             self.blocks_item.set_traces(Y if show != "average" else Y[:0], fs)
-            with np.errstate(all="ignore"), warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)               # padding: all-NaN ends
-                avg = np.nanmean(Y, 0)
-            by_group = self.page.group.currentIndex() == 0 and len(self.page.groups) > 1
-            if show != "blocks" and not by_group:
-                self.avg_item.setData(np.arange(n) / fs, avg)
-            else:
-                self.avg_item.setData(np.empty(0), np.empty(0))
-            if by_group and show != "blocks":
-                # all blocks, grouped: one average per stimulus group
-                for g, (label, blocks) in enumerate(self.page.groups):
-                    rows = [r for r, i in enumerate(chosen) if i in blocks]
-                    if not rows:
-                        continue
-                    with np.errstate(all="ignore"), warnings.catch_warnings():
-                        warnings.simplefilter("ignore", RuntimeWarning)       # padding: all-NaN ends
-                        gavg = np.nanmean(Y[rows], 0)
-                    item = TraceCurve(name=f"{label} ({len(rows)})")
-                    item.setPen(pg.mkPen(self.page.group_color(g), width=2.5))
-                    item.setZValue(6)
-                    self.overlay.getPlotItem().addItem(item)
-                    item.setData(np.arange(n) / fs, gavg)
-                    self.group_avgs.append(item)
+            self.avg_item.setData(np.empty(0), np.empty(0))
+            if show != "blocks":
+                spread = self.page.spread()
+                for g, label, mean, sd, sem, rows in self._averages(chosen, Y):
+                    x = np.arange(len(mean)) / fs
+                    color = "#E69F00" if g is None else self.page.group_color(g)
+                    if g is None:
+                        item = self.avg_item                  # the one average of the chosen blocks
+                    else:                                     # all blocks, grouped: one per stimulus group
+                        item = TraceCurve(name=f"{label} (n={rows})")
+                        item.setPen(pg.mkPen(color, width=2.5))
+                        item.setZValue(6)
+                        self.overlay.getPlotItem().addItem(item)
+                        self.group_avgs.append(item)
+                    item.setData(x, mean)
+                    if spread:
+                        self._band(x, mean, sd if spread == "sd" else sem, color)
             self.overlay.getPlotItem().setXRange(0, n / fs, padding=0.01)
-            _label(self.overlay.getPlotItem(), "left", self.channel.currentText(),
+            label_axis(self.overlay.getPlotItem(), "left", self.channel.currentText(),
                    self.page.unit_of(self.channel.currentText()))
             self.raster.getPlotItem().setYRange(0.5, len(self.blocks) + 0.5, padding=0)
         else:
@@ -695,7 +756,7 @@ class RawView(QtWidgets.QWidget):
         if ev is not None and len(ev.t):
             m = ev.block == i
             idx = np.clip(np.round(ev.t[m] * fs).astype(int), 0, len(y) - 1)
-            self.marks.setData(ev.t[m], y[idx], brush=[pg.mkBrush(_unit_color(u)) for u in ev.unit[m]])
+            self.marks.setData(ev.t[m], y[idx], brush=[pg.mkBrush(unit_color(u)) for u in ev.unit[m]])
         else:
             self.marks.setData([], [])
         self._draw_threshold()
@@ -809,23 +870,23 @@ class RawView(QtWidgets.QWidget):
         if ev is None:
             self.raster_dots.setData([], [])
             return
-        self.raster_dots.setData(ev.t, ev.block + 1, brush=[pg.mkBrush(_unit_color(u)) for u in ev.unit])
+        self.raster_dots.setData(ev.t, ev.block + 1, brush=[pg.mkBrush(unit_color(u)) for u in ev.unit])
         sizes = np.abs(ev.amplitude)
         edges = np.histogram_bin_edges(sizes, bins=40) if len(sizes) else np.array([0.0, 1.0])
         all_isi = A.intervals_ms(ev)
         # up to the 98th percentile, so a few long gaps don't squash the rest
         top = float(np.percentile(all_isi, 98)) if len(all_isi) else 100.0
         isi_edges = np.linspace(0, max(top, 1.0), 61)
-        _label(hp, "bottom", "size from the baseline", self._unit())
-        _label(wp, "left", self.channel.currentText(), self._unit())
+        label_axis(hp, "bottom", "size from the baseline", self._unit())
+        label_axis(wp, "left", self.channel.currentText(), self._unit())
         rng = np.random.default_rng(0)
         for s in ev.summary():
             u = s["unit"] - 1
-            color = QtGui.QColor(_unit_color(u))
+            color = QtGui.QColor(unit_color(u))
             r = self.table.rowCount()
             self.table.insertRow(r)
             unit_item = QtWidgets.QTableWidgetItem(f"Unit {s['unit']}")
-            unit_item.setIcon(style.dot_icon(_unit_color(u)))
+            unit_item.setIcon(style.dot_icon(unit_color(u)))
             self.table.setItem(r, 0, unit_item)
             for c, text in enumerate((f"{s['count']}", f"{s['rate']:.2f} /s", self._fmt(s['amplitude']),
                                       f"{s['width_ms']:.2f} ms"), 1):
@@ -866,7 +927,7 @@ class RawView(QtWidgets.QWidget):
         edges = np.append(centres - b / 2, centres[-1] + b / 2)
         if ev.n_units > 1:
             for u in range(ev.n_units):
-                p.plot(edges, rates[u], stepMode="center", pen=pg.mkPen(_unit_color(u), width=1.5))
+                p.plot(edges, rates[u], stepMode="center", pen=pg.mkPen(unit_color(u), width=1.5))
         p.plot(edges, rates[None], stepMode="center", pen=pg.mkPen(self._fg(), width=2))
 
     def export(self, path: str | Path) -> Path:
@@ -880,6 +941,45 @@ class RawView(QtWidgets.QWidget):
                             self.channel.currentText()])
         return path
 
+    def export_averages(self, path: str | Path) -> Path:
+        """time, then mean, SD, SEM and n for each average shown, as CSV."""
+        chosen = self._chosen()
+        if not chosen:
+            raise ValueError("No blocks chosen.")
+        fs = self.blocks[chosen[0]]["sample_rate"]
+        n = max(len(self._trace(i)) for i in chosen)
+        Y = np.full((len(chosen), n), np.nan)
+        for r, i in enumerate(chosen):
+            y = self._trace(i)
+            Y[r, :len(y)] = y
+        unit = self.page.unit_of(self.channel.currentText())
+        sets = self._averages(chosen, Y)
+        path = Path(path)
+        with path.open("w", newline="") as f:
+            w = csv.writer(f)
+            head = ["time_s"]
+            for _, label, *_rest in sets:
+                head += [f"{label} mean ({unit})", f"{label} SD ({unit})", f"{label} SEM ({unit})", f"{label} n"]
+            w.writerow(head)
+            counts = [A.mean_spread(Y[[r for r, i in enumerate(chosen) if g is None or
+                                       i in self.page.groups[g][1]]])[3] for g, *_rest in sets]
+            for k in range(n):
+                row = [f"{k / fs:.6f}"]
+                for (g, label, mean, sd, sem, _), cnt in zip(sets, counts):
+                    row += [f"{mean[k]:.6g}", f"{sd[k]:.6g}", f"{sem[k]:.6g}", int(cnt[k])]
+                w.writerow(row)
+        return path
+
+    def _export_averages_dialog(self) -> None:
+        start = str(Path(self.main._start_dir()) / "averages.csv")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export averages", start, "CSV (*.csv)")
+        if path:
+            try:
+                self.export_averages(path)
+                self._show_message(f"Saved the averages to {Path(path).name}.")
+            except ValueError as e:
+                self._show_message(str(e), error=True)
+
     def _export_dialog(self) -> None:
         start = str(Path(self.main._start_dir()) / "events.csv")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export events", start, "CSV (*.csv)")
@@ -888,19 +988,11 @@ class RawView(QtWidgets.QWidget):
             self._show_message(f"Saved {len(self.events.t)} event(s) to {Path(path).name}.")
 
     # -- looks ---------------------------------------------------------------------------------
-    def _fg(self):
-        return theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT].foreground
-
-    def _show_message(self, text: str, error: bool = False) -> None:
-        t = style.tokens(self._mode)
-        self.message.setStyleSheet(f"color: {t['error'] if error else t['muted']}")
-        self.message.setText(text)
-
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
         for pw in (self.overlay, self.raster, self.rate_plot, self.hist, self.isi, self.wave_plot):
-            _style_plot(pw, th)
+            style_plot(pw, th)
         trace = QtGui.QColor(cfgmod.PALETTE[1])
         faint = QtGui.QColor(th.foreground)
         faint.setAlpha(35)
@@ -918,12 +1010,9 @@ class RawView(QtWidgets.QWidget):
             self._show_results()
 
 
-class CompareView(QtWidgets.QWidget):
+class CompareView(View):
     def __init__(self, page: AnalysisPage):
-        super().__init__()
-        self.page = page
-        self.main = page.main
-        self._mode = style.LIGHT
+        super().__init__(page)
         self._plots: list[pg.PlotWidget] = []
         outer = QtWidgets.QHBoxLayout(self)
         outer.setContentsMargins(0, 8, 0, 0)
@@ -1107,7 +1196,7 @@ class CompareView(QtWidgets.QWidget):
         self.unit_pick.clear()
         self.unit_pick.addItem("All units", None)
         for u in range(ev.n_units if ev is not None else 0):
-            self.unit_pick.addItem(style.dot_icon(_unit_color(u)), f"Unit {u + 1}", u)
+            self.unit_pick.addItem(style.dot_icon(unit_color(u)), f"Unit {u + 1}", u)
         i = self.unit_pick.findData(keep)
         self.unit_pick.setCurrentIndex(max(0, i))
         self.unit_pick.blockSignals(False)
@@ -1169,7 +1258,7 @@ class CompareView(QtWidgets.QWidget):
             for (label, unit, y), color in zip(series, colors):
                 d = y - np.median(y)
                 scale = np.percentile(np.abs(d), 99.9) or 1.0
-                curve = TraceCurve(name=f"{label} (±{_with_unit(scale, unit)})")
+                curve = TraceCurve(name=f"{label} (±{with_unit(scale, unit)})")
                 curve.mode = "peak"
                 curve.setPen(pg.mkPen(color, width=1.5))
                 p.addItem(curve)
@@ -1181,7 +1270,7 @@ class CompareView(QtWidgets.QWidget):
                 pw = plot_widget()
                 p = pw.getPlotItem()
                 p.setTitle(label, size="9pt")                     # the name above, the unit beside
-                _label(p, "left", "", unit)
+                label_axis(p, "left", "", unit)
                 p.getAxis("left").setWidth(80)                    # line the time axes up
                 curve = TraceCurve()
                 curve.mode = "peak"
@@ -1194,7 +1283,7 @@ class CompareView(QtWidgets.QWidget):
         for pw in plots:
             p = pw.getPlotItem()
             p.showGrid(x=True, y=True, alpha=0.2)
-            _style_plot(pw, th)
+            style_plot(pw, th)
             self.traces_lay.addWidget(pw, 1)
         # plain seconds on every row, so they read the same
         for pw in plots:
@@ -1228,24 +1317,43 @@ class CompareView(QtWidgets.QWidget):
                 if y is not None:
                     triggers[b] = A.stimulus_times(y, fs)
         b = self.bin.value()
-        groups = [(label, [k for k in blocks if k in triggers]) for label, blocks in page.groups]
-        groups = [(label, blocks) for label, blocks in groups if blocks]
+        spread = page.spread()
+        tag = {"sd": ", ± SD across stimuli", "sem": ", ± SEM across stimuli"}.get(spread, "")
+
+        def psth(trig: dict, color: str, name: str | None, filled: bool) -> int:
+            """One stimulus-triggered rate: the mean over stimuli, with its spread."""
+            centres, rates = A.triggered_rates(times, trig, self.before.value(), self.after.value(), b)
+            if not len(rates):
+                return 0
+            mean, sd, sem, _ = A.mean_spread(rates)
+            edges = np.append(centres - b / 2, centres[-1] + b / 2)
+            c = QtGui.QColor(color)
+            if spread:
+                s_ = np.nan_to_num(sd if spread == "sd" else sem)
+                hi = pp.plot(edges, mean + s_, stepMode="center", pen=pg.mkPen(None))
+                lo = pp.plot(edges, np.maximum(mean - s_, 0), stepMode="center", pen=pg.mkPen(None))
+                c.setAlpha(60)
+                pp.addItem(pg.FillBetweenItem(hi, lo, brush=pg.mkBrush(c)))
+                c.setAlpha(255)
+            fill = QtGui.QColor(color)
+            fill.setAlpha(90)
+            pp.plot(edges, mean, stepMode="center", pen=pg.mkPen(c, width=2 if name else 1.5), name=name,
+                    **({"fillLevel": 0, "brush": pg.mkBrush(fill)} if filled and not spread else {}))
+            return len(rates)
+
+        groups = [(g, label, [k for k in blocks if k in triggers]) for g, (label, blocks) in enumerate(page.groups)]
+        groups = [(g, label, blocks) for g, label, blocks in groups if blocks]
         self.psth_legend.clear()
         if page.group.currentIndex() == 0 and len(groups) > 1:
             # all blocks, grouped by stimulus: one line each, to compare the responses
             n_trig = 0
-            for g, (label, blocks) in enumerate(groups):
-                centres, rate, n = A.triggered_rate(times, {k: triggers[k] for k in blocks}, self.before.value(),
-                                                    self.after.value(), b)
-                n_trig += n
-                pp.plot(np.append(centres - b / 2, centres[-1] + b / 2), rate, stepMode="center",
-                        pen=pg.mkPen(_unit_color(g), width=2), name=f"{label} ({n})")
-            pp.setTitle(f"Stimulus-triggered spike rate by stimulus group ({n_trig} stimuli)", color=self._fg())
+            for g, label, blocks in groups:
+                n = len([t for k in blocks for t in triggers[k]])
+                n_trig += psth({k: triggers[k] for k in blocks}, page.group_color(g), f"{label} (n={n})", False)
+            pp.setTitle(f"Stimulus-triggered spike rate by stimulus group ({n_trig} stimuli{tag})", color=self._fg())
         else:
-            centres, rate, n_trig = A.triggered_rate(times, triggers, self.before.value(), self.after.value(), b)
-            pp.plot(np.append(centres - b / 2, centres[-1] + b / 2), rate, stepMode="center", fillLevel=0,
-                    brush=pg.mkBrush(86, 180, 233, 90), pen=pg.mkPen("#56B4E9", width=1.5))
-            pp.setTitle(f"Stimulus-triggered spike rate ({n_trig} stimuli)" if n_trig else
+            n_trig = psth(triggers, "#56B4E9", None, True)
+            pp.setTitle(f"Stimulus-triggered spike rate ({n_trig} stimuli{tag})" if n_trig else
                         "Stimulus-triggered spike rate: no stimuli found on that channel", color=self._fg())
         name = self.sta_channel.currentData()
         traces = {k: page.trace(k, name) for k in chosen} if name else {}
@@ -1253,25 +1361,20 @@ class CompareView(QtWidgets.QWidget):
                                              {k: v for k, v in times.items() if k in traces},
                                              self.sta_before.value(), self.sta_after.value())
         if n:
-            hi = sp.plot(t, mean + sd, pen=pg.mkPen(None))
-            lo = sp.plot(t, mean - sd, pen=pg.mkPen(None))
-            sp.addItem(pg.FillBetweenItem(hi, lo, brush=pg.mkBrush(230, 159, 0, 50)))
+            if spread:
+                s_ = sd if spread == "sd" else sd / np.sqrt(n)
+                hi = sp.plot(t, mean + s_, pen=pg.mkPen(None))
+                lo = sp.plot(t, mean - s_, pen=pg.mkPen(None))
+                sp.addItem(pg.FillBetweenItem(hi, lo, brush=pg.mkBrush(230, 159, 0, 50)))
             sp.plot(t, mean, pen=pg.mkPen("#E69F00", width=2))
-            _label(sp, "left", name, page.unit_of(name))
-        sp.setTitle(f"Spike-triggered average of {name} ({n} spikes, ± SD)" if n else
+            label_axis(sp, "left", name, page.unit_of(name))
+        tag = {"sd": ", ± SD", "sem": ", ± SEM"}.get(spread, "")
+        sp.setTitle(f"Spike-triggered average of {name} ({n} spikes{tag})" if n else
                     "Spike-triggered average: no spikes far enough from the block ends", color=self._fg())
 
     # -- looks -----------------------------------------------------------------------------------
-    def _fg(self):
-        return theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT].foreground
-
-    def _show_message(self, text: str, error: bool = False) -> None:
-        t = style.tokens(self._mode)
-        self.message.setStyleSheet(f"color: {t['error'] if error else t['muted']}")
-        self.message.setText(text)
-
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
         for pw in [self.psth, self.sta] + self._plots:
-            _style_plot(pw, th)
+            style_plot(pw, th)

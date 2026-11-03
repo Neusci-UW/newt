@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import simulation
+from .dsp import Calculation
 
 # USB-6003 limits (NI spec): one multiplexed ADC, 100 kS/s aggregate,
 # 8 single-ended / 4 differential inputs, fixed +/-10 V range.
@@ -111,6 +112,8 @@ class Config:
     stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
     # Simulated backend only: the cells it simulates and what each input records
     sim_network: simulation.Network = field(default_factory=simulation.default_network)
+    # Calculated channels (filters, arithmetic: see dsp.py), shown and analysed, never recorded
+    calculations: list = field(default_factory=list)
 
     @property
     def aggregate_rate(self) -> float:
@@ -154,6 +157,8 @@ def load(path: str | Path) -> Config:
         stim_units=str(st.get("units", "V")).strip() or "V",
         stim_scale=float(st.get("scale", 1.0)),
         sim_network=simulation.from_toml(sim),
+        calculations=[Calculation(str(c.get("name", "")).strip(), str(c.get("formula", "")).strip(),
+                                  str(c.get("unit", "")).strip()) for c in raw.get("calculations", [])],
     ).with_channels(chans)
     validate(cfg)
     return cfg
@@ -202,6 +207,14 @@ def validate(cfg: Config) -> None:
         seen[ch.physical] = ch.name
         names.add(ch.name)
     simulation.validate(cfg.sim_network)
+    names = {c.name for c in cfg.channels}
+    seen_calc: set[str] = set()
+    for c in cfg.calculations:
+        if not c.name or not c.formula:
+            raise ValueError("Every calculated channel needs a name and a formula.")
+        if c.name in names or c.name in seen_calc:
+            raise ValueError(f"{c.name!r} is already a channel's name: give the calculation another.")
+        seen_calc.add(c.name)
     if cfg.backend == "simulated":
         return
     for ch in cfg.channels:
@@ -242,6 +255,8 @@ def dumps(cfg: Config) -> str:
     ]
     if cfg.stim_units != "V" or cfg.stim_scale != 1.0:
         lines += [f"units = {_s(cfg.stim_units)}", f"scale = {cfg.stim_scale:g}"]
+    for c in cfg.calculations:
+        lines += ["", "[[calculations]]", f"name = {_s(c.name)}", f"formula = {_s(c.formula)}", f"unit = {_s(c.unit)}"]
     if cfg.sim_network != simulation.default_network():      # only when it's been changed
         lines += ["", "[simulated]"] + simulation.to_toml_lines(cfg.sim_network)
     for c in cfg.channels + cfg.spare_channels:

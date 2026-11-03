@@ -21,6 +21,7 @@ Numpy only: the lab computers don't need scikit-learn.
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -389,21 +390,40 @@ def stimulus_times(y: np.ndarray, fs: float) -> np.ndarray:
     return np.asarray(out)
 
 
-def triggered_rate(event_times: dict[int, np.ndarray], triggers: dict[int, np.ndarray],
-                   before_ms: float, after_ms: float, bin_ms: float):
-    """Stimulus-triggered spike rate (a PSTH): spikes/s in bins from before_ms before
-    each trigger to after_ms after it, averaged over the triggers. `event_times` and
-    `triggers` are seconds within each block. Returns (bin centres ms, rate, n triggers)."""
+def triggered_rates(event_times: dict[int, np.ndarray], triggers: dict[int, np.ndarray],
+                    before_ms: float, after_ms: float, bin_ms: float):
+    """Spikes/s in bins around each trigger, one row per trigger (trial): from before_ms
+    before it to after_ms after. `event_times` and `triggers` are seconds within each
+    block. Returns (bin centres ms, rates: triggers × bins)."""
     edges = np.arange(-before_ms, after_ms + bin_ms / 2, bin_ms)
-    counts = np.zeros(len(edges) - 1)
-    n = 0
+    rows = []
     for b, trig in triggers.items():
         ev = event_times.get(b, np.empty(0)) * 1000
         for t in np.asarray(trig) * 1000:
-            counts += np.histogram(ev - t, edges)[0]
-            n += 1
-    rate = counts / max(n, 1) / (bin_ms / 1000)
-    return edges[:-1] + bin_ms / 2, rate, n
+            rows.append(np.histogram(ev - t, edges)[0] / (bin_ms / 1000))
+    rates = np.array(rows) if rows else np.empty((0, len(edges) - 1))
+    return edges[:-1] + bin_ms / 2, rates
+
+
+def triggered_rate(event_times: dict[int, np.ndarray], triggers: dict[int, np.ndarray],
+                   before_ms: float, after_ms: float, bin_ms: float):
+    """Stimulus-triggered spike rate (a PSTH): the trials' rates (triggered_rates)
+    averaged. Returns (bin centres ms, rate, n triggers)."""
+    centres, rates = triggered_rates(event_times, triggers, before_ms, after_ms, bin_ms)
+    return centres, rates.mean(0) if len(rates) else np.zeros(len(centres)), len(rates)
+
+
+def mean_spread(rows: np.ndarray):
+    """Across trials (the rows; NaN where a trial has no value): (mean, SD, SEM, n) at
+    each point. SD is the sample SD (n − 1); SEM = SD / √n; both are NaN where n < 2."""
+    rows = np.atleast_2d(np.asarray(rows, float))
+    n = np.sum(np.isfinite(rows), 0)
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean = np.nanmean(rows, 0)
+        sd = np.where(n >= 2, np.nanstd(rows, 0, ddof=1), np.nan)
+    sem = np.where(n >= 2, sd / np.sqrt(np.maximum(n, 1)), np.nan)
+    return mean, sd, sem, n
 
 
 def triggered_average(traces: dict[int, np.ndarray], fs: float, times: dict[int, np.ndarray],

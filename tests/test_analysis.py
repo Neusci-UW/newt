@@ -235,7 +235,7 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    assert [ap.tabs.tabText(i) for i in range(ap.tabs.count())] == ["Raw Data Visualization", "Comparison"]
+    assert [ap.tabs.tabText(i) for i in range(ap.tabs.count())] == ["Raw Data Visualization", "Comparison", "DataPad"]
     ap.raw.overlay.setFocus()
     key(ap.raw.overlay, QtCore.Qt.Key.Key_Right)
     pump(app, 0.05)
@@ -493,3 +493,153 @@ def test_the_lab_recording_sorts_into_its_25_sine_stimuli():
     groups = AnalysisPage._group([session.read_block(p) for p in paths], "Channel 1")
     assert len(groups) == 25 and all(len(b) == 10 for _, b in groups)
     assert groups[0][1] == list(range(10)) and groups[0][0].startswith("Sine 5 Hz")
+
+
+# ---------------------------------------------------------------- spread across trials
+def test_mean_spread():
+    rows = np.array([[1, 2, np.nan], [3, 4, 5], [5, 6, np.nan]], float)
+    mean, sd, sem, n = A.mean_spread(rows)
+    assert np.allclose(mean, [3, 4, 5]) and list(n) == [3, 3, 1]
+    assert sd[0] == pytest.approx(2.0) and sem[0] == pytest.approx(2 / np.sqrt(3))
+    assert np.isnan(sd[2]) and np.isnan(sem[2])                     # one trial: no spread
+    centres, rates = A.triggered_rates({0: np.array([0.105, 0.11, 0.62])}, {0: np.array([0.1, 0.6])}, 10, 30, 10)
+    assert rates.shape == (2, 4) and list(rates[:, 1]) == [100.0, 0.0]   # 5 ms after: 1 spike in 10 ms
+
+
+def test_averages_show_and_export_sd_and_sem(app, win, tmp_path):
+    import csv
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    raw = ap.raw
+    raw.channel.setCurrentText("Ch1")
+    ap.spread_box.setCurrentIndex(1)                                 # ± SD
+    assert len(raw.group_avgs) == 2 and len(raw.bands) == 2 * 3      # each group: line + band
+    chosen = raw.chosen_or_none()
+    Y = np.array([ap.trace(i, "Ch1") for i in chosen if i in ap.groups[0][1]][:2])
+    n = min(len(y) for y in Y)
+    mean, sd = Y[:, :n].mean(0), Y[:, :n].std(0, ddof=1)
+    up = raw.bands[0].getOriginalDataset()[1][:n]
+    assert np.allclose(up, mean + sd)                                # the band is mean ± SD
+    ap.spread_box.setCurrentIndex(2)                                 # ± SEM
+    assert np.allclose(raw.bands[0].getOriginalDataset()[1][:n], mean + sd / np.sqrt(2))
+    out = raw.export_averages(tmp_path / "avg.csv")
+    rows = list(csv.reader(out.open()))
+    assert rows[0][0] == "time_s" and rows[0][1].startswith(ap.groups[0][0]) and "mean" in rows[0][1]
+    assert float(rows[11][1]) == pytest.approx(mean[10], rel=1e-4)
+    assert float(rows[11][2]) == pytest.approx(sd[10], rel=1e-4) and rows[11][4] == "2"
+    raw.channel.setCurrentText("Ch2")                                # the spike rate gets bands too
+    raw.find()
+    ap.tabs.setCurrentIndex(1)
+    pump(app, 0.2)
+    ap.compare.trigger.setCurrentIndex(ap.compare.trigger.findData("Stim"))
+    fills = [x for x in ap.compare.psth.getPlotItem().items if isinstance(x, __import__("pyqtgraph").FillBetweenItem)]
+    assert len(fills) == 2 and "SEM across stimuli" in ap.compare.psth.getPlotItem().titleLabel.text
+    ap.spread_box.setCurrentIndex(0)
+    assert raw.bands == []
+
+
+# ---------------------------------------------------------------- DataPad
+def test_datapad_measurements():
+    from neusci_daq import datapad as D
+    from neusci_daq.datapadview import fmt
+    fs = 10000.0
+    t = np.arange(int(fs)) / fs
+    y = 2 * np.sin(2 * np.pi * 7 * t) + 1
+    m = {k: D.measure(k, t, y, fs, [0.1, 0.5, 0.9, 1.5]) for k in D.MEASUREMENTS}
+    assert m["mean"] == pytest.approx(1, abs=1e-3) and m["p2p"] == pytest.approx(4, abs=1e-3)
+    assert m["rms"] == pytest.approx(np.sqrt(3), abs=1e-3) and m["freq"] == pytest.approx(7, abs=0.01)
+    assert m["area"] == pytest.approx(1, abs=1e-3)
+    bump = np.exp(-((t - 0.3) / 0.01) ** 2)
+    assert D.measure("tmax", t, bump, fs) == pytest.approx(0.3) and D.measure("tmin", t, -bump, fs) == pytest.approx(0.3)
+    assert m["rise"] == pytest.approx(4 * np.pi * 7, rel=1e-3) and m["spikes"] == 3
+    w = D.window(t, 0.2, 0.3)
+    assert t[w][0] == pytest.approx(0.2) and t[w][-1] == pytest.approx(0.3)
+    assert D.window(t, None, None) == slice(0, len(t))
+    assert D.measure("slope", t[w], 3 * t[w] + 1, fs) == pytest.approx(3)
+    assert np.isnan(D.measure("spikes", t, y, fs)) and np.isnan(D.measure("mean", t, np.full(len(t), np.nan), fs))
+    assert D.unit_of("slope", "mV") == "mV/s" and D.unit_of("freq", "V") == "Hz"
+    assert fmt(0.0374, "V") == "37.4 mV" and fmt(12.5, "V/s") == "12.5 V/s" and fmt(0.002, "s") == "2 ms"
+    assert fmt(float("nan"), "V") == "—" and fmt(3, "") == "3"
+
+
+def test_datapad_measures_blocks_averages_and_groups(app, win, tmp_path):
+    import csv
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    pad = ap.datapad
+    ap.tabs.setCurrentWidget(pad)
+    pump(app, 0.1)
+    assert pad.columns and pad.columns[0][0] == ap.names()[0]        # starts with a few columns
+    pad.columns = []
+    pad.add_column("Stim", "max")
+    pad.add_column("Stim", "mean")
+    pad.whole.setChecked(True)
+    fs = ap.blocks[0]["sample_rate"]
+
+    assert pad.add_rows("current") == 1                               # the highlighted block
+    assert pad.rows[0]["values"][("Stim", "max")] == pytest.approx(ap.trace(0, "Stim").max())
+    assert pad.add_rows("blocks") == 4                                # each block
+    assert [r["group"] for r in pad.rows[1:]] == [g for g, b in ap.groups for _ in b]
+
+    pad.clear_rows()
+    pad.add_rows("stats")                                             # mean ± spread per group
+    assert [r["n"] for r in pad.rows] == [2, 2]
+    per = [ap.trace(i, "Stim").max() for i in ap.groups[1][1]]
+    assert pad.rows[1]["values"][("Stim", "max")] == pytest.approx(np.mean(per))
+    assert pad.rows[1]["spread"][("Stim", "max")] == pytest.approx(np.std(per, ddof=1))
+    assert pad.rows[0]["values"][("Stim", "max")] < pad.rows[1]["values"][("Stim", "max")]  # 1 V < 2 V
+    ap.spread_box.setCurrentIndex(2)                                  # SEM
+    pad.add_rows("stats")
+    assert pad.rows[3]["spread"][("Stim", "max")] == pytest.approx(np.std(per, ddof=1) / np.sqrt(2))
+    assert "± SEM" in pad.rows[3]["row"]
+
+    pad.clear_rows()
+    pad.whole.setChecked(False)                                       # a window: just before the 1st pulse
+    pad.t0.setValue(0.0)
+    pad.t1.setValue(0.0005)
+    assert pad.region.getRegion() == pytest.approx((0.0, 0.0005))
+    pad.add_rows("avg")                                               # each group's average trace
+    blocks = ap.groups[0][1]
+    Y = np.array([ap.trace(i, "Stim")[:int(0.0005 * fs) + 1] for i in blocks])
+    assert pad.rows[0]["values"][("Stim", "mean")] == pytest.approx(Y.mean(0).mean(), abs=1e-9)
+    assert pad.rows[0]["window"] == "0–0.0005 s"
+
+    pad.region.setRegion((0.1, 0.2))                                  # dragging sets the boxes
+    pad.region.sigRegionChangeFinished.emit(pad.region)
+    assert (pad.t0.value(), pad.t1.value()) == pytest.approx((0.1, 0.2))
+
+    out = pad.export(tmp_path / "pad.csv")
+    rows = list(csv.reader(out.open()))
+    assert rows[0][:4] == ["row", "group", "window", "n"] and rows[0][4] == "Stim: Maximum (V)"
+    assert len(rows) == 1 + len(pad.rows) and float(rows[1][6]) == pytest.approx(
+        pad.rows[0]["values"][("Stim", "mean")], rel=1e-5)
+    pad.copy()
+    assert app.clipboard().text().splitlines()[0].startswith("row\tgroup\twindow\tn")
+    assert pad.table.rowCount() == len(pad.rows) and pad.table.columnCount() == 6
+
+
+def test_datapad_counts_spikes_found_on_the_raw_tab(app, win):
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    pad = ap.datapad
+    pad.columns = []
+    pad.add_column("Ch2", "spikes")
+    pad.whole.setChecked(True)
+    pad.add_rows("current")
+    assert np.isnan(pad.rows[0]["values"][("Ch2", "spikes")])       # nothing found yet
+    assert "find them" in pad.message.text()
+    ap.raw.channel.setCurrentText("Ch2")
+    ev = ap.raw.find()
+    pad.add_rows("blocks")
+    assert [r["values"][("Ch2", "spikes")] for r in pad.rows[1:]] == \
+        [float(np.sum(ev.block == i)) for i in range(4)]
+

@@ -252,7 +252,7 @@ def _panel(win):
     """The Blocks panel as data: [(top-level data, [child data])]."""
     from pyqtgraph.Qt import QtCore
     role = QtCore.Qt.ItemDataRole.UserRole
-    t = win.block_list
+    t = win.blocks_panel.tree
     return [(t.topLevelItem(r).data(0, role),
              [t.topLevelItem(r).child(c).data(0, role) for c in range(t.topLevelItem(r).childCount())])
             for r in range(t.topLevelItemCount())]
@@ -260,32 +260,32 @@ def _panel(win):
 
 def _item(win, data):
     from pyqtgraph.Qt import QtCore
-    return next(it for it in win._items() if it.data(0, QtCore.Qt.ItemDataRole.UserRole) == data)
+    return next(it for it in win.blocks_panel.items() if it.data(0, QtCore.Qt.ItemDataRole.UserRole) == data)
 
 
 def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp_path):
     from neusci_daq.gui import LIVE, REVIEW, MainWindow
     win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
     win._ask_unsaved = lambda: "discard"
-    assert _panel(win) == [("live", [])] and win.block_list.isEnabled()
-    assert not win.stim_ch.isEnabled()                               # no session yet
+    assert _panel(win) == [("live", [])] and win.blocks_panel.tree.isEnabled()
+    assert not win.blocks_panel.stim_ch.isEnabled()                               # no session yet
     win.btn_run.setChecked(True)
     pump(app, 0.2)
     for _ in range(2):
         win.btn_rec.setChecked(True)
         pump(app, 0.3)
-        assert not win.block_list.isEnabled()                        # not while recording
+        assert not win.blocks_panel.tree.isEnabled()                        # not while recording
         win.btn_rec.setChecked(False)
     assert _panel(win) == [("live", []), (("page", "Blocks"), [("block", 0), ("block", 1)])]
-    assert win.stim_ch.isEnabled()
+    assert win.blocks_panel.stim_ch.isEnabled()
     sess = win.session_dir
-    win._block_list_clicked(_item(win, ("block", 1)))                # the second block
+    win._activate(("block", 1))                # the second block
     assert win.mode == REVIEW and win.review_dir == sess and win.block_combo.currentIndex() == 1
     assert _panel(win)[0][0] == "back"
     assert str(sess) not in win.recent_sessions()                    # an untitled session isn't "recent"
-    win._block_list_clicked(_item(win, ("block", 0)))
+    win._activate(("block", 0))
     assert win.block_combo.currentIndex() == 0
-    win._block_list_clicked(_item(win, "back"))                      # Back to Live
+    win._activate("back")                      # Back to Live
     assert win.mode == LIVE and win.session_dir == sess and len(win.blocks) == 2
     win.btn_run.setChecked(True)
     pump(app, 0.2)
@@ -314,11 +314,11 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
         win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
     win.rename_page("Blocks", "Baseline")
-    texts = [it.text(0) for it in win._items()]
+    texts = [it.text(0) for it in win.blocks_panel.items()]
     assert texts[1].startswith("Baseline  (3)") and texts[2].startswith("Baseline 1")
     assert texts[4].startswith("Baseline 3")
     win.move_block(2, "Drug")                                        # into a new page
-    texts = [it.text(0) for it in win._items()]
+    texts = [it.text(0) for it in win.blocks_panel.items()]
     assert any(t.startswith("Drug  (1)") for t in texts) and any(t.startswith("Drug 1") for t in texts)
     assert pages.load(win.session_dir) == {"renamed": {"Blocks": "Baseline"}, "moved": {"block_003": "Drug"}}
     win.rename_page("Drug", "Drug A")                                # its block follows
@@ -326,11 +326,11 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
     win.move_block(2, "Baseline")                                    # back home: no longer "moved"
     assert pages.load(win.session_dir)["moved"] == {}
     win.move_block(0, "Somewhere")
-    assert win.btn_reset_pages.isEnabled()
+    assert win.blocks_panel.btn_reset.isEnabled()
     win.reset_pages()                                                # forget names and moves
     assert pages.load(win.session_dir) == {"renamed": {}, "moved": {}}
-    assert [it.text(0) for it in win._items()][1].startswith("Blocks  (3)")
-    assert not win.btn_reset_pages.isEnabled()
+    assert [it.text(0) for it in win.blocks_panel.items()][1].startswith("Blocks  (3)")
+    assert not win.blocks_panel.btn_reset.isEnabled()
     win.close()
 
 
@@ -356,11 +356,11 @@ def test_selected_blocks_are_overlaid(app, settings, tmp_path):
     assert _item(win, ("block", 0)).isSelected() and _item(win, ("block", 2)).isSelected()
     win.step_block(1)                                                # stepping keeps the overlay
     assert len(win._overlay_items) == len(win.plots)
-    win.block_list.clearSelection()
+    win.blocks_panel.tree.clearSelection()
     _item(win, ("page", "Blocks")).setSelected(True)                 # a whole page
     pump(app, 0.05)
     assert win._overlay_sel == [0, 1, 2]
-    win.block_list.clearSelection()
+    win.blocks_panel.tree.clearSelection()
     _item(win, ("block", 1)).setSelected(True)                       # one block: no overlay
     pump(app, 0.05)
     assert win._overlay_sel == [] and win._overlay_items == []

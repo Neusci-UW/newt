@@ -248,14 +248,27 @@ def test_restart_discards_leftover_chunks_from_previous_run(tmp_path, app, setti
     assert w.buf_t.max() < 100, "data from the previous run was drawn"
     w.close()
 
-def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp_path):
+def _panel(win):
+    """The Blocks panel as data: [(top-level data, [child data])]."""
     from pyqtgraph.Qt import QtCore
+    role = QtCore.Qt.ItemDataRole.UserRole
+    t = win.block_list
+    return [(t.topLevelItem(r).data(0, role),
+             [t.topLevelItem(r).child(c).data(0, role) for c in range(t.topLevelItem(r).childCount())])
+            for r in range(t.topLevelItemCount())]
+
+
+def _item(win, data):
+    from pyqtgraph.Qt import QtCore
+    return next(it for it in win._items() if it.data(0, QtCore.Qt.ItemDataRole.UserRole) == data)
+
+
+def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp_path):
     from neusci_daq.gui import LIVE, REVIEW, MainWindow
     win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
     win._ask_unsaved = lambda: "discard"
-    role = QtCore.Qt.ItemDataRole.UserRole
-    items = lambda: [win.block_list.item(r).data(role) for r in range(win.block_list.count())]
-    assert items() == ["live"] and win.block_list.isEnabled()
+    assert _panel(win) == [("live", [])] and win.block_list.isEnabled()
+    assert not win.stim_ch.isEnabled()                               # no session yet
     win.btn_run.setChecked(True)
     pump(app, 0.2)
     for _ in range(2):
@@ -263,15 +276,16 @@ def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp
         pump(app, 0.3)
         assert not win.block_list.isEnabled()                        # not while recording
         win.btn_rec.setChecked(False)
-    assert items() == ["live", 0, 1] and win.block_list.isEnabled()
+    assert _panel(win) == [("live", []), (("page", "Blocks"), [("block", 0), ("block", 1)])]
+    assert win.stim_ch.isEnabled()
     sess = win.session_dir
-    win._block_list_clicked(win.block_list.item(2))                  # the second block
+    win._block_list_clicked(_item(win, ("block", 1)))                # the second block
     assert win.mode == REVIEW and win.review_dir == sess and win.block_combo.currentIndex() == 1
-    assert items() == ["back", 0, 1] and win.block_list.currentRow() == 2
+    assert _panel(win)[0][0] == "back"
     assert str(sess) not in win.recent_sessions()                    # an untitled session isn't "recent"
-    win._block_list_clicked(win.block_list.item(1))                  # click another block
-    assert win.block_combo.currentIndex() == 0 and win.block_list.currentRow() == 1
-    win._block_list_clicked(win.block_list.item(0))                  # Back to Live
+    win._block_list_clicked(_item(win, ("block", 0)))
+    assert win.block_combo.currentIndex() == 0
+    win._block_list_clicked(_item(win, "back"))                      # Back to Live
     assert win.mode == LIVE and win.session_dir == sess and len(win.blocks) == 2
     win.btn_run.setChecked(True)
     pump(app, 0.2)
@@ -279,9 +293,105 @@ def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp
     pump(app, 0.3)
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
-    assert win.session_dir == sess and len(win.blocks) == 3 and items() == ["live", 0, 1, 2]
+    assert win.session_dir == sess and len(win.blocks) == 3 and len(_panel(win)[1][1]) == 3
     win.open_session(sess)                                           # a plain Open isn't "browsing"
-    assert items() == [0, 1, 2]
+    assert _panel(win)[0][0] == ("page", "Blocks")
     win.back_to_live()
     assert win.session_dir is None and not win.blocks                # so it starts afresh, as before
+    win.close()
+
+
+def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_path):
+    from neusci_daq import pages
+    from neusci_daq.gui import MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(3):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.25)
+        win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.rename_page("Blocks", "Baseline")
+    texts = [it.text(0) for it in win._items()]
+    assert texts[1].startswith("Baseline  (3)") and texts[2].startswith("Baseline 1")
+    assert texts[4].startswith("Baseline 3")
+    win.move_block(2, "Drug")                                        # into a new page
+    texts = [it.text(0) for it in win._items()]
+    assert any(t.startswith("Drug  (1)") for t in texts) and any(t.startswith("Drug 1") for t in texts)
+    assert pages.load(win.session_dir) == {"renamed": {"Blocks": "Baseline"}, "moved": {"block_003": "Drug"}}
+    win.rename_page("Drug", "Drug A")                                # its block follows
+    assert pages.load(win.session_dir)["moved"] == {"block_003": "Drug A"}
+    win.move_block(2, "Baseline")                                    # back home: no longer "moved"
+    assert pages.load(win.session_dir)["moved"] == {}
+    win.move_block(0, "Somewhere")
+    assert win.btn_reset_pages.isEnabled()
+    win.reset_pages()                                                # forget names and moves
+    assert pages.load(win.session_dir) == {"renamed": {}, "moved": {}}
+    assert [it.text(0) for it in win._items()][1].startswith("Blocks  (3)")
+    assert not win.btn_reset_pages.isEnabled()
+    win.close()
+
+
+def test_selected_blocks_are_overlaid(app, settings, tmp_path):
+    from neusci_daq.gui import REVIEW, MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(3):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.25)
+        win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    _item(win, ("block", 0)).setSelected(True)                       # Cmd-click two blocks, from live
+    _item(win, ("block", 2)).setSelected(True)
+    pump(app, 0.05)
+    assert win.mode == REVIEW and win._overlay_sel == [0, 2]
+    assert len(win._overlay_items) == len(win.plots)                 # one overlay per channel plot
+    rows = win._overlay_items[0][1].getOriginalDataset()[1].shape[0]
+    assert rows == 2
+    assert _item(win, ("block", 0)).isSelected() and _item(win, ("block", 2)).isSelected()
+    win.step_block(1)                                                # stepping keeps the overlay
+    assert len(win._overlay_items) == len(win.plots)
+    win.block_list.clearSelection()
+    _item(win, ("page", "Blocks")).setSelected(True)                 # a whole page
+    pump(app, 0.05)
+    assert win._overlay_sel == [0, 1, 2]
+    win.block_list.clearSelection()
+    _item(win, ("block", 1)).setSelected(True)                       # one block: no overlay
+    pump(app, 0.05)
+    assert win._overlay_sel == [] and win._overlay_items == []
+    win.close()
+
+
+
+def test_channels_can_be_overlaid_in_one_plot(app, settings, tmp_path):
+    from neusci_daq.gui import MainWindow
+    win = MainWindow(make_cfg(tmp_path, n=3), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    win.resize(1200, 800)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.3)
+    win.btn_overlay_ch.setChecked(True)                              # live
+    pump(app, 0.3)
+    first = win.plots[0]
+    assert len(win._mirrors) == 2 and all(m.getViewBox() is first.vb for _, m in win._mirrors)
+    assert not win.plot_widgets[1].isVisible() and win.strips[1].isVisible()   # controls stay
+    x, y = win._mirrors[0][1].getOriginalDataset()
+    assert len(x) > 0 and np.array_equal(y, win.curves[1].getOriginalDataset()[1])   # follows the data
+    win.btn_rec.setChecked(True)
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.open_session(win.session_dir)                                # review: overlaid too
+    pump(app, 0.1)
+    assert len(win._mirrors) == 2 and not win.plot_widgets[2].parentWidget().isVisible()
+    assert settings.value("overlay_channels", type=bool) is True     # remembered
+    win.btn_overlay_ch.setChecked(False)
+    pump(app, 0.1)
+    assert win._mirrors == [] and win.plot_widgets[2].isVisible()
     win.close()

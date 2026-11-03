@@ -92,16 +92,22 @@ def record(app, win, n):
     win.btn_run.setChecked(False)
 
 
-def test_page_buttons_step_through_blocks(app, win):
+def test_up_down_step_through_the_blocks_panel(app, win):
     record(app, win, 3)
-    win.open_session(win.session_dir)
+    win.show()
+    assert win.mode == "live"
+    win.step_block(1)                                                # ↓ from Live: the first block
     assert win.mode == REVIEW and win.block_combo.currentIndex() == 0
-    win.btn_next_block.click()
+    win.step_block(1)
     win.step_block(1)
     assert win.block_combo.currentIndex() == 2
     win.step_block(1)                                                # past the end: stays
-    win.btn_prev_block.click()
+    assert win.block_combo.currentIndex() == 2
+    win.step_block(-1)
     assert win.block_combo.currentIndex() == 1
+    win.step_block(-1)
+    win.step_block(-1)                                               # ↑ past the first: Back to Live
+    assert win.mode == "live" and len(win.blocks) == 3
 
 
 def test_analysis_tab_overlays_blocks_and_finds_events(app, win, tmp_path):
@@ -229,8 +235,7 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    assert [ap.tabs.tabText(i) for i in range(ap.tabs.count())] == \
-        ["Raw Data Visualization", "Comparison", "Stimuli"]
+    assert [ap.tabs.tabText(i) for i in range(ap.tabs.count())] == ["Raw Data Visualization", "Comparison"]
     ap.raw.overlay.setFocus()
     key(ap.raw.overlay, QtCore.Qt.Key.Key_Right)
     pump(app, 0.05)
@@ -241,7 +246,7 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     assert ap.current.value() == 4 and ap.slider.value() == 4
     win.tabs.pick(0, "acq")
     pump(app, 0.05)
-    win.step_block(1)                                                # on Acquisition: the review block
+    win.step_block(1)                                                # ↓ on Acquisition: the review block
     assert win.block_combo.currentIndex() == 1
 
 
@@ -420,28 +425,16 @@ def test_stimulus_channel_is_set_after_recording_and_remembered(app, win, tmp_pa
     w2.close()
 
 
-def test_stimuli_tab_shows_each_group(app, win):
+def test_raw_view_shows_the_stimulus_groups(app, win):
     two_stimulus_session(app, win)
     win.show()
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    ap.raw.channel.setCurrentText("Ch2")
-    ap.raw.find()
-    ap.tabs.setCurrentIndex(2)
-    pump(app, 0.2)
-    st = ap.stimuli
-    assert st.table.rowCount() == 2 and st.table.item(0, 2).text() == "1-2"
-    assert len(st.stim_plot.getPlotItem().listDataItems()) == 2      # each group's stimulus
-    assert len(st.resp_plot.getPlotItem().listDataItems()) == 2      # and response
-    assert len(st.rate_plot.getPlotItem().listDataItems()) == 2      # and spike rate
-    peaks = [c.getData()[1].max() for c in st.stim_plot.getPlotItem().listDataItems()]
-    assert sorted(round(p) for p in peaks) == [1, 2]                  # 1 V and 2 V
-    st.table.selectRow(1)                                            # click a group: picked everywhere
-    assert ap.group.currentIndex() == 2 and ap.raw.chosen_or_none() == [2, 3]
-    # Raw shows the groups too: an average each, and a mark on each block's raster row
-    ap.group.setCurrentIndex(0)
-    assert len(ap.raw.group_avgs) == 2 and len(ap.raw.group_marks.data) == 4
+    assert "2 different stimuli" in ap.group_note.text()
+    assert len(ap.raw.group_avgs) == 2 and len(ap.raw.group_marks.data) == 4   # an average each; row marks
+    ap.group.setCurrentIndex(2)                                      # one group: just its blocks
+    assert ap.raw.chosen_or_none() == [2, 3] and ap.raw.group_avgs == []
 
 
 def test_isi_histogram():
@@ -450,3 +443,53 @@ def test_isi_histogram():
     isi = A.intervals_ms(ev)
     assert len(isi) == len(ev.t) - ev.n_units * len(blocks)          # within a unit and a block
     assert isi.min() >= 10                                           # the fake spikes are >= 10 ms apart
+
+
+
+def test_analysis_groups_are_the_named_pages(app, win):
+    two_stimulus_session(app, win)
+    win.rename_page("Pulse of 1 V, 0.9 ms", "Weak")
+    win.move_block(3, "Odd one")
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    assert [(n, b) for n, b in ap.groups] == [("Weak", [0, 1]), ("Pulse of 2 V, 0.9 ms", [2]), ("Odd one", [3])]
+    assert ap.group.itemText(1) == "Weak (2 blocks)"
+
+
+# ---------------------------------------------------------------- a chosen stimulus channel: any waveform
+def test_any_waveform_on_the_stimulus_channel_is_a_stimulus():
+    from neusci_daq.analysispage import AnalysisPage
+    fs = 20000
+    t = np.arange(fs) / fs
+    rng = np.random.default_rng(0)
+
+    def block(y):
+        y = y + 0.0002 * rng.standard_normal(fs)
+        return {"data": np.vstack([y]), "channel_names": ["Stim"], "units": ["V"], "sample_rate": float(fs),
+                "comments": []}
+    blocks = ([block(0.005 * np.sin(2 * np.pi * 5 * t + ph)) for ph in (0, 1, 2)]         # same sine, any phase
+              + [block(0.007 * np.sin(2 * np.pi * 5 * t)) for _ in range(2)]            # bigger
+              + [block(0.005 * np.sin(2 * np.pi * 10 * t)) for _ in range(2)]           # faster
+              + [block(0.01 * np.sign(np.sin(2 * np.pi * 10 * t)))]                     # square
+              + [block(np.zeros(fs))])                                                  # nothing
+    groups = AnalysisPage._group(blocks, "Stim")
+    assert [b for _, b in groups] == [[0, 1, 2], [3, 4], [5, 6], [7], [8]]
+    names = [n for n, _ in groups]
+    assert names[0].startswith("Sine 5 Hz") and names[2].startswith("Sine 10 Hz")
+    assert names[3].startswith("Square wave 10 Hz") and names[4] == "No stimulus found"
+    assert len(set(names)) == len(names)                             # every stimulus its own name
+    assert A.unique_names({1: "Sine 5 Hz", 2: "Sine 5 Hz", 3: "X"}) == {1: "Sine 5 Hz", 2: "Sine 5 Hz (2)", 3: "X"}
+
+
+def test_the_lab_recording_sorts_into_its_25_sine_stimuli():
+    """AU26_Lab1_Data.mat: 250 blocks, a sine on Channel 1 at 5 frequencies × 5 amplitudes."""
+    import glob
+    from neusci_daq.analysispage import AnalysisPage
+    paths = sorted(glob.glob("data/imported/AU26_Lab1_Data/block_*.h5"))
+    if len(paths) != 250:
+        pytest.skip("the lab recording isn't on this computer")
+    groups = AnalysisPage._group([session.read_block(p) for p in paths], "Channel 1")
+    assert len(groups) == 25 and all(len(b) == 10 for _, b in groups)
+    assert groups[0][1] == list(range(10)) and groups[0][0].startswith("Sine 5 Hz")

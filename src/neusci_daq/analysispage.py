@@ -25,6 +25,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
 from . import config as cfgmod
+from . import pages
 from . import session
 from . import style, theme
 from .plotzoom import OverlayCurve, TraceCurve, plot_widget
@@ -125,10 +126,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.tabs.setDocumentMode(True)
         self.raw = RawView(self)
         self.compare = CompareView(self)
-        self.stimuli = StimuliView(self)
         self.tabs.addTab(self.raw, "Raw Data Visualization")
         self.tabs.addTab(self.compare, "Comparison")
-        self.tabs.addTab(self.stimuli, "Stimuli")
         lay.addWidget(self.tabs, 1)
 
         self.btn_prev.clicked.connect(lambda: self.step(-1))
@@ -205,7 +204,6 @@ class AnalysisPage(QtWidgets.QWidget):
         self.raw.set_channels(names)
         self.compare.set_channels(names)
         self.compare.stimulus_channel_changed()
-        self.stimuli.set_channels(names)
 
     def names(self) -> list[str]:
         good = [b for b in self.blocks if b is not None]
@@ -254,6 +252,7 @@ class AnalysisPage(QtWidgets.QWidget):
         key = self._settings_key()
         if key:
             self.main.settings.setValue(key, self.stim_channel.currentData() or "")
+        self.main._fill_recorded()                  # the Acquisition Blocks panel groups the same way
         self.compare.stimulus_channel_changed()
         self._compute_groups()
         self.groups_changed()
@@ -266,27 +265,66 @@ class AnalysisPage(QtWidgets.QWidget):
         has_notes = any(b is not None and A.stimulus_notes(b["comments"]) for b in self.blocks)
         return "notes" if has_notes else ""
 
-    def _compute_groups(self) -> None:
-        """Group the blocks by their stimulus (see Stimulus groups from) and list the groups."""
-        how = self.how()
+    @staticmethod
+    def _group(blocks: list[dict | None], how: str) -> list[tuple[str, list[int]]]:
+        """Blocks with the same stimulus together: [(label, block indices)]. `how` is a
+        stimulus channel's name, "notes", or "" (no groups)."""
+        if not how:
+            return []
         keys, labels = {}, {}
-        for i, b in enumerate(self.blocks):
-            if b is None or not how:
+        for i, b in enumerate(blocks):
+            if b is None:
                 continue
             if how == "notes":
                 k = A.stimulus_notes(b["comments"]) or None
                 if k is not None:
                     labels[k] = " · ".join(k)
             else:
-                y = self.trace(i, how)
-                k = A.pulse_signature(y, b["sample_rate"]) if y is not None else None
+                # you said this channel is the stimulus: whatever it shows is the stimulus
+                y = b["data"][b["channel_names"].index(how)] if how in b["channel_names"] else None
+                k = A.stimulus_signature(y, b["sample_rate"]) if y is not None else None
             keys[i] = k
-        if how and how != "notes":
+        if how != "notes":
+            # a block where the channel is nearly flat, next to the others, had no stimulus
+            size = lambda k: abs(k[3]) if k[0] == "pulse" else k[2]
+            biggest = max((size(k) for k in keys.values() if k is not None), default=0.0)
+            keys = {i: (k if k is not None and size(k) >= 0.1 * biggest else None) for i, k in keys.items()}
             # measured signatures jitter: blocks with the same stimulus share the first one's
-            good = [b for b in self.blocks if b is not None]
+            good = [b for b in blocks if b is not None]
             keys = A.cluster_signatures(keys, good[0]["sample_rate"] if good else 1.0)
-            labels = {k: A.describe_signature(k, self.unit_of(how)) for k in keys.values() if k is not None}
-        self.groups = A.group_blocks(keys, labels) if how else []
+            unit = next((b["units"][b["channel_names"].index(how)] for b in good if how in b["channel_names"]), "V")
+            labels = A.unique_names({k: A.describe_signature(k, unit) for k in dict.fromkeys(keys.values())
+                                     if k is not None})
+        return A.group_blocks(keys, labels)
+
+    def stimulus_groups_of(self, paths: list[Path], where: Path | None) -> list[tuple[str, list[int]]]:
+        """The stimulus groups of any session's blocks (for the Acquisition Blocks panel),
+        the same way this tab would group them, without changing what it shows: the
+        session's saved Stimulus channel, else one called Stim, else the notes."""
+        blocks = []
+        for p in paths:
+            try:
+                blocks.append(self._read(p))
+            except Exception:
+                blocks.append(None)
+        good = [b for b in blocks if b is not None]
+        names = good[0]["channel_names"] if good else []
+        saved = self.main.settings.value(f"stim_channel/{Path(where).resolve()}") if where else None
+        ch = saved if saved is not None else next((n for n in names if "stim" in n.lower()), "")
+        how = ch if ch in names else ""
+        if not how and any(A.stimulus_notes(b["comments"]) for b in good):
+            how = "notes"
+        return self._group(blocks, how)
+
+    def _compute_groups(self) -> None:
+        """Group the blocks by their stimulus (see Stimulus channel) and list the groups."""
+        how = self.how()
+        auto = self._group(self.blocks, how)
+        # the pages of the Blocks panel: your names, and blocks you moved
+        folder = self.main.review_dir if self.main.mode == "review" else self.main.session_dir
+        d = pages.load(folder)
+        changed = d["moved"] or d["renamed"]
+        self.groups = pages.apply(auto, [p.stem for p in self._paths], d) if auto or changed else []
         keep = self.group.currentText().rsplit(" (", 1)[0]
         self.group.blockSignals(True)
         self.group.clear()
@@ -301,7 +339,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.group_note.setText(
             "No stimulus channel or notes: pick the channel that recorded the stimulus" if not how else
             f"{n} different stimul{'us' if n == 1 else 'i'}" + (" (from the notes)" if how == "notes" else "")
-            + ": see the Stimuli tab" if n else
+            + ": pick one with Show" if n else
             f"No stimulus pulses found on {how}: is it the right channel?" if how != "notes" else
             "No stimuli in the notes")
 
@@ -328,26 +366,29 @@ class AnalysisPage(QtWidgets.QWidget):
         if how == "notes":
             return A.note_times(b["comments"])
         y = self.trace(i, how)
-        return A.train_starts(A.stimulus_times(y, b["sample_rate"])) if y is not None else None
+        if y is None:
+            return None
+        sig = A.stimulus_signature(y, b["sample_rate"])
+        if sig is not None and sig[0] == "wave":
+            # a wave starts where the channel first leaves its middle level
+            moved = np.flatnonzero(np.abs(np.nan_to_num(y) - sig[3]) > 0.1 * sig[2])
+            return np.array([moved[0] / b["sample_rate"]]) if len(moved) else np.empty(0)
+        return A.train_starts(A.stimulus_times(y, b["sample_rate"]))
 
     def groups_changed(self) -> None:
         self.raw._settings_changed()
-        for view in (self.compare, self.stimuli):
-            if view.isVisible():
-                view.redraw()
+        if self.compare.isVisible():
+            self.compare.redraw()
 
     def events_changed(self) -> None:
         if self.compare.isVisible():
             self.compare.redraw()
-        if self.stimuli.isVisible():
-            self.stimuli.redraw()
 
     # -- looks ----------------------------------------------------------------------------
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         self.raw.apply_theme(mode)
         self.compare.apply_theme(mode)
-        self.stimuli.apply_theme(mode)
 
 
 class RawView(QtWidgets.QWidget):
@@ -1233,229 +1274,4 @@ class CompareView(QtWidgets.QWidget):
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
         for pw in [self.psth, self.sta] + self._plots:
-            _style_plot(pw, th)
-
-
-def _ranges(blocks: list[int]) -> str:
-    """0-based block indices as 1-based ranges: [0, 1, 2, 5] -> '1-3, 6'."""
-    out, run = [], []
-    for b in sorted(blocks):
-        if run and b == run[-1] + 1:
-            run.append(b)
-        else:
-            if run:
-                out.append(f"{run[0] + 1}" if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
-            run = [b]
-    if run:
-        out.append(f"{run[0] + 1}" if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}")
-    return ", ".join(out)
-
-
-class StimuliView(QtWidgets.QWidget):
-    """Each stimulus group side by side: what the stimulus was, the average response
-    to it, and the spike rate around it."""
-
-    def __init__(self, page: AnalysisPage):
-        super().__init__()
-        self.page = page
-        self.main = page.main
-        self._mode = style.LIGHT
-        outer = QtWidgets.QHBoxLayout(self)
-        outer.setContentsMargins(0, 8, 0, 0)
-        outer.setSpacing(12)
-
-        side = QtWidgets.QWidget()
-        side.setMaximumWidth(420)
-        left = QtWidgets.QVBoxLayout(side)
-        left.setContentsMargins(0, 0, 0, 0)
-        left.setSpacing(10)
-        intro = QtWidgets.QLabel("Blocks recorded with the same stimulus make a group, found from the "
-                                 "<i>Stimulus channel</i> above (or the notes). Click a group to look at just "
-                                 "it, here and on the other tabs.")
-        intro.setWordWrap(True)
-        left.addWidget(intro)
-        self.table = QtWidgets.QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Stimulus", "Blocks", "Which"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        h = self.table.horizontalHeader()
-        h.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        h.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        h.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        left.addWidget(self.table, 1)
-        f = QtWidgets.QFormLayout()
-        self.channel = QtWidgets.QComboBox()
-        self.channel.setToolTip("The channel whose response is averaged")
-        self.before = UnitSpinBox(0, 5000, "ms", step=5)
-        self.before.setValue(10)
-        self.after = UnitSpinBox(1, 10000, "ms", step=5)
-        self.after.setValue(100)
-        self.bin = UnitSpinBox(0.1, 1000, "ms", step=1)
-        self.bin.setValue(5)
-        self.bin.setToolTip("Bin width of the spike rate")
-        f.addRow("Response on", self.channel)
-        f.addRow("Before stimulus", self.before)
-        f.addRow("After stimulus", self.after)
-        f.addRow("Rate bins", self.bin)
-        left.addLayout(f)
-        self.message = QtWidgets.QLabel()
-        self.message.setWordWrap(True)
-        left.addWidget(self.message)
-        outer.addWidget(side)
-
-        right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self.stim_plot = plot_widget()
-        self.resp_plot = plot_widget()
-        self.rate_plot = plot_widget()
-        for pw, title in ((self.stim_plot, "The stimulus"), (self.resp_plot, "Average response"),
-                          (self.rate_plot, "Spike rate")):
-            p = pw.getPlotItem()
-            p.setTitle(title)
-            p.showGrid(x=True, y=True, alpha=0.2)
-            p.setLabel("bottom", "ms from the stimulus")
-            p.addItem(pg.InfiniteLine(0, angle=90, pen=pg.mkPen("#888", style=QtCore.Qt.PenStyle.DashLine)))
-            right.addWidget(pw)
-        self.rate_plot.getPlotItem().setLabel("left", "spikes/s")
-        self.resp_plot.setXLink(self.stim_plot)
-        self.rate_plot.setXLink(self.stim_plot)
-        self.legend = self.resp_plot.getPlotItem().addLegend(offset=(-10, 10))
-        outer.addWidget(right, 1)
-
-        self.table.itemSelectionChanged.connect(self._row_picked)
-        self.channel.currentIndexChanged.connect(lambda *_: self.redraw())
-        for w in (self.before, self.after, self.bin):
-            w.valueChanged.connect(lambda *_: self.redraw())
-        self.apply_theme(style.LIGHT)
-
-    def set_channels(self, names: list[str]) -> None:
-        keep = self.channel.currentText()
-        self.channel.blockSignals(True)
-        self.channel.clear()
-        self.channel.addItems(names)
-        if keep in names:
-            self.channel.setCurrentText(keep)
-        else:   # the first channel that isn't the stimulus
-            stim = self.page.stim_channel.currentData()
-            self.channel.setCurrentText(next((n for n in names if n != stim and "stim" not in n.lower()),
-                                             names[0] if names else ""))
-        self.channel.blockSignals(False)
-
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        self.redraw()
-
-    def _row_picked(self) -> None:
-        rows = {i.row() for i in self.table.selectedIndexes()}
-        if rows:
-            self.page.group.setCurrentIndex(min(rows) + 1)
-
-    def _stim_channel(self) -> str | None:
-        """The channel that recorded the stimulus, if there is one."""
-        return self.page.stim_channel.currentData() or None
-
-    def redraw(self) -> None:
-        page = self.page
-        groups = [(g, label, blocks) for g, (label, blocks) in enumerate(page.groups)
-                  if label != "No stimulus found"]
-        picked = page.group.currentIndex() - 1
-        # the table
-        self.table.blockSignals(True)
-        self.table.setRowCount(len(page.groups))
-        for r, (label, blocks) in enumerate(page.groups):
-            item = QtWidgets.QTableWidgetItem(label)
-            item.setIcon(style.dot_icon(page.group_color(r)))
-            self.table.setItem(r, 0, item)
-            self.table.setItem(r, 1, QtWidgets.QTableWidgetItem(str(len(blocks))))
-            self.table.setItem(r, 2, QtWidgets.QTableWidgetItem(_ranges(blocks)))
-        self.table.clearSelection()
-        if 0 <= picked < self.table.rowCount():
-            self.table.selectRow(picked)
-        self.table.blockSignals(False)
-        # the plots
-        sp, rp, qp = (pw.getPlotItem() for pw in (self.stim_plot, self.resp_plot, self.rate_plot))
-        for p in (sp, rp, qp):
-            for item in list(p.listDataItems()):
-                p.removeItem(item)
-            for item in [x for x in p.items if isinstance(x, pg.FillBetweenItem)]:
-                p.removeItem(item)
-        self.legend.clear()
-        if not page.how():
-            self._show_message("Set the Stimulus channel above to the channel that recorded the stimulus. "
-                               "(Sessions recorded here also have notes of each stimulus.)")
-            return
-        if not groups:
-            self._show_message("No stimuli found that way. Try another channel, or the notes.")
-            return
-        good = [b for b in page.blocks if b is not None]
-        fs = good[0]["sample_rate"]
-        before, after = self.before.value(), self.after.value()
-        stim_ch, resp_ch = self._stim_channel(), self.channel.currentText()
-        events = page.events
-        notes = []
-        if page.how() == "notes":
-            notes.append("Times come from the notes, so they're close but not exact (within a read, "
-                         "~50 ms): record the stimulus on a channel (Stimulator › Record on) for exact times.")
-        if events is None:
-            notes.append("Find action potentials on the Raw Data tab to see spike rates.")
-        for g, label, blocks in groups:
-            on = {i: page.onsets(i) for i in blocks}
-            on = {i: t for i, t in on.items() if t is not None and len(t)}
-            if not on:
-                continue
-            color = QtGui.QColor(page.group_color(g))
-            strong = picked < 0 or picked == g
-            if not strong:
-                color.setAlpha(70)
-            width = 2.5 if picked == g else 1.8
-            n_stim = sum(len(t) for t in on.values())
-            for plot, ch in ((sp, stim_ch), (rp, resp_ch)):
-                if not ch:
-                    continue
-                traces = {i: page.trace(i, ch) for i in on}
-                t, mean, sd, n = A.triggered_average({i: y for i, y in traces.items() if y is not None}, fs, on,
-                                                     before, after)
-                if not n:
-                    continue
-                if plot is rp and picked == g:
-                    hi = rp.plot(t, mean + sd, pen=pg.mkPen(None))
-                    lo = rp.plot(t, mean - sd, pen=pg.mkPen(None))
-                    band = QtGui.QColor(color)
-                    band.setAlpha(45)
-                    rp.addItem(pg.FillBetweenItem(hi, lo, brush=pg.mkBrush(band)))
-                plot.plot(t, mean, pen=pg.mkPen(color, width=width),
-                          name=f"{label} ({n_stim})" if plot is rp else None)
-            if events is not None:
-                times = {int(b): events.t[events.block == b] for b in np.unique(events.block)}
-                centres, rate, _ = A.triggered_rate(times, on, before, after, self.bin.value())
-                b = self.bin.value()
-                qp.plot(np.append(centres - b / 2, centres[-1] + b / 2), rate, stepMode="center",
-                        pen=pg.mkPen(color, width=width))
-        if stim_ch:
-            _label(sp, "left", stim_ch, page.unit_of(stim_ch))
-            sp.setTitle(f"The stimulus, as recorded on {stim_ch}", color=self._fg())
-        else:
-            sp.setTitle("The stimulus: no channel recorded it (Stimulator › Record on)", color=self._fg())
-        _label(rp, "left", resp_ch, page.unit_of(resp_ch))
-        rp.setTitle(f"Average response on {resp_ch}" + (" (± SD of the picked group)" if picked >= 0 else ""),
-                    color=self._fg())
-        qp.setTitle("Spike rate" + ("" if events is not None else ": find action potentials first"),
-                    color=self._fg())
-        sp.setXRange(-before, after, padding=0)
-        self._show_message(" ".join(notes))
-
-    # -- looks ---------------------------------------------------------------------------------
-    def _fg(self):
-        return theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT].foreground
-
-    def _show_message(self, text: str, error: bool = False) -> None:
-        t = style.tokens(self._mode)
-        self.message.setStyleSheet(f"color: {t['error'] if error else t['muted']}")
-        self.message.setText(text)
-
-    def apply_theme(self, mode: str) -> None:
-        self._mode = mode
-        th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
-        for pw in (self.stim_plot, self.resp_plot, self.rate_plot):
             _style_plot(pw, th)

@@ -73,18 +73,19 @@ class TraceCurve(pg.PlotDataItem):
 
     def viewRangeChanged(self, vb=None, ranges=None, changed=None):
         super().viewRangeChanged(vb, ranges, changed)
-        if (changed is None or changed[0]) and not getattr(self, "_queued", False):
-            # Once, after this round of events: live updates move the view and set
-            # new data together, and should only regroup once.
-            self._queued = True
-            QtCore.QTimer.singleShot(0, self._queued_redisplay)
-
-    def _queued_redisplay(self) -> None:
-        self._queued = False
-        try:
-            self._redisplay()
-        except RuntimeError:                           # the plot was closed meanwhile
-            pass
+        if changed is None or changed[0]:
+            # Once, after this round of events: live updates move the view and set new
+            # data together, and should only regroup once. The timer belongs to this
+            # item, so if the plot is deleted first it goes too and never fires (a
+            # QTimer.singleShot would call into the deleted item and crash).
+            timer = getattr(self, "_timer", None)
+            if timer is None:
+                timer = self._timer = QtCore.QTimer(self)
+                timer.setSingleShot(True)
+                timer.setInterval(0)
+                timer.timeout.connect(self._redisplay)
+            if not timer.isActive():
+                timer.start()
 
     def dataBounds(self, ax, frac=1.0, orthoRange=None):
         """Auto-scale to the samples themselves, not the averages drawn: averaging

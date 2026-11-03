@@ -456,13 +456,19 @@ def pulse_signature(y: np.ndarray, fs: float) -> tuple | None:
     interval ms). Pulses under TRAIN_GAP_MS apart make one train; repeats further
     apart (however many fit in the block) don't change it. None without pulses.
     Measurements jitter by a sample, so compare them with same_stimulus."""
-    d = np.asarray(y, float) - np.median(y)
+    y = np.asarray(y, float)
+    if not y.size:                    # e.g. a block that's still being recorded
+        return None
+    y = np.nan_to_num(y)              # missing samples (a channel off part of the time) as 0
+    d = y - np.median(y)
     a = np.abs(d)
-    if not a.size or a.max() < 10 * max(noise_sd(y), 1e-12):
+    if a.max() < 10 * max(noise_sd(y), 1e-12):
         return None
     on = a > 0.5 * a.max()
     edges = np.flatnonzero(np.diff(np.r_[0, on.astype(np.int8), 0]))
     starts, ends = edges[::2], edges[1::2]
+    if not len(starts):
+        return None
     peaks = [d[s:e][np.argmax(a[s:e])] for s, e in zip(starts, ends)]
     widths = (ends - starts) / fs * 1000
     gaps = np.diff(starts) / fs * 1000
@@ -473,9 +479,62 @@ def pulse_signature(y: np.ndarray, fs: float) -> tuple | None:
     return per_train, float(np.median(peaks)), float(np.median(widths)), gap
 
 
+def wave_signature(y: np.ndarray, fs: float) -> tuple | None:
+    """A stimulus that isn't brief pulses (a sine, a square wave, a long step...):
+    ("wave", main frequency Hz, amplitude, offset, shape). Amplitude is half the
+    peak-to-peak (from the 2nd to the 98th percentile, so noise and stray samples
+    don't count); shape is RMS / amplitude (sine 0.71, square 1, triangle 0.58).
+    None if it's perfectly flat."""
+    y = np.nan_to_num(np.asarray(y, float))
+    if y.size < 4:
+        return None
+    lo, hi = np.percentile(y, [2, 98])
+    amp = (hi - lo) / 2
+    if amp <= 0:
+        return None
+    mid = (hi + lo) / 2
+    d = y - mid
+    spec = np.abs(np.fft.rfft(d - d.mean()))
+    k = 1 + int(np.argmax(spec[1:])) if len(spec) > 2 else 1
+    if 1 <= k < len(spec) - 1:                      # between FFT bins: a parabola through the peak
+        a, b, c = spec[k - 1], spec[k], spec[k + 1]
+        k = k + 0.5 * (a - c) / (a - 2 * b + c) if (a - 2 * b + c) else k
+    freq = k * fs / len(y)
+    return "wave", float(freq), float(amp), float(mid), float(np.sqrt(np.mean(d ** 2)) / amp)
+
+
+def stimulus_signature(y: np.ndarray, fs: float) -> tuple | None:
+    """What a channel you've said records the stimulus shows in a block: brief pulses
+    on a flat baseline as ("pulse", pulses per train, size, width ms, interval ms),
+    anything else as wave_signature. None when there's no samples or it's flat."""
+    y = np.nan_to_num(np.asarray(y, float))
+    if not y.size:
+        return None
+    d = y - np.median(y)
+    a = np.abs(d)
+    pulsy = a.max() >= 10 * max(noise_sd(y), 1e-12) and np.mean(a > 0.5 * a.max()) < 0.3
+    if pulsy:
+        p = pulse_signature(y, fs)
+        if p is not None:
+            return ("pulse",) + tuple(p)
+    return wave_signature(y, fs)
+
+
 def same_stimulus(a: tuple, b: tuple, fs: float) -> bool:
-    """Whether two pulse signatures are the same stimulus: the same pulses per train,
-    size within 5%, width and interval within 10% or 2 samples."""
+    """Whether two signatures are the same stimulus. Pulses: the same pulses per train,
+    size within 5%, width and interval within 10% or 2 samples. Waves: frequency
+    within 3% (or 0.6 Hz), amplitude within 5%, offset within 5% of the amplitude,
+    and the same shape. Signatures without a kind are pulse_signature's."""
+    if isinstance(a[0], str) or isinstance(b[0], str):
+        if a[0] != b[0]:
+            return False
+        if a[0] == "pulse":
+            return same_stimulus(a[1:], b[1:], fs)
+        _, fa, aa, oa, sa = a
+        _, fb, ab, ob, sb = b
+        near = lambda x, y, rel, floor: abs(x - y) <= max(rel * max(abs(x), abs(y)), floor)
+        return (near(fa, fb, 0.03, 0.6) and near(aa, ab, 0.05, 0.0)
+                and abs(oa - ob) <= 0.05 * max(aa, ab) and abs(sa - sb) <= 0.08)
     if a[0] != b[0]:
         return False
     sample_ms = 2000.0 / fs
@@ -503,12 +562,33 @@ def cluster_signatures(sigs: dict[int, tuple | None], fs: float) -> dict[int, tu
 
 def describe_signature(sig: tuple, unit: str = "V") -> str:
     from .units import best_prefix
+    if sig[0] == "pulse":
+        sig = sig[1:]
+    elif sig[0] == "wave":
+        _, freq, amp, offset, shape = sig
+        kind = ("Sine" if abs(shape - 0.707) < 0.06 else "Square wave" if shape > 0.9
+                else "Triangle wave" if abs(shape - 0.577) < 0.05 else "Wave")
+        v, u = best_prefix(_sig(amp), unit)
+        out = f"{kind} {_sig(freq):g} Hz, ±{v:.2g} {u}"
+        if abs(offset) > 0.1 * amp:
+            o, ou = best_prefix(_sig(offset), unit)
+            out += f", offset {o:.2g} {ou}"
+        return out
     # to 0.1 ms: finer than that is a sample's jitter, not a different stimulus
     n, size, width, gap = sig[0], _sig(sig[1]), round(sig[2], 1), round(sig[3], 1)
     v, u = best_prefix(size, unit)
     if n == 1:
         return f"Pulse of {v:.2g} {u}, {width:g} ms"
     return f"Train of {n} pulses of {v:.2g} {u}, {width:g} ms, every {gap:g} ms"
+
+
+def unique_names(labels: dict[object, str]) -> dict[object, str]:
+    """Different stimuli that round to the same name get (2), (3)... after it."""
+    out, seen = {}, {}
+    for k, name in labels.items():
+        seen[name] = seen.get(name, 0) + 1
+        out[k] = name if seen[name] == 1 else f"{name} ({seen[name]})"
+    return out
 
 
 def group_blocks(keys: dict[int, object], labels: dict[object, str]) -> list[tuple[str, list[int]]]:

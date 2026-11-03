@@ -47,10 +47,11 @@ from .channels import ChannelRow, ChannelRowWidget, ChannelStrip, ColorButton
 from .comments import CommentPopup, CommentsPanel
 from .config import Channel, Config, valid_inputs
 from .export import to_labchart_mat
-from .plotzoom import TraceCurve, WheelViewBox
+from .plotzoom import OverlayCurve, TraceCurve, WheelViewBox
 from .recorder import Recorder
 from .stim import Stimulus
 from .stimout import make_output
+from . import pages as pagesmod
 from .analysispage import AnalysisPage
 from .simpage import SimPage
 from .stimwindow import StimPage
@@ -117,6 +118,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.review_dir: Path | None = None
         self._review_source: Path | None = None   # the .mat an imported session came from
         self._live_state = None              # the live session, while browsing its own blocks
+        self._overlay_sel: list[int] = []    # blocks overlaid on the review plots (2 or more)
+        self._mirrors: list = []             # other channels' copies in the first plot (Overlay channels)
+        self._overlay_items: list = []
         self.review_blocks: list[Path] = []
         self.review_block: dict | None = None
         self.review_color_btns: list[ColorButton] = []
@@ -202,13 +206,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.block_combo = QtWidgets.QComboBox()
         self.block_combo.setMinimumContentsLength(18)
         self.block_combo.currentIndexChanged.connect(self._show_review_block)
-        # Pages: step through the blocks (also ← and →).
-        self.btn_prev_block = QtWidgets.QToolButton(text="◀", autoRaise=True)
-        self.btn_prev_block.setToolTip("Previous block (←)")
-        self.btn_prev_block.clicked.connect(lambda: self.step_block(-1))
-        self.btn_next_block = QtWidgets.QToolButton(text="▶", autoRaise=True)
-        self.btn_next_block.setToolTip("Next block (→)")
-        self.btn_next_block.clicked.connect(lambda: self.step_block(1))
         self.btn_live = QtWidgets.QPushButton("Back to Live")
         self.btn_live.clicked.connect(self.back_to_live)
         self.btn_comments = QtWidgets.QPushButton("Comments (0)", checkable=True)
@@ -224,8 +221,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tb_live = [A(self.btn_run), A(self.btn_rec), tb.addSeparator(),
                          A(self.lbl_rate), A(self.rate_box)]
         self._act_lbl_rate = self._tb_live[3]
-        self._tb_review = [A(QtWidgets.QLabel("Block")), A(self.btn_prev_block), A(self.block_combo),
-                           A(self.btn_next_block)]
+        # The block shown is picked in the Blocks panel (↑ ↓); block_combo just holds which.
+        self._tb_review = []
         self._tb_acq = [A(self.lbl_window), A(self.window_box)]
         self._act_lbl_window = self._tb_acq[0]
         self._tb_acq_live = [tb.addSeparator(), A(self.comment_edit)]
@@ -287,8 +284,11 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=lambda: self.fire_stimulus())
         QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, activated=self._escape)
         # Text boxes keep their own arrow keys (Qt lets them claim the key first).
-        QtGui.QShortcut(QtGui.QKeySequence("Left"), self, activated=lambda: self.step_block(-1))
-        QtGui.QShortcut(QtGui.QKeySequence("Right"), self, activated=lambda: self.step_block(1))
+        # ← → step Analysis's block; ↑ ↓ step through the Acquisition Blocks panel.
+        QtGui.QShortcut(QtGui.QKeySequence("Left"), self, activated=lambda: self.analysis_step(-1))
+        QtGui.QShortcut(QtGui.QKeySequence("Right"), self, activated=lambda: self.analysis_step(1))
+        QtGui.QShortcut(QtGui.QKeySequence("Up"), self, activated=lambda: self.step_block(-1))
+        QtGui.QShortcut(QtGui.QKeySequence("Down"), self, activated=lambda: self.step_block(1))
 
         central = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(central)
@@ -322,6 +322,12 @@ class MainWindow(QtWidgets.QMainWindow):
         bb.setSpacing(0)
         bb.addWidget(self.channel_bar, 1)
         bb.addStretch(0)
+        self.btn_overlay_ch = QtWidgets.QPushButton("Overlay channels", checkable=True)
+        self.btn_overlay_ch.setToolTip("Draw every channel in one plot, on the same time and voltage axes")
+        self.btn_overlay_ch.setChecked(self.settings.value("overlay_channels", False, type=bool))
+        self.btn_overlay_ch.toggled.connect(self.set_channel_overlay)
+        bb.addWidget(self.btn_overlay_ch)
+        bb.addSpacing(6)
         bb.addWidget(self.btn_comments)
 
         self.scroll = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
@@ -335,16 +341,42 @@ class MainWindow(QtWidgets.QMainWindow):
         # session's blocks). Clicking one shows it; Live goes back to acquiring.
         self.blocks_panel = QtWidgets.QWidget()
         self.blocks_panel.setObjectName("blocksPanel")
-        self.blocks_panel.setFixedWidth(170)
+        self.blocks_panel.setFixedWidth(230)
         bl = QtWidgets.QVBoxLayout(self.blocks_panel)
         bl.setContentsMargins(6, 6, 6, 6)
         bl.setSpacing(4)
+        # The stimulus channel (also on the Analysis tab): its pulses sort the blocks into pages.
+        bl.addWidget(QtWidgets.QLabel("Stimulus channel"))
+        self.stim_ch = QtWidgets.QComboBox()
+        self.stim_ch.setToolTip("The channel that recorded the stimulus, set any time: blocks with the same "
+                                "stimulus go on one page. With None, the notes of each stimulus are used. "
+                                "Remembered for this session (and the same setting as on Analysis)")
+        self.stim_ch.activated.connect(lambda *_: self.set_stim_channel(self.stim_ch.currentData()))
+        bl.addWidget(self.stim_ch)
+        self.btn_reset_pages = QtWidgets.QPushButton("Reset pages")
+        self.btn_reset_pages.setToolTip("Forget the page names and moved blocks, and sort the blocks into "
+                                        "pages again from the stimulus channel")
+        self.btn_reset_pages.clicked.connect(self._reset_pages_dialog)
+        bl.addWidget(self.btn_reset_pages)
         self.blocks_title = QtWidgets.QLabel("<b>Blocks</b>")
-        self.block_list = QtWidgets.QListWidget()
-        self.block_list.setToolTip("Click a block to look at it (this stops acquiring). Live goes back, "
-                                   "and Record carries on adding to the same session")
-        self.block_list.itemClicked.connect(self._block_list_clicked)
+        bl.addSpacing(6)
         bl.addWidget(self.blocks_title)
+        self.block_list = QtWidgets.QTreeWidget()
+        self.block_list.setHeaderHidden(True)
+        self.block_list.setIndentation(12)
+        self.block_list.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.block_list.customContextMenuRequested.connect(self._block_menu)
+        # Cmd/Shift-click several blocks (or pick a page) to overlay them
+        self.block_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        # The handlers rebuild the tree, so they run once Qt has finished with the click:
+        # rebuilding it inside its own signal deletes the item Qt is still using (a crash).
+        role = QtCore.Qt.ItemDataRole.UserRole
+        self.block_list.itemClicked.connect(
+            lambda item, *_: self._later(lambda data=item.data(0, role): self._activate(data)))
+        self.block_list.itemDoubleClicked.connect(
+            lambda item, *_: self._later(lambda data=item.data(0, role): self._double_activate(data)))
+        self.block_list.itemSelectionChanged.connect(
+            lambda: self._later(lambda picked=self._selected_blocks(): self.overlay_blocks(picked)))
         bl.addWidget(self.block_list, 1)
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -455,6 +487,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_widgets, self.curve_colors, self.curve_widths = [], [], []
         self.row_widgets = []
         self._unfitted.clear()
+        self._overlay_items = []                 # they went with the plots
+        self._mirrors = []
 
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
         pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time))
@@ -505,6 +539,59 @@ class MainWindow(QtWidgets.QMainWindow):
         for c in self.curves:
             c.refresh()
 
+    def _curves_updated(self) -> None:
+        """After new data went into the curves."""
+        self._fit_new_plots()
+        for k, mirror in self._mirrors:
+            if k < len(self.curves):
+                mirror.setData(*self.curves[k].getOriginalDataset())
+
+    def set_channel_overlay(self, on: bool) -> None:
+        """Overlay channels: every channel in the first plot."""
+        self.settings.setValue("overlay_channels", bool(on))
+        if self.btn_overlay_ch.isChecked() != bool(on):
+            self.btn_overlay_ch.blockSignals(True)
+            self.btn_overlay_ch.setChecked(bool(on))
+            self.btn_overlay_ch.blockSignals(False)
+        if self.mode == LIVE:
+            self._build_live_plots()
+            self._redraw_live()
+        elif self.review_blocks:
+            self._review_names = None               # rebuild the plots for this block
+            self._show_review_block(self.block_combo.currentIndex())
+
+    def _apply_channel_overlay(self) -> None:
+        """With Overlay channels on, put a copy of each other channel's curve in the first
+        plot (in its colour) and hide the other plots: live, their rows shrink to just the
+        channel's controls; in review, their rows go."""
+        self._mirrors = []
+        if not self.btn_overlay_ch.isChecked() or len(self.plots) < 2:
+            return
+        first = self.plots[0]
+        legend = first.addLegend(offset=(-10, 10))
+        legend.clear()
+        names = [r.ch.name for r in self.rows if r.ch.enabled] if self.mode == LIVE else \
+            list(getattr(self, "_review_names", None) or [])
+        for k, (pw, curve) in enumerate(zip(self.plot_widgets, self.curves)):
+            name = names[k] if k < len(names) else f"Channel {k + 1}"
+            if k == 0:
+                legend.addItem(curve, name)
+                continue
+            mirror = TraceCurve()
+            mirror.setPen(curve.opts["pen"])
+            first.addItem(mirror)
+            legend.addItem(mirror, name)
+            self._mirrors.append((k, mirror))
+            row = pw.parentWidget()
+            if self.mode == LIVE and isinstance(row, ChannelRowWidget):
+                pw.hide()                                # keep the channel's controls, like an "off" row
+                row.setFixedHeight(row.strip.sizeHint().height())
+            elif row is not None:
+                row.hide()
+        first.setLabel("left", "all channels")
+        first.getAxis("left").enableAutoSIPrefix(False)
+        self.plots[0].setLabel("bottom", "time", units="s")
+
     def _fit_new_plots(self) -> None:
         """With auto-scale off, give a plot that has just got its first data a range
         that fits it, then leave it alone."""
@@ -524,6 +611,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.plots[0].sigXRangeChanged.connect(self._xrange_changed)
             if getattr(self, "mode", LIVE) == LIVE and not self.btn_run.isChecked():
                 self._show_stopped()     # new plots (e.g. after a rate change) start at Window
+        self._apply_channel_overlay()
 
     def _build_live_plots(self):
         """One row per channel: its controls on the left, its plot on the right.
@@ -1083,6 +1171,7 @@ class MainWindow(QtWidgets.QMainWindow):
         carries on with that session."""
         state, self._live_state = self._live_state, None
         own = state is not None and self.review_dir == state[0]
+        self._overlay_sel = []
         self._flush_review_mat()
         self._live_comments_dirty = False
         self.review_dir, self.review_blocks, self.review_block = None, [], None
@@ -1288,63 +1377,302 @@ class MainWindow(QtWidgets.QMainWindow):
 
     _LIVE, _BACK = "live", "back"
 
-    def _fill_recorded(self) -> None:
-        """The Blocks panel: in live mode, Live and the blocks recorded so far; in review,
-        the session's blocks (and Back to Live when they're this live session's)."""
-        lst = self.block_list
-        lst.blockSignals(True)
-        lst.clear()
+    # -- the Blocks panel: pages of blocks --------------------------------------------------
+    def _panel_folder(self) -> Path | None:
+        return self.review_dir if self.mode == REVIEW else self.session_dir
 
-        def add(text, data, bold=False):
-            item = QtWidgets.QListWidgetItem(text)
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, data)
-            if bold:
-                f = item.font()
-                f.setBold(True)
-                item.setFont(f)
-            lst.addItem(item)
+    def _panel_paths(self) -> list[Path]:
+        return list(self.review_blocks) if self.mode == REVIEW else list(self.blocks)
+
+    def _panel_channels(self) -> list[str]:
+        if self.mode == REVIEW:
+            return list(getattr(self, "_review_names", None) or [])
+        return [c.name for c in self.cfg.channels]
+
+    def _stim_key(self) -> str | None:
+        folder = self._panel_folder()
+        return f"stim_channel/{Path(folder).resolve()}" if folder else None
+
+    def set_stim_channel(self, name: str | None) -> None:
+        """The session's stimulus channel ("" or None: use the notes). Shared with Analysis."""
+        key = self._stim_key()
+        if key is None:
+            return
+        self.settings.setValue(key, name or "")
+        self._fill_recorded()
+        self.analysis_page.source_changed()
+
+    def _page_state(self):
+        """(pages [(name, block indices)], stimulus groups, saved changes) for the panel."""
+        paths, folder = self._panel_paths(), self._panel_folder()
+        auto = self.analysis_page.stimulus_groups_of(paths, folder) if paths else []
+        d = pagesmod.load(folder)
+        return pagesmod.apply(auto, [p.stem for p in paths], d), auto, d
+
+    def _fill_recorded(self) -> None:
+        """The Blocks panel: Live (or Back to Live), then the session's blocks on their
+        pages, each named after its page: "Baseline 1", "Baseline 2"..."""
+        role = QtCore.Qt.ItemDataRole.UserRole
+        # the stimulus channel
+        names, key = self._panel_channels(), self._stim_key()
+        saved = self.settings.value(key) if key else None
+        current = saved if saved is not None else next((n for n in names if "stim" in n.lower()), "")
+        self.stim_ch.blockSignals(True)
+        self.stim_ch.clear()
+        self.stim_ch.addItem("None (use the notes)", "")
+        for n in names:
+            self.stim_ch.addItem(n, n)
+        self.stim_ch.setCurrentIndex(max(0, self.stim_ch.findData(current)))
+        self.stim_ch.setEnabled(key is not None)
+        self.stim_ch.setToolTip(self.stim_ch.toolTip() if key else "Record a block first: the setting "
+                                "belongs to the session")
+        self.stim_ch.blockSignals(False)
+        # the tree
+        tree = self.block_list
+        tree.blockSignals(True)
+        tree.clear()
+
+        def bold(item):
+            f = item.font(0)
+            f.setBold(True)
+            item.setFont(0, f)
+            return item
 
         if self.mode == LIVE:
-            add("● Live", self._LIVE, bold=True)
-            paths = self.blocks
-        else:
-            if self._live_state is not None:
-                add("● Back to Live", self._BACK, bold=True)
-            paths = self.review_blocks
-        for i, b in enumerate(paths):
-            try:
-                add(f"{b.stem}   {session.block_info(b)['duration_s']:.1f} s", i)
-            except Exception:
-                add(b.stem, i)
-        self.blocks_title.setText(f"<b>Blocks</b> ({len(paths)})")
+            top = bold(QtWidgets.QTreeWidgetItem(["● Live"]))
+            top.setData(0, role, self._LIVE)
+            tree.addTopLevelItem(top)
+        elif self._live_state is not None:
+            top = bold(QtWidgets.QTreeWidgetItem(["● Back to Live"]))
+            top.setData(0, role, self._BACK)
+            tree.addTopLevelItem(top)
+        paths = self._panel_paths()
+        pages, _, _ = self._page_state() if paths else ([], None, None)
+        for g, (name, blocks) in enumerate(pages):
+            head = bold(QtWidgets.QTreeWidgetItem([f"{name}  ({len(blocks)})"]))
+            head.setData(0, role, ("page", name))
+            head.setIcon(0, style.dot_icon(self.analysis_page.group_color(g)))
+            head.setToolTip(0, "Double-click to rename this page; its blocks take the new name")
+            tree.addTopLevelItem(head)
+            for k, i in enumerate(blocks, 1):
+                try:
+                    dur = f"{session.block_info(paths[i])['duration_s']:.1f} s"
+                except Exception:
+                    dur = "?"
+                item = QtWidgets.QTreeWidgetItem([f"{name} {k}   ({paths[i].stem})"])
+                item.setData(0, role, ("block", i))
+                item.setToolTip(0, f"{paths[i].stem}, {dur}: click to look at it; Cmd/Shift-click several "
+                                   "to overlay them; right-click to move it to another page")
+                head.addChild(item)
+            head.setExpanded(True)
+        self.blocks_title.setText(f"<b>Blocks</b> ({len(paths)})" + (f" on {len(pages)} pages" if len(pages) > 1
+                                                                       else ""))
+        d = pagesmod.load(self._panel_folder())
+        self.btn_reset_pages.setEnabled(bool(d["renamed"] or d["moved"]))
+        tree.blockSignals(False)
         self._mark_block_list()
         busy = self.recorder.recording
-        lst.setEnabled(not busy)
-        lst.setToolTip("Stop recording to look at other blocks" if busy else
-                       "Click a block to look at it (this stops acquiring). Live goes back, and Record "
-                       "carries on adding to the same session")
-        lst.blockSignals(False)
+        tree.setEnabled(not busy)
+        tree.setToolTip("Stop recording to look at other blocks" if busy else
+                        "Click a block to look at it (this stops acquiring). Live goes back, and Record "
+                        "carries on adding to the same session")
+
+    def _items(self):
+        """Every item in the Blocks panel, pages and blocks."""
+        tree = self.block_list
+        for r in range(tree.topLevelItemCount()):
+            top = tree.topLevelItem(r)
+            yield top
+            for c in range(top.childCount()):
+                yield top.child(c)
 
     def _mark_block_list(self) -> None:
         """Select what's on screen: Live, or the block being reviewed."""
-        want = self._LIVE if self.mode == LIVE else self.block_combo.currentIndex()
-        for r in range(self.block_list.count()):
-            if self.block_list.item(r).data(QtCore.Qt.ItemDataRole.UserRole) == want:
-                self.block_list.blockSignals(True)
-                self.block_list.setCurrentRow(r)
-                self.block_list.scrollToItem(self.block_list.item(r))
-                self.block_list.blockSignals(False)
-                return
+        role = QtCore.Qt.ItemDataRole.UserRole
+        want = self._LIVE if self.mode == LIVE else ("block", self.block_combo.currentIndex())
+        tree = self.block_list
+        tree.blockSignals(True)
+        for item in self._items():
+            data = item.data(0, role)
+            if data == want:
+                if self._overlay_sel:            # don't disturb a multiple selection
+                    tree.setCurrentItem(item, 0, QtCore.QItemSelectionModel.SelectionFlag.NoUpdate)
+                else:
+                    tree.setCurrentItem(item)
+                tree.scrollToItem(item)
+            if isinstance(data, tuple) and data[0] == "block":
+                item.setSelected(data[1] in self._overlay_sel or (not self._overlay_sel and data == want))
+        tree.blockSignals(False)
 
-    def _block_list_clicked(self, item) -> None:
-        data = item.data(QtCore.Qt.ItemDataRole.UserRole)
+    def _later(self, fn) -> None:
+        """Run fn once Qt is done with the event in hand. The timer belongs to the window,
+        so nothing runs after the window's gone."""
+        if not hasattr(self, "_later_timer"):
+            self._later_q: list = []
+            self._later_timer = QtCore.QTimer(self, singleShot=True, interval=0)
+            self._later_timer.timeout.connect(self._run_later)
+        self._later_q.append(fn)
+        self._later_timer.start()
+
+    def _run_later(self) -> None:
+        q, self._later_q = self._later_q, []
+        for fn in q:
+            fn()
+
+    def _block_list_clicked(self, item, *_) -> None:
+        self._activate(item.data(0, QtCore.Qt.ItemDataRole.UserRole))
+
+    def _activate(self, data) -> None:
+        """What clicking a Blocks panel entry does: Live, Back to Live, or show a block."""
         if data in (self._LIVE, self._BACK):
             if self.mode == REVIEW:
                 self.back_to_live()
-        elif self.mode == LIVE:
-            self.browse_recorded(int(data))
+        elif isinstance(data, tuple) and data[0] == "block":
+            if self.mode == LIVE:
+                self.browse_recorded(int(data[1]))
+            else:
+                self.block_combo.setCurrentIndex(int(data[1]))
+
+    def _selected_blocks(self) -> list[int]:
+        """The blocks selected in the Blocks panel; a selected page counts as all its blocks."""
+        role = QtCore.Qt.ItemDataRole.UserRole
+        picked = set()
+        for item in self.block_list.selectedItems():
+            data = item.data(0, role)
+            if isinstance(data, tuple) and data[0] == "block":
+                picked.add(int(data[1]))
+            elif isinstance(data, tuple) and data[0] == "page":
+                picked.update(int(item.child(c).data(0, role)[1]) for c in range(item.childCount()))
+        return sorted(picked)
+
+    def overlay_blocks(self, blocks: list[int]) -> None:
+        """Overlay these blocks on the plots, each from its start and coloured by page,
+        with the block shown on top. Fewer than two: no overlay. From live mode, this
+        first opens the session's blocks (as clicking one does)."""
+        self._overlay_sel = list(blocks) if len(blocks) >= 2 else []
+        if self._overlay_sel and self.mode == LIVE:
+            self.browse_recorded(self._overlay_sel[0])
+            return                               # browsing shows the block, which draws the overlay
+        if self.mode == REVIEW and self._overlay_sel and self.block_combo.currentIndex() not in self._overlay_sel:
+            self.block_combo.setCurrentIndex(self._overlay_sel[0])
         else:
-            self.block_combo.setCurrentIndex(int(data))
+            self._draw_overlay()
+
+    def _draw_overlay(self) -> None:
+        for plot, item in self._overlay_items:
+            plot.removeItem(item)
+        self._overlay_items = []
+        if self.mode != REVIEW or len(self._overlay_sel) < 2 or not self.plots:
+            self.status.setToolTip("")
+            return
+        names = list(getattr(self, "_review_names", None) or [])
+        pages, _, _ = self._page_state()
+        page_of = {i: g for g, (_, blocks) in enumerate(pages) for i in blocks}
+        by_page: dict[int, list[dict]] = {}
+        for i in self._overlay_sel:
+            if 0 <= i < len(self.review_blocks):
+                try:
+                    blk = self.analysis_page._read(self.review_blocks[i])
+                except Exception:
+                    continue
+                by_page.setdefault(page_of.get(i, 0), []).append(blk)
+        fs = (self.review_block or {}).get("sample_rate")
+        for g, blks in by_page.items():
+            color = QtGui.QColor(self.analysis_page.group_color(g))
+            color.setAlpha(110)
+            for k, (plot, name) in enumerate(zip(self.plots, names)):
+                if self.btn_overlay_ch.isChecked():
+                    plot = self.plots[0]                 # channels overlaid: everything in one plot
+                rows = [b["data"][b["channel_names"].index(name)] for b in blks
+                        if name in b["channel_names"] and b["sample_rate"] == fs]
+                if not rows:
+                    continue
+                Y = np.full((len(rows), max(len(r) for r in rows)), np.nan)
+                for r, y in enumerate(rows):
+                    Y[r, :len(y)] = y
+                item = OverlayCurve()
+                item.mode = "peak"                   # spikes keep their height
+                item.setPen(pg.mkPen(color, width=1))
+                item.setZValue(-5)                   # the block itself stays on top
+                plot.addItem(item)
+                item.set_traces(Y, fs)
+                self._overlay_items.append((plot, item))
+        self.statusBar().showMessage(f"Overlaying {len(self._overlay_sel)} blocks (Cmd/Shift-click in "
+                                     "Blocks to change; click one block to stop)", 8000)
+
+    def _double_activate(self, data) -> None:
+        if isinstance(data, tuple) and data[0] == "page":
+            self._rename_dialog(data[1])
+
+    def _rename_dialog(self, old: str) -> None:
+        new, ok = QtWidgets.QInputDialog.getText(self, "Rename page", "Name for this page:", text=old)
+        if ok:
+            self.rename_page(old, new)
+
+    def rename_page(self, old: str, new: str) -> None:
+        """Rename a page of the Blocks panel; its blocks take the name."""
+        folder = self._panel_folder()
+        if folder is None:
+            return
+        _, auto, d = self._page_state()
+        pagesmod.save(folder, pagesmod.rename(auto, d, old, new))
+        self._fill_recorded()
+        self.analysis_page.source_changed()
+
+    def move_block(self, i: int, page: str) -> None:
+        """Put block i on page `page` (existing or new); it takes that page's name."""
+        folder = self._panel_folder()
+        if folder is None:
+            return
+        paths = self._panel_paths()
+        _, auto, d = self._page_state()
+        pagesmod.save(folder, pagesmod.move(auto, [p.stem for p in paths], d, i, page))
+        self._fill_recorded()
+        self.analysis_page.source_changed()
+
+    def _reset_pages_dialog(self) -> None:
+        if QtWidgets.QMessageBox.question(
+                self, "Reset pages", "Forget the page names you gave and the blocks you moved, and sort "
+                "the blocks into pages again from the stimulus channel?") == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.reset_pages()
+
+    def reset_pages(self) -> None:
+        """Back to the automatic pages: no names given, no blocks moved."""
+        folder = self._panel_folder()
+        if folder is None:
+            return
+        (Path(folder) / pagesmod.FILE).unlink(missing_ok=True)
+        self._fill_recorded()
+        self.analysis_page.source_changed()
+
+    def _block_menu(self, pos) -> None:
+        item = self.block_list.itemAt(pos)
+        data = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        if not isinstance(data, tuple) or self.recorder.recording:
+            return
+        menu = QtWidgets.QMenu(self)
+        if data[0] == "page":
+            menu.addAction("Rename page…", lambda: self._later(lambda: self._rename_dialog(data[1])))
+        else:
+            i = int(data[1])
+            pages, auto, d = self._page_state()
+            here = next(name for name, blocks in pages if i in blocks)
+            to = menu.addMenu("Move to page")
+            for name, _ in pages:
+                if name != here:
+                    to.addAction(name, lambda name=name: self._later(lambda: self.move_block(i, name)))
+            to.addSeparator()
+            to.addAction("New page…", lambda: self._later(lambda: self._new_page_dialog(i)))
+            home = pagesmod.auto_page(auto, i, d)
+            if home != here:
+                menu.addAction(f"Back to its stimulus page ({home})",
+                               lambda: self._later(lambda: self.move_block(i, home)))
+        menu.exec(self.block_list.viewport().mapToGlobal(pos))
+
+    def _new_page_dialog(self, i: int) -> None:
+        name, ok = QtWidgets.QInputDialog.getText(self, "New page", "Name for the new page:")
+        if ok and name.strip():
+            self.move_block(i, name)
 
     def browse_recorded(self, i: int) -> None:
         """Show block i of this live session in review. Back to Live returns to the
@@ -1353,14 +1681,17 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         state = (self.session_dir, list(self.blocks), self.session_saved, self._exported_n,
                  self._live_comments_dirty, self._recolor_policy)
+        overlay = self._overlay_sel
         self.open_session(self.session_dir, remember=False)
-        self._live_state = state
+        self._live_state, self._overlay_sel = state, overlay
         self._fill_recorded()                     # now with Back to Live
         self.block_combo.setCurrentIndex(i)
+        self._draw_overlay()                      # also when block i was already showing
 
     def open_session(self, path: str | Path, remember: bool = True):
         """Review a saved session."""
         self._live_state = None
+        self._overlay_sel = []
         path = Path(path)
         blocks = session.list_blocks(path)
         if not blocks:
@@ -1537,7 +1868,8 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.set_color(color)
         for curve, y in zip(self.curves, blk["data"]):
             curve.setData(blk["t"], y)
-        self._fit_new_plots()
+        self._curves_updated()
+        self._draw_overlay()
         self.refresh_comments()
         self._update_scroll_range()
         self._update_wiring_label()
@@ -1552,20 +1884,23 @@ class MainWindow(QtWidgets.QMainWindow):
         """The blocks the Analysis tab works on: those being reviewed, or recorded so far."""
         return list(self.review_blocks) if self.mode == REVIEW else list(self.blocks)
 
-    def step_block(self, d: int) -> None:
-        """← / →: step the block on screen. In Analysis (when it's showing and either
-        Acquisition isn't, or you're working in Analysis) its highlighted block; in
-        review, the block shown."""
-        focus = QtWidgets.QApplication.focusWidget()
-        in_analysis = focus is not None and self.analysis_page.isAncestorOf(focus)
-        if self.tabs.is_visible("analysis") and (in_analysis or not self.tabs.is_visible("acq")):
+    def analysis_step(self, d: int) -> None:
+        """← / →: Analysis's highlighted block, when Analysis is showing."""
+        if self.tabs.is_visible("analysis"):
             self.analysis_page.step(d)
+
+    def step_block(self, d: int) -> None:
+        """↑ / ↓: the next entry in the Acquisition Blocks panel, in the order it shows
+        (Live, then each page's blocks), opening it as a click would. Not while recording."""
+        if not self.tabs.is_visible("acq") or self.recorder.recording:
             return
-        if self.mode != REVIEW:
-            return
-        i = self.block_combo.currentIndex() + d
-        if 0 <= i < self.block_combo.count():
-            self.block_combo.setCurrentIndex(i)
+        role = QtCore.Qt.ItemDataRole.UserRole
+        stops = [it for it in self._items() if it.data(0, role) in (self._LIVE, self._BACK)
+                 or (isinstance(it.data(0, role), tuple) and it.data(0, role)[0] == "block")]
+        here = self._LIVE if self.mode == LIVE else ("block", self.block_combo.currentIndex())
+        k = next((n for n, it in enumerate(stops) if it.data(0, role) == here), 0)
+        if 0 <= k + d < len(stops):
+            self._block_list_clicked(stops[k + d])
 
     def _update_scroll_range(self):
         if self.review_block is None:
@@ -1799,7 +2134,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.buf_t.size and self.buf_y.shape[0] == len(self.curves):
             for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
                 curve.setData(self.buf_t - self._axis_zero, ch.to_units(y))
-            self._fit_new_plots()
+            self._curves_updated()
 
     def _set_axis_zero(self, zero: float) -> None:
         """Change which stream time the live axis shows as 0; comment lines move with it."""
@@ -2157,7 +2492,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plots[0].setXRange(t_end - self.window_box.value(), t_end, padding=0)
         for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
             curve.setData(x, ch.to_units(y))
-        self._fit_new_plots()
+        self._curves_updated()
         # drop markers that scrolled off
         t_min = x[0]
         while self.markers and self.markers[0][0] < t_min:

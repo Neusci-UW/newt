@@ -7,7 +7,6 @@ be written to the output.
 from __future__ import annotations
 
 import math
-import re
 from pathlib import Path
 
 import numpy as np
@@ -16,68 +15,11 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
 from .plotzoom import plot_widget
+from .units import (_PREFIX, _converter, _same_kind, _tidy_unit, parse_quantity,  # noqa: F401
+                    unit_factor)
 
 from . import stim as stimmod
 from .stim import Stimulus
-
-
-# SI prefixes a typed unit may carry ("u" for people without a µ key).
-_PREFIX = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6, "m": 1e-3, "k": 1e3}
-_QUANTITY = re.compile(r"^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*(\S*)\s*$", re.IGNORECASE)
-
-
-def _split_unit(u: str) -> tuple[float, str]:
-    """'mV' -> (0.001, 'v'); 'V' -> (1, 'v'). Bases compare without case."""
-    if len(u) > 1 and u[0] in _PREFIX:
-        return _PREFIX[u[0]], u[1:].lower()
-    return 1.0, u.lower()
-
-
-def unit_factor(typed: str, target: str) -> float | None:
-    """How many `target` one `typed` is, if they're the same kind of unit with
-    different SI prefixes: unit_factor('s', 'ms') == 1000. None if they differ."""
-    if typed == target:
-        return 1.0
-    (pt, bt), (pg, bg) = _split_unit(typed), _split_unit(target)
-    return pt / pg if bt == bg else None
-
-
-def _tidy_unit(typed: str, family: str) -> str:
-    """How to show a typed unit: its prefix (u -> µ) and the family's spelling of the
-    base, so 'S' shows as 's', 'us' as 'µs' and 'mv' as 'mV'."""
-    base = family[1:] if len(family) > 1 and family[0] in _PREFIX else family
-    prefix = typed[0] if len(typed) > 1 and typed[0] in _PREFIX else ""
-    return {"u": "µ", "μ": "µ"}.get(prefix, prefix) + base
-
-
-def _converter(families):
-    """convert(unit) -> factor to the base unit, for `families`: [(unit, how many base
-    units one of it is)]. Any SI prefix of a family's unit is accepted."""
-    def convert(typed):
-        for fam, k in families:
-            f = unit_factor(typed, fam)
-            if f is not None:
-                return f * k
-        return None
-    return convert
-
-
-def _same_kind(unit: str):
-    """For a field in `unit`: accept that unit with any SI prefix (ms, s, µs; Hz, kHz)."""
-    return _converter([(unit, 1.0)])
-
-
-def parse_quantity(text: str, convert, default_unit: str = "") -> tuple[float, str]:
-    """'500 mV' -> (the number in base units, 'mV'), using convert(unit) -> factor or None.
-    A bare number is in `default_unit` ('' = base units). Raises ValueError."""
-    m = _QUANTITY.match(text.replace(",", ""))
-    if not m:
-        raise ValueError(f"{text.strip()!r} isn't a number")
-    unit = m.group(2) or default_unit
-    factor = 1.0 if not unit else convert(unit)
-    if factor is None:
-        raise ValueError(f"{unit!r} isn't a unit this field understands")
-    return float(m.group(1)) * factor, unit
 
 
 # Prefixes a field may show, by base unit, smallest first. Others get µ, m and none.

@@ -247,3 +247,41 @@ def test_restart_discards_leftover_chunks_from_previous_run(tmp_path, app, setti
     assert np.all(np.diff(w.buf_t) > 0), "time went backwards in the display buffer"
     assert w.buf_t.max() < 100, "data from the previous run was drawn"
     w.close()
+
+def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp_path):
+    from pyqtgraph.Qt import QtCore
+    from neusci_daq.gui import LIVE, REVIEW, MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    role = QtCore.Qt.ItemDataRole.UserRole
+    items = lambda: [win.block_list.item(r).data(role) for r in range(win.block_list.count())]
+    assert items() == ["live"] and win.block_list.isEnabled()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(2):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.3)
+        assert not win.block_list.isEnabled()                        # not while recording
+        win.btn_rec.setChecked(False)
+    assert items() == ["live", 0, 1] and win.block_list.isEnabled()
+    sess = win.session_dir
+    win._block_list_clicked(win.block_list.item(2))                  # the second block
+    assert win.mode == REVIEW and win.review_dir == sess and win.block_combo.currentIndex() == 1
+    assert items() == ["back", 0, 1] and win.block_list.currentRow() == 2
+    assert str(sess) not in win.recent_sessions()                    # an untitled session isn't "recent"
+    win._block_list_clicked(win.block_list.item(1))                  # click another block
+    assert win.block_combo.currentIndex() == 0 and win.block_list.currentRow() == 1
+    win._block_list_clicked(win.block_list.item(0))                  # Back to Live
+    assert win.mode == LIVE and win.session_dir == sess and len(win.blocks) == 2
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)                                     # carries on in the same session
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    assert win.session_dir == sess and len(win.blocks) == 3 and items() == ["live", 0, 1, 2]
+    win.open_session(sess)                                           # a plain Open isn't "browsing"
+    assert items() == [0, 1, 2]
+    win.back_to_live()
+    assert win.session_dir is None and not win.blocks                # so it starts afresh, as before
+    win.close()

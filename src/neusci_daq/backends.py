@@ -48,6 +48,9 @@ class Backend:
         """Configure hardware in the caller's thread so setup errors raise here."""
         self.error = None
         self._stop.clear()
+        # The rate may have changed since this backend was made; hardware backends
+        # replace it in _setup with what the device actually does.
+        self.actual_rate = self.cfg.sample_rate
         self._setup()
         self._thread = threading.Thread(target=self._run, daemon=True, name="daq-acq")
         self._thread.start()

@@ -116,6 +116,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Review session.
         self.review_dir: Path | None = None
         self._review_source: Path | None = None   # the .mat an imported session came from
+        self._live_state = None              # the live session, while browsing its own blocks
         self.review_blocks: list[Path] = []
         self.review_block: dict | None = None
         self.review_color_btns: list[ColorButton] = []
@@ -160,6 +161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._rate_busy = False
         self._set_mode(LIVE)
         self._sync_setup_controls()
+        self._fill_recorded()
         open_ = self.settings.value("comments_open", True, type=bool)
         self.btn_comments.setChecked(open_)
         self.comments_panel.setVisible(open_)
@@ -329,9 +331,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.comments_panel.deleted.connect(self.delete_comment)
         self.comments_panel.jump.connect(self.jump_to)
         self.comments_panel.closed.connect(lambda: self.btn_comments.setChecked(False))
+        # Blocks, always on screen: Live and every block recorded (or, in review, the
+        # session's blocks). Clicking one shows it; Live goes back to acquiring.
+        self.blocks_panel = QtWidgets.QWidget()
+        self.blocks_panel.setObjectName("blocksPanel")
+        self.blocks_panel.setFixedWidth(170)
+        bl = QtWidgets.QVBoxLayout(self.blocks_panel)
+        bl.setContentsMargins(6, 6, 6, 6)
+        bl.setSpacing(4)
+        self.blocks_title = QtWidgets.QLabel("<b>Blocks</b>")
+        self.block_list = QtWidgets.QListWidget()
+        self.block_list.setToolTip("Click a block to look at it (this stops acquiring). Live goes back, "
+                                   "and Record carries on adding to the same session")
+        self.block_list.itemClicked.connect(self._block_list_clicked)
+        bl.addWidget(self.blocks_title)
+        bl.addWidget(self.block_list, 1)
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
+        row.addWidget(self.blocks_panel)
         row.addWidget(self.plot_area, 1)
         row.addWidget(self.comments_panel)
         lay.addLayout(row, 1)
@@ -1060,7 +1078,11 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def back_to_live(self):
-        """Leave review. The next Record starts a new untitled session."""
+        """Leave review. The next Record starts a new untitled session, unless the
+        review was of this live session's own blocks (Recorded blocks): then it
+        carries on with that session."""
+        state, self._live_state = self._live_state, None
+        own = state is not None and self.review_dir == state[0]
         self._flush_review_mat()
         self._live_comments_dirty = False
         self.review_dir, self.review_blocks, self.review_block = None, [], None
@@ -1068,9 +1090,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.session_dir, self.blocks, self._exported_n = None, [], 0
         self.session_saved = False
         self._recolor_policy = None          # a new session asks again
+        if own:
+            (self.session_dir, self.blocks, self.session_saved, self._exported_n,
+             self._live_comments_dirty, self._recolor_policy) = state
+            self._live_comments_dirty = self._live_comments_dirty or self.session_saved
         self._build_live_plots()
         self._set_mode(LIVE)
         self.status.setText("")
+        self._fill_recorded()
         self.analysis_page.source_changed()
 
     # ======================================================================
@@ -1259,8 +1286,81 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f"Saved to {path}", 10000)
         return path
 
-    def open_session(self, path: str | Path):
+    _LIVE, _BACK = "live", "back"
+
+    def _fill_recorded(self) -> None:
+        """The Blocks panel: in live mode, Live and the blocks recorded so far; in review,
+        the session's blocks (and Back to Live when they're this live session's)."""
+        lst = self.block_list
+        lst.blockSignals(True)
+        lst.clear()
+
+        def add(text, data, bold=False):
+            item = QtWidgets.QListWidgetItem(text)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, data)
+            if bold:
+                f = item.font()
+                f.setBold(True)
+                item.setFont(f)
+            lst.addItem(item)
+
+        if self.mode == LIVE:
+            add("● Live", self._LIVE, bold=True)
+            paths = self.blocks
+        else:
+            if self._live_state is not None:
+                add("● Back to Live", self._BACK, bold=True)
+            paths = self.review_blocks
+        for i, b in enumerate(paths):
+            try:
+                add(f"{b.stem}   {session.block_info(b)['duration_s']:.1f} s", i)
+            except Exception:
+                add(b.stem, i)
+        self.blocks_title.setText(f"<b>Blocks</b> ({len(paths)})")
+        self._mark_block_list()
+        busy = self.recorder.recording
+        lst.setEnabled(not busy)
+        lst.setToolTip("Stop recording to look at other blocks" if busy else
+                       "Click a block to look at it (this stops acquiring). Live goes back, and Record "
+                       "carries on adding to the same session")
+        lst.blockSignals(False)
+
+    def _mark_block_list(self) -> None:
+        """Select what's on screen: Live, or the block being reviewed."""
+        want = self._LIVE if self.mode == LIVE else self.block_combo.currentIndex()
+        for r in range(self.block_list.count()):
+            if self.block_list.item(r).data(QtCore.Qt.ItemDataRole.UserRole) == want:
+                self.block_list.blockSignals(True)
+                self.block_list.setCurrentRow(r)
+                self.block_list.scrollToItem(self.block_list.item(r))
+                self.block_list.blockSignals(False)
+                return
+
+    def _block_list_clicked(self, item) -> None:
+        data = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if data in (self._LIVE, self._BACK):
+            if self.mode == REVIEW:
+                self.back_to_live()
+        elif self.mode == LIVE:
+            self.browse_recorded(int(data))
+        else:
+            self.block_combo.setCurrentIndex(int(data))
+
+    def browse_recorded(self, i: int) -> None:
+        """Show block i of this live session in review. Back to Live returns to the
+        session (it isn't closed), so the next Record adds to it."""
+        if self.recorder.recording or not (0 <= i < len(self.blocks)) or self.session_dir is None:
+            return
+        state = (self.session_dir, list(self.blocks), self.session_saved, self._exported_n,
+                 self._live_comments_dirty, self._recolor_policy)
+        self.open_session(self.session_dir, remember=False)
+        self._live_state = state
+        self._fill_recorded()                     # now with Back to Live
+        self.block_combo.setCurrentIndex(i)
+
+    def open_session(self, path: str | Path, remember: bool = True):
         """Review a saved session."""
+        self._live_state = None
         path = Path(path)
         blocks = session.list_blocks(path)
         if not blocks:
@@ -1280,9 +1380,11 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 self.block_combo.addItem(f"{b.stem}  (unreadable)")
         self.block_combo.blockSignals(False)
-        self._remember(path)
+        if remember:
+            self._remember(path)
         self.statusBar().showMessage(f"Opened {path.name} ({len(blocks)} block(s)) for review", 10000)
         self._show_review_block(0)
+        self._fill_recorded()
         self.analysis_page.source_changed()
 
     def open_mat(self, path: str | Path) -> Path:
@@ -1440,6 +1542,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_scroll_range()
         self._update_wiring_label()
         self.plots[0].setXRange(0, min(self.window_box.value(), max(blk["duration_s"], 1e-3)), padding=0)
+        self._mark_block_list()
         self.status.setText(
             f"Reviewing {self.review_blocks[index].stem} ({index + 1}/{len(self.review_blocks)}) · "
             f"{blk['duration_s']:.2f} s · {blk['sample_rate']:,.0f} Hz/ch · "
@@ -1450,7 +1553,14 @@ class MainWindow(QtWidgets.QMainWindow):
         return list(self.review_blocks) if self.mode == REVIEW else list(self.blocks)
 
     def step_block(self, d: int) -> None:
-        """Review: show the block `d` pages on (or back)."""
+        """← / →: step the block on screen. In Analysis (when it's showing and either
+        Acquisition isn't, or you're working in Analysis) its highlighted block; in
+        review, the block shown."""
+        focus = QtWidgets.QApplication.focusWidget()
+        in_analysis = focus is not None and self.analysis_page.isAncestorOf(focus)
+        if self.tabs.is_visible("analysis") and (in_analysis or not self.tabs.is_visible("acq")):
+            self.analysis_page.step(d)
+            return
         if self.mode != REVIEW:
             return
         i = self.block_combo.currentIndex() + d
@@ -1609,6 +1719,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_rec.setIcon(style.dot_icon("#ffffff", square=True))
             self._lock_channels(True)
             self._set_comment_box(True)
+            self._fill_recorded()
         else:
             self.recorder.stop()
             self._lock_channels(False)
@@ -1618,6 +1729,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
             self._set_comment_box(False)
             self.analysis_page.source_changed()          # a new block to analyse
+        self._fill_recorded()
         # Starting a block keeps the previous block's comment lines: its data is
         # still on screen (now at negative times), and they scroll off with it.
         self.refresh_comments(redraw_markers=not on)

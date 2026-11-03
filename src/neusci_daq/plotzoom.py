@@ -8,6 +8,8 @@ Acquisition plots zoom by changing Window instead (see gui._TraceViewBox).
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore
@@ -196,7 +198,9 @@ class OverlayCurve(TraceCurve):
             return
         block = Y[:, a:a + n * ds].reshape(rows, n, ds)
         start = (a + np.arange(n) * ds) / fs
-        with np.errstate(all="ignore"):
+        # shorter blocks are padded with NaN: all-NaN groups are expected, not a problem
+        with np.errstate(all="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
             if ds == 1:
                 xs, ys = start, block[:, :, 0]
             elif self.mode == "peak":

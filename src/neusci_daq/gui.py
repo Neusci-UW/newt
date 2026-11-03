@@ -47,7 +47,7 @@ from .channels import ChannelRow, ChannelRowWidget, ChannelStrip, ColorButton
 from .comments import CommentPopup, CommentsPanel
 from .config import Channel, Config, valid_inputs
 from .export import to_labchart_mat
-from .plotzoom import WheelViewBox, light_curve
+from .plotzoom import TraceCurve, WheelViewBox
 from .recorder import Recorder
 from .stim import Stimulus
 from .stimout import make_output
@@ -147,6 +147,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.plot_mode = mode if mode in theme.THEMES else theme.DARK
         # Off: each plot keeps its voltage range (fitted once when it first gets data).
         self.auto_scale_y = self.settings.value("auto_scale_y", True, type=bool)
+        mode = self.settings.value("trace_mode", "mean")
+        TraceCurve.mode = mode if mode in ("mean", "peak") else "mean"
         self._unfitted: set = set()      # plots still waiting for that first fit
         self._build_ui()
         self._build_menu()
@@ -391,6 +393,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_auto_y.toggled.connect(self.set_auto_scale_y)
         self.act_auto_y.setToolTip("On: each plot's voltage axis keeps resizing to fit its trace. "
                                    "Off: it stays where it is (Cmd+scroll to zoom it).")
+        tm = v.addMenu("&Zoomed-out traces")
+        group = QtGui.QActionGroup(self)
+        self.act_trace_mode = {}
+        for key, text, tip in (
+                ("mean", "&Average (smooth)",
+                 "Each pixel shows the average of the samples it covers, a moving average. "
+                 "Smooth, but spikes shrink when zoomed out."),
+                ("peak", "&Min and max (keeps spikes)",
+                 "Each pixel shows the lowest and highest sample it covers, so spikes stay visible.")):
+            a = tm.addAction(text, lambda key=key: self.set_trace_mode(key))
+            a.setCheckable(True)
+            a.setChecked(TraceCurve.mode == key)
+            a.setToolTip(tip)
+            group.addAction(a)
+            self.act_trace_mode[key] = a
+        tm.setToolTipsVisible(True)
         v.setToolTipsVisible(True)
 
 
@@ -420,9 +438,7 @@ class MainWindow(QtWidgets.QMainWindow):
             p.getAxis("left").enableAutoSIPrefix(False)
         p.getAxis("left").setWidth(70)   # same width on every plot, so time axes line up
         p.showGrid(x=True, y=True, alpha=0.2)
-        # Peak downsampling keeps spikes visible when zoomed out.
-        p.setDownsampling(auto=True, mode="peak")
-        p.setClipToView(True)
+        # No pyqtgraph downsampling: TraceCurve does its own, which doesn't alias.
         p.enableAutoRange(axis="y", enable=self.auto_scale_y)
         p.setAutoVisible(y=True)
         if not self.auto_scale_y:
@@ -430,7 +446,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plots:
             p.setXLink(self.plots[0])
         self.plots.append(p)
-        self.curves.append(light_curve(p.plot()))
+        curve = TraceCurve()
+        p.addItem(curve)
+        self.curves.append(curve)
         self.curve_colors.append(color)
         self.curve_widths.append(float(width))
         self._set_curve_color(len(self.curves) - 1, color)
@@ -447,6 +465,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unfitted.clear()
         for p in self.plots:
             p.enableAutoRange(axis="y", enable=self.auto_scale_y)
+
+    def set_trace_mode(self, mode: str) -> None:
+        """View › Zoomed-out traces: "mean" (moving average) or "peak" (min and max)."""
+        TraceCurve.mode = mode if mode in ("mean", "peak") else "mean"
+        self.settings.setValue("trace_mode", TraceCurve.mode)
+        self.act_trace_mode[TraceCurve.mode].setChecked(True)
+        for c in self.curves:
+            c.refresh()
 
     def _fit_new_plots(self) -> None:
         """With auto-scale off, give a plot that has just got its first data a range
@@ -1985,10 +2011,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         x = self.buf_t - self._axis_zero
         t_end = x[-1]
+        # the range first, so each TraceCurve groups its samples once for this frame
+        self.plots[0].setXRange(t_end - self.window_box.value(), t_end, padding=0)
         for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
             curve.setData(x, ch.to_units(y))
         self._fit_new_plots()
-        self.plots[0].setXRange(t_end - self.window_box.value(), t_end, padding=0)
         # drop markers that scrolled off
         t_min = x[0]
         while self.markers and self.markers[0][0] < t_min:

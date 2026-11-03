@@ -109,9 +109,8 @@ class Config:
     stim_monitor: str = ""        # input that records the stimulus (wired from the output), or ""
     stim_units: str = "V"         # units the Stimulator shows levels in, e.g. "µA" behind an isolator
     stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
-    # Simulated backend only: what each input records (see simulation.py); inputs
-    # not listed use the defaults
-    sim_inputs: list = field(default_factory=list)
+    # Simulated backend only: the cells it simulates and what each input records
+    sim_network: simulation.Network = field(default_factory=simulation.default_network)
 
     @property
     def aggregate_rate(self) -> float:
@@ -154,7 +153,7 @@ def load(path: str | Path) -> Config:
         stim_monitor=str(st.get("monitor", "")).lower(),
         stim_units=str(st.get("units", "V")).strip() or "V",
         stim_scale=float(st.get("scale", 1.0)),
-        sim_inputs=simulation.from_toml(sim),
+        sim_network=simulation.from_toml(sim),
     ).with_channels(chans)
     validate(cfg)
     return cfg
@@ -202,7 +201,7 @@ def validate(cfg: Config) -> None:
             raise ValueError(f"Two channels are named {ch.name!r}; give each its own name.")
         seen[ch.physical] = ch.name
         names.add(ch.name)
-    simulation.validate(cfg.sim_inputs)
+    simulation.validate(cfg.sim_network)
     if cfg.backend == "simulated":
         return
     for ch in cfg.channels:
@@ -243,8 +242,8 @@ def dumps(cfg: Config) -> str:
     ]
     if cfg.stim_units != "V" or cfg.stim_scale != 1.0:
         lines += [f"units = {_s(cfg.stim_units)}", f"scale = {cfg.stim_scale:g}"]
-    if cfg.sim_inputs:
-        lines += ["", "[simulated]"] + simulation.to_toml_lines(cfg.sim_inputs)
+    if cfg.sim_network != simulation.default_network():      # only when it's been changed
+        lines += ["", "[simulated]"] + simulation.to_toml_lines(cfg.sim_network)
     for c in cfg.channels + cfg.spare_channels:
         lines += ["", "[[channels]]",
                   f"physical = {_s(c.physical)}",

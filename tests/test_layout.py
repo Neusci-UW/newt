@@ -1,4 +1,5 @@
 """Tabs, split view, hover strips, line thickness, whole-app light/dark, stimulator chip."""
+import numpy as np
 import pytest
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
@@ -500,7 +501,8 @@ def test_voltage_auto_scale_can_be_turned_off(app, win):
     pump(app, 0.5)
     vb = win.plots[0].vb
     lo, hi = vb.viewRange()[1]
-    assert not vb.autoRangeEnabled()[1] and lo < 0 < hi and hi - lo < 5
+    y = win.curves[0].getOriginalDataset()[1]
+    assert not vb.autoRangeEnabled()[1] and lo <= np.median(y) <= hi and hi - lo < 5   # fits the trace
     win.act_auto_y.trigger()                                 # back on
     assert win.auto_scale_y and vb.autoRangeEnabled()[1]
     win.btn_run.setChecked(False)
@@ -564,3 +566,100 @@ def test_trials_and_stimulator_plots_use_the_same_wheel_rules(app, win):
         vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))       # Cmd: voltage zooms, time stays
         assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < 2
         assert vb.viewRange()[0] == pytest.approx([lo + span / 10, hi + span / 10])
+
+
+# ---------------------------------------------------------------- zoomed-out traces
+def test_zoomed_out_traces_average_without_shimmer(app):
+    import numpy as np
+    import pyqtgraph as pg
+    from neusci_daq.plotzoom import TraceCurve
+    pw = pg.PlotWidget()
+    pw.resize(600, 300)
+    pw.show()
+    curve = TraceCurve()
+    pw.getPlotItem().addItem(curve)
+    fs = 20000
+    rng = np.random.default_rng(0)
+    y_all = rng.standard_normal(fs * 12)
+
+    def show(start):                                         # a 10 s view, scrolled by `start` samples
+        x = np.arange(start, start + fs * 10) / fs
+        pw.getPlotItem().setXRange(x[0], x[-1], padding=0)
+        curve.setData(x, y_all[start:start + fs * 10])
+        app.processEvents()
+        return curve.getData()
+
+    TraceCurve.mode = "mean"
+    x1, y1 = show(0)
+    assert len(x1) < 2000                                    # ~1 point per pixel, not 200,000
+    assert np.std(y1) < 0.2                                  # an average: the noise is smoothed out
+    x2, y2 = show(37)                                        # scroll by a few samples
+    common = np.intersect1d(np.round(x1, 9), np.round(x2, 9))
+    assert len(common) > 0.9 * len(x1)                       # the same groups, not regrouped
+    i1 = np.isin(np.round(x1, 9), common)
+    i2 = np.isin(np.round(x2, 9), common)
+    assert np.allclose(y1[i1], y2[i2])                       # with the same values: no shimmer
+    assert len(curve.getOriginalDataset()[0]) == fs * 10     # the full trace is kept
+
+    TraceCurve.mode = "peak"
+    curve.refresh()
+    _, yp = curve.getData()
+    assert yp.max() > 3                                      # min/max keeps the extremes
+    TraceCurve.mode = "mean"
+    pw.close()
+
+
+def test_zoomed_out_trace_mode_is_a_remembered_menu_choice(app, win, tmp_path):
+    from neusci_daq.gui import MainWindow
+    from neusci_daq.plotzoom import TraceCurve
+    assert win.act_trace_mode["mean"].isChecked()            # average by default
+    win.act_trace_mode["peak"].trigger()
+    assert TraceCurve.mode == "peak" and win.settings.value("trace_mode") == "peak"
+    w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)
+    assert w2.act_trace_mode["peak"].isChecked()
+    w2.close()
+    win.set_trace_mode("mean")
+
+
+def test_zooming_time_out_doesnt_shrink_the_auto_scaled_voltage_axis(app, win):
+    """Averaging shrinks noise when zoomed out; auto-scale must follow the samples,
+    or the voltage axis zooms along with time."""
+    from neusci_daq import simulation as sim
+    win.resize(1200, 700)
+    win.show()
+    win.cfg.sim_network = sim.default_network()
+    win.cfg.sim_network.recordings = [sim.Recording("ai0", 0, "extracellular", noise_v=0.05)]
+    win.window_box.setValue(0.2)
+    win.btn_run.setChecked(True)
+    pump(app, 2.5)
+    vb = win.plots[0].vb
+    spans = []
+    for w in (0.2, 2.0):
+        win.window_box.setValue(w)
+        pump(app, 0.4)
+        lo, hi = vb.viewRange()[1]
+        spans.append(hi - lo)
+    win.btn_run.setChecked(False)
+    assert spans[1] > 0.9 * spans[0]
+
+
+def test_real_wheel_events_zoom_only_time(app, win):
+    win.resize(1200, 700)
+    win.show()
+    pump(app, 0.1)
+    pw = win.plot_widgets[0]
+    vb = pw.getPlotItem().vb
+    win.set_auto_scale_y(False)
+    vb.setYRange(-1, 1, padding=0)
+    pos = QtCore.QPointF(pw.width() / 2, pw.height() / 2)
+    for pixel in (False, True):                              # a mouse wheel, then a trackpad
+        before = win.window_box.value()
+        d = 120 if not pixel else 12
+        ev = QtGui.QWheelEvent(pos, pw.mapToGlobal(pos), QtCore.QPoint(0, d if pixel else 0), QtCore.QPoint(0, d),
+                               QtCore.Qt.MouseButton.NoButton, QtCore.Qt.KeyboardModifier.NoModifier,
+                               QtCore.Qt.ScrollPhase.NoScrollPhase, False)
+        QtWidgets.QApplication.sendEvent(pw.viewport(), ev)
+        pump(app, 0.05)
+        assert win.window_box.value() < before
+        assert vb.viewRange()[1] == pytest.approx([-1, 1])
+    win.set_auto_scale_y(True)

@@ -84,95 +84,111 @@ class Backend:
 
 
 class SimulatedBackend(Backend):
-    """Fake signals for developing and teaching without hardware. What each input
-    records (noise, sine, EPSPs after each stimulus pulse, and spiking cells whose
-    rate follows the EPSPs) is set per input on the Simulation tab; see simulation.py.
-    Settings changed while running apply from the next chunk."""
+    """Fake recordings for developing and teaching without hardware: a small network
+    of integrate-and-fire cells, each input recording one of them (see
+    simulation.py, and the Simulation tab). Settings changed while running apply
+    from the next chunk."""
 
     _pending = None    # (monitor input, waveform at the input rate) from SimulatedOutput
 
     def _setup(self):
         self._rng = np.random.default_rng(0)
         self._stim = None             # (monitor input, waveform, position) being played
-        self._epsp: dict[str, np.ndarray] = {}    # per input: depolarization still to come
+        self._net = None              # NetworkState, made on the first chunk
+        self._net_cfg = None          # the settings it was made from
         self._tail: dict[str, np.ndarray] = {}    # per input: spike samples past the last chunk
-        self._last_spike: dict = {}               # (input, cell #) -> sample index of last spike
-        self._shapes: dict = {}                   # (cell, fs) -> spike_shape
+        self._spike_log: list[tuple[float, int]] = []   # (time s, cell) of recent spikes
+        self._time = 0.0
 
     def inject(self, monitor: str, wave: np.ndarray, rate: float) -> None:
-        """Play a stimulus: `wave` appears on the `monitor` input, and every other
-        input gets an EPSP per pulse (simulation only)."""
+        """Play a stimulus: `wave` appears on the `monitor` input, and its pulses
+        reach the cells that the stimulus drives."""
         fs = self.cfg.sample_rate
         t_in = np.arange(len(wave)) / rate
         t_ai = np.arange(0, len(wave) / rate, 1.0 / fs)
         w = np.interp(t_ai, t_in, wave) if len(wave) > 1 else np.asarray(wave, float)
         self._pending = (monitor, w)
 
-    def _start_stimulus(self, monitor, w, inputs, fs):
-        self._stim = (monitor, w, 0)
-        onsets = sim.pulse_onsets(w)
-        for ch in self.cfg.channels:
-            inp = sim.input_for(inputs, ch.physical)
-            if ch.physical == monitor or not onsets or not inp.epsp_v_per_v:
-                continue
-            k = sim.epsp_shape(inp, fs)
-            resp = np.zeros(onsets[-1][0] + len(k))
-            for i, amp in onsets:
-                resp[i:i + len(k)] += inp.epsp_v_per_v * amp * k
-            old = self._epsp.get(ch.physical, np.zeros(0))
-            if len(old) < len(resp):
-                old = np.concatenate([old, np.zeros(len(resp) - len(old))])
-            old[:len(resp)] += resp                   # EPSPs sum with any still going
-            self._epsp[ch.physical] = old
+    def rates(self, window_s: float = 10.0) -> list[float]:
+        """Each cell's firing rate over the last `window_s` seconds (spikes/s)."""
+        n = len(self.cfg.sim_network.cells)
+        span = min(window_s, max(self._time, 1e-9))
+        counts = np.zeros(n)
+        for t, c in list(self._spike_log):
+            if t >= self._time - window_s and c < n:
+                counts[c] += 1
+        return list(counts / span)
 
-    def _take_epsp(self, phys: str, cs: int) -> np.ndarray:
-        e = self._epsp.get(phys, np.zeros(0))
-        d = np.zeros(cs)
-        d[:min(cs, len(e))] = e[:cs]
-        self._epsp[phys] = e[cs:]
-        return d
+    def _network(self) -> sim.NetworkState:
+        net = self.cfg.sim_network                    # may be replaced while running
+        if self._net is None:
+            self._net = sim.NetworkState(net, self._rng)
+        elif net is not self._net_cfg:
+            self._net.configure(net)
+        self._net_cfg = net
+        return self._net
 
-    def _spikes(self, phys: str, cells, d: np.ndarray, idx: int, fs: float) -> np.ndarray:
-        """Spikes for this chunk on one input, each cell firing at cell.rate(d). A
-        spike that runs past the chunk's end is added to the start of the next one."""
-        rng, cs = self._rng, len(d)
-        shapes = []
-        for c in cells:
-            key = (tuple(vars(c).values()), fs)
-            if key not in self._shapes:
-                self._shapes[key] = sim.spike_shape(c, fs)
-            shapes.append(self._shapes[key])
-        tail = self._tail.get(phys, np.zeros(0))
-        pad = max([len(w) for w, _ in shapes] + [0]) + int(np.ceil(0.018 * fs)) + 1
-        out = np.zeros(cs + max(pad, len(tail)))
-        out[:len(tail)] += tail
-        refractory = max(1, int(round(sim.REFRACTORY_MS / 1000 * fs)))
-        for n, (c, (w, trough)) in enumerate(zip(cells, shapes)):
-            last = self._last_spike.get((phys, n), -10 ** 12)
-            for j in np.flatnonzero(rng.random(cs) < c.rate(d) / fs):
-                if idx + j - last < refractory:
-                    continue
-                gain = 1 + 0.05 * rng.standard_normal()           # each spike's size varies ~5%
-                for _ in range(1 + (rng.integers(1, 4) if rng.random() < c.burst else 0)):
-                    a = j - trough                                # where the spike starts in this chunk
-                    out[max(a, 0):a + len(w)] += gain * w[max(-a, 0):]
-                    last = idx + j
-                    j += max(refractory, int(round(rng.uniform(3, 6) * 1e-3 * fs)))
-                    gain *= 0.8                                   # bursts shrink
-            self._last_spike[(phys, n)] = last
-        self._tail[phys] = out[cs:].copy()
-        return out[:cs]
+    def _record(self, rec: sim.Recording, cell: sim.Cell, v_mv: np.ndarray, spikes_s: list[float],
+                t: np.ndarray, fs: float) -> np.ndarray:
+        """One input's trace for this chunk, from its cell's membrane potential (mV at
+        the chunk's samples) and spike times (s from the chunk's start)."""
+        cs = len(t)
+        if rec.kind == "intracellular":
+            shape = sim.intracellular_ap(cell, fs)
+            trace_mv = v_mv.copy()
+            tail = self._tail.get(rec.physical)
+            if tail is not None:                       # an action potential from the last chunk
+                m = min(cs, len(tail))
+                trace_mv[:m] = tail[:m]
+            nxt = None
+            for ts in spikes_s:
+                i = int(round(ts * fs))
+                end = i + len(shape)
+                if end > cs:
+                    nxt = shape[cs - i:] if i < cs else shape
+                trace_mv[i:min(end, cs)] = shape[:min(end, cs) - i]
+            self._tail[rec.physical] = nxt
+            y = rec.gain * trace_mv / 1000.0
+        else:
+            w, trough = sim.spike_shape(cell, fs)
+            tail = self._tail.get(rec.physical)
+            out = np.zeros(cs + len(w))
+            if tail is not None:
+                out[:len(tail)] += tail
+            for ts in spikes_s:
+                a = int(round(ts * fs)) - trough
+                out[max(a, 0):a + len(w)] += w[max(-a, 0):]
+            self._tail[rec.physical] = out[cs:].copy()
+            y = out[:cs]
+        return y + rec.sine_v * np.sin(2 * np.pi * rec.sine_hz * t) + rec.noise_v * self._rng.standard_normal(cs)
 
     def _loop(self):
         fs, cs = self.cfg.sample_rate, self.cfg.chunk_size
         idx, t0 = 0, time.perf_counter()
+        steps_done = 0
         while not self._stop.is_set():
-            inputs = self.cfg.sim_inputs                  # may be edited while running
+            net_cfg = self.cfg.sim_network
+            state = self._network()
             t = (idx + np.arange(cs)) / fs
             if self._pending is not None:
                 monitor, w = self._pending
                 self._pending = None
-                self._start_stimulus(monitor, w, inputs, fs)
+                self._stim = (monitor, w, 0)
+                state.stimulate([(i / fs, amp) for i, amp in sim.pulse_onsets(w)])
+            # run the network up to the end of this chunk
+            steps = int(round((idx + cs) / fs / sim.SIM_DT)) - steps_done
+            v, spikes = state.run(max(steps, 0))
+            t_net = (steps_done + np.arange(len(v))) * sim.SIM_DT
+            steps_done += len(v)
+            chunk_start = idx / fs
+            by_cell: dict[int, list[float]] = {}
+            for k, c in spikes:
+                ts = t_net[k]
+                by_cell.setdefault(c, []).append(ts - chunk_start)
+                self._spike_log.append((ts, c))
+            self._time = (idx + cs) / fs
+            while self._spike_log and self._spike_log[0][0] < self._time - 30:
+                self._spike_log.pop(0)
             stim = np.zeros(cs)
             if self._stim is not None:
                 monitor, w, pos = self._stim
@@ -184,11 +200,10 @@ class SimulatedBackend(Backend):
                 if ch.physical == self.cfg.stim_monitor:
                     data[i] = 0.002 * self._rng.standard_normal(cs) + stim    # a clean wire
                     continue
-                inp = sim.input_for(inputs, ch.physical)
-                d = self._take_epsp(ch.physical, cs)
-                data[i] = (inp.sine_v * np.sin(2 * np.pi * inp.sine_hz * t)
-                           + inp.noise_v * self._rng.standard_normal(cs)
-                           + d + self._spikes(ch.physical, inp.cells, d, idx, fs))
+                rec = sim.recording_for(net_cfg, ch.physical)
+                c = min(rec.cell, len(net_cfg.cells) - 1)
+                v_mv = np.interp(t, t_net, v[:, c]) if len(v) else np.full(cs, state.v[c])
+                data[i] = self._record(rec, net_cfg.cells[c], v_mv, by_cell.get(c, []), t, fs)
             self._publish(Chunk(data, t, idx))
             idx += cs
             # pace to real time

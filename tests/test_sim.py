@@ -1,7 +1,8 @@
-"""The simulated recording: per-input settings, EPSPs, voltage-dependent firing, and the tab."""
+"""The simulated network: integrate-and-fire cells, synapses, recordings, config and the tab."""
+import time
+
 import numpy as np
 import pytest
-from scipy.signal import find_peaks
 
 from neusci_daq import config, simulation as sim
 from neusci_daq.backends import SimulatedBackend
@@ -11,139 +12,209 @@ from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
 FS = 20000.0
 
 
-def backend(inputs=(), monitor=""):
-    cfg = config.Config(backend="simulated", sample_rate=FS, chunk_size=1000,
-                        channels=[config.Channel("ai0", "A"), config.Channel("ai1", "B")],
-                        sim_inputs=list(inputs), stim_monitor=monitor)
+def spikes_of(spikes, cell):
+    return [k for k, c in spikes if c == cell]
+
+
+# ---------------------------------------------------------------- the cells
+def test_cells_fire_now_and_then_at_rest():
+    st = sim.NetworkState(sim.default_network(), np.random.default_rng(0))
+    v, spikes = st.run(int(20 / sim.SIM_DT))                      # 20 s
+    for i in range(3):
+        assert 0.3 < len(spikes_of(spikes, i)) / 20 < 5            # ~1-2 spikes/s
+    assert v.max() < -49 and v.min() > -90                         # held below threshold; resets
+
+
+def test_a_cell_fires_at_threshold_and_respects_its_refractory_period():
+    net = sim.Network([sim.Cell(drive_mv=40, noise_mv=0, refractory_ms=5)])   # driven past threshold
+    net.set_weights(np.zeros((1, 1)))
+    _, spikes = sim.NetworkState(net, np.random.default_rng(0)).run(int(1 / sim.SIM_DT))
+    gaps = np.diff([k for k, _ in spikes]) * sim.SIM_DT
+    assert len(spikes) > 10 and gaps.min() >= 0.005 - 1e-9
+
+
+def test_synapse_sizes_are_the_psp_in_mv():
+    net = sim.Network([sim.Cell(drive_mv=0, noise_mv=0, stimulus=10.0), sim.Cell(drive_mv=0, noise_mv=0)],
+                      synapse_delay_ms=2)
+    net.set_weights(np.zeros((2, 2)))
+    st = sim.NetworkState(net, np.random.default_rng(0))
+    st.stimulate([(0.0, 1.0)])                                      # 1 V pulse: a 10 mV PSP on cell 1
+    v, _ = st.run(int(0.1 / sim.SIM_DT))
+    assert v[:, 0].max() - (-70) == pytest.approx(10, abs=0.1)
+    assert v[:, 1].max() == pytest.approx(-70, abs=1e-6)            # cell 2 isn't driven
+    assert np.argmax(v[:, 0]) * sim.SIM_DT > 0.002                  # after the synaptic delay
+
+
+def test_activity_spreads_along_excitatory_synapses_and_inhibition_hyperpolarizes():
+    net = sim.default_network()                                     # 1 -> 2 -> 3, 3 -| 1
+    st = sim.NetworkState(net, np.random.default_rng(1))
+    hits = np.zeros(3)
+    for _ in range(30):
+        st.stimulate([(0.0, 1.0)])
+        _, sp = st.run(int(1 / sim.SIM_DT))
+        for i in range(3):
+            hits[i] += any(c == i and k * sim.SIM_DT < 0.03 for k, c in sp)
+    assert hits[0] == 30 and hits[1] > 20 and hits[2] > 15          # down the chain
+    quiet = sim.Network([sim.Cell(noise_mv=0, drive_mv=0, stimulus=40), sim.Cell(noise_mv=0, drive_mv=0)])
+    quiet.set_weights(np.array([[0, -10.0], [0, 0]]))               # 1 inhibits 2
+    st = sim.NetworkState(quiet, np.random.default_rng(0))
+    st.stimulate([(0.0, 1.0)])
+    v, sp = st.run(int(0.1 / sim.SIM_DT))
+    assert spikes_of(sp, 0) and v[:, 1].min() == pytest.approx(-80, abs=0.2)   # a 10 mV IPSP
+
+
+def test_changing_settings_while_running_keeps_the_cells():
+    net = sim.default_network()
+    st = sim.NetworkState(net, np.random.default_rng(0))
+    st.run(1000)
+    v = st.v.copy()
+    net2 = sim.copy_network(net)
+    net2.cells[0].threshold_mv = -45
+    st.configure(net2)
+    assert np.array_equal(st.v, v) and st.thr[0] == -45
+    sim.resize(net2, 5)
+    st.configure(net2)
+    assert len(st.v) == 5
+
+
+def test_resize_keeps_settings_and_synapses():
+    net = sim.default_network()
+    net.cells[1].tau_ms = 25
+    sim.resize(net, 5)
+    assert len(net.cells) == 5 and net.cells[1].tau_ms == 25 and net.weights()[0, 1] == 15
+    net.recordings = [sim.Recording("ai0", cell=4)]
+    sim.resize(net, 2)
+    assert net.weights().shape == (2, 2) and net.recordings[0].cell == 1
+    sim.resize(net, 50)
+    assert len(net.cells) == sim.MAX_CELLS
+
+
+# ---------------------------------------------------------------- what an input records
+def test_backend_records_intracellular_and_extracellular():
+    net = sim.default_network()
+    net.recordings = [sim.Recording("ai0", 0, "intracellular", gain=10, noise_v=0),
+                      sim.Recording("ai1", 1, "extracellular", noise_v=0)]
+    cfg = config.Config(backend="simulated", sample_rate=FS, chunk_size=1000, sim_network=net,
+                        channels=[config.Channel("ai0", "A"), config.Channel("ai1", "B")])
     be = SimulatedBackend(cfg)
-    be._setup()                                              # what start() does first
-    return be
+    q = be.subscribe()
+    be.start()
+    time.sleep(0.3)
+    w = np.zeros(100)
+    w[:20] = 1.0
+    be.inject("", w, 5000)                                          # cell 1 fires, then 2
+    time.sleep(1.5)
+    be.stop()
+    assert be.error is None
+    d = np.concatenate([q.get_nowait().data for _ in range(q.qsize())], axis=1)
+    mv = d[0] * 100                                                 # gain 10: V on the trace -> mV
+    assert mv.max() == pytest.approx(sim.AP_PEAK_MV, abs=1)         # action potentials
+    assert -75 < np.median(mv) < -55                                # resting near rest + drive
+    assert d[1].min() == pytest.approx(-0.9, abs=0.1)               # cell 2's extracellular spikes
+    assert abs(np.median(d[1])) < 0.01
+    assert len(be.rates()) == 3 and be.rates()[0] > 0
 
 
-# ---------------------------------------------------------------- the model
+def test_monitor_input_records_the_stimulus():
+    cfg = config.Config(backend="simulated", sample_rate=FS, chunk_size=1000, stim_monitor="ai0",
+                        channels=[config.Channel("ai0", "Stim"), config.Channel("ai1", "B")])
+    be = SimulatedBackend(cfg)
+    q = be.subscribe()
+    be.start()
+    time.sleep(0.2)
+    be.inject("ai0", np.full(500, 2.0), 5000)
+    time.sleep(0.4)
+    be.stop()
+    d = np.concatenate([q.get_nowait().data for _ in range(q.qsize())], axis=1)
+    assert d[0].max() == pytest.approx(2.0, abs=0.02)
+
+
 def test_spike_shape():
-    w, trough = sim.spike_shape(sim.SimCell(depth_v=1.0, width_ms=0.55, peak_ratio=0.35), FS)
+    w, trough = sim.spike_shape(sim.Cell(spike_depth_v=1.0, spike_width_ms=0.55), FS)
     assert w[trough] == pytest.approx(-1.0) and w.argmin() == trough
-    peak = trough + w[trough:].argmax()
-    assert w[peak] == pytest.approx(0.35, abs=0.05)                  # repolarization peak
-    assert (peak - trough) / FS * 1e3 == pytest.approx(0.55, abs=0.05)
-    assert w[:trough].max() > 0                                      # small bump before the trough
-
-
-def test_rate_rises_with_depolarization():
-    c = sim.SimCell(max_rate=100, threshold_v=0.25, slope_v=0.05)
-    assert c.rate(0.0) < 1 and c.rate(0.25) == pytest.approx(50) and c.rate(1.0) == pytest.approx(100, abs=0.1)
-    rest = [float(c.rate(0)) for c in sim.default_cells()]
-    assert rest == pytest.approx([1.0, 0.6, 0.3], abs=0.05)          # the old fixed rates
-
-
-def test_pulse_onsets_and_epsp_shape():
-    w = np.zeros(400)
-    w[10:20], w[110:120] = 1.0, 2.0                                  # two pulses
-    assert sim.pulse_onsets(w) == [(10, 1.0), (110, 2.0)]
-    k = sim.epsp_shape(sim.SimInput("ai0", epsp_delay_ms=5, epsp_peak_ms=4), FS)
-    assert k.argmax() == int(0.005 * FS) + int(0.004 * FS) and k.max() == pytest.approx(1.0)
-
-
-# ---------------------------------------------------------------- the backend
-def test_each_pulse_gives_an_epsp_that_sums():
-    be = backend([sim.SimInput("ai1", epsp_v_per_v=0.5, epsp_delay_ms=5, epsp_peak_ms=4)])
-    w = np.zeros(int(0.03 * FS))
-    w[:20] = 1.0                                                     # 1 V pulse at 0 ms
-    w[int(0.002 * FS):int(0.002 * FS) + 20] = 1.0                    # and another 2 ms later
-    be._start_stimulus("", w, be.cfg.sim_inputs, FS)
-    d0 = be._take_epsp("ai0", 2000)                                  # ai0: default 0.3 V per V
-    d1 = be._take_epsp("ai1", 2000)
-    assert d1.max() > 0.5 * 1.2 and d1.max() < 1.0                  # two EPSPs summed
-    assert d0.max() == pytest.approx(d1.max() * 0.3 / 0.5, rel=0.01)
-    assert np.argmax(d1) / FS > 0.009                                # after the delay and rise
-
-
-def test_monitor_input_records_the_stimulus_not_epsps():
-    be = backend(monitor="ai0")
-    w = np.ones(200)
-    be._start_stimulus("ai0", w, [], FS)
-    assert not len(be._epsp.get("ai0", [])) and be._epsp["ai1"].max() > 0
-
-
-def test_firing_rate_follows_depolarization():
-    cells = [sim.SimCell(depth_v=1.0, max_rate=200, threshold_v=0.3, slope_v=0.05)]
-    be = backend()
-
-    def count(d_value):
-        be._tail.clear(); be._last_spike.clear()
-        y = np.concatenate([be._spikes("ai0", cells, np.full(1000, d_value), k * 1000, FS)
-                            for k in range(200)])                    # 10 s
-        return len(find_peaks(-y, height=0.5, distance=int(0.002 * FS))[0])
-    at_rest, depolarized = count(0.0), count(0.6)
-    assert at_rest < 10 and depolarized > 1000                       # ~0.5/s vs ~200/s
-    assert depolarized < 10 * 200 * 1.1                              # refractory keeps it sane
-
-
-def test_cells_have_their_own_heights():
-    be = backend()
-    cells = sim.default_cells()
-    y = np.concatenate([be._spikes("ai0", cells, np.zeros(1000), k * 1000, FS) for k in range(20 * 60)])
-    depths = -y[find_peaks(-y, height=0.2, distance=int(0.002 * FS))[0]]
-    for c in cells:                                                  # each cell's spikes are there, ±15%
-        assert np.sum(np.abs(depths - c.depth_v) < 0.15 * c.depth_v) > 10
+    assert (trough + w[trough:].argmax() - trough) / FS * 1e3 == pytest.approx(0.55, abs=0.05)
+    assert w[:trough].max() > 0
 
 
 # ---------------------------------------------------------------- config
-def test_settings_round_trip_through_the_config(tmp_path):
-    inp = sim.SimInput("ai1", noise_v=0.01, sine_v=0, epsp_v_per_v=0.8,
-                       cells=[sim.SimCell(depth_v=0.7, threshold_v=0.4, burst=0.2)])
-    c = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")], sim_inputs=[inp])
-    back = config.load(config.save(c, tmp_path / "s.toml"))
-    assert back.sim_inputs == [inp]
-    empty = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")],
-                          sim_inputs=[sim.SimInput("ai2", cells=[])])
-    assert config.load(config.save(empty, tmp_path / "e.toml")).sim_inputs[0].cells == []
+def test_network_round_trips_through_the_config(tmp_path):
+    net = sim.default_network(4)
+    net.cells[2].stimulus = 7
+    net.set_weights(np.array([[0, 5, 0, -3], [0, 0, 9, 0], [1, 0, 0, 0], [0, 0, 0, 0]], float))
+    net.synapse_delay_ms = 3.5
+    net.recordings = [sim.Recording("ai1", 3, "extracellular", noise_v=0.03, sine_v=0.1, sine_hz=50)]
+    c = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")], sim_network=net)
+    back = config.load(config.save(c, tmp_path / "s.toml")).sim_network
+    assert back == net
 
 
-def test_old_no_sine_setting_still_loads(tmp_path):
+def test_default_network_isnt_written_and_old_settings_still_load(tmp_path):
+    c = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")])
+    assert "[simulated]" not in config.dumps(c)
     p = tmp_path / "old.toml"
-    p.write_text('[device]\nbackend = "simulated"\n[simulated]\nno_sine = ["ai1"]\n'
+    p.write_text('[device]\nbackend = "simulated"\n[simulated]\nno_sine = ["ai1"]\n\n'
+                 '[[simulated.inputs]]\nphysical = "ai1"\nsine_amplitude = 0\nepsp = 0.3\n\n'
+                 '[[simulated.inputs.cells]]\ndepth = 0.4\n\n'
                  '[[channels]]\nphysical = "ai0"\nname = "A"\n')
-    (inp,) = config.load(p).sim_inputs
-    assert inp.physical == "ai1" and inp.sine_v == 0 and len(inp.cells) == 3
+    net = config.load(p).sim_network
+    assert len(net.cells) == 3 and net.recordings[0].physical == "ai1" and net.recordings[0].sine_v == 0
 
 
-def test_example_config_loads_its_simulation():
-    cfg = config.load("config.toml")
-    assert sim.input_for(cfg.sim_inputs, "ai1").sine_v == 0
+def test_example_config_loads():
+    net = config.load("config.toml").sim_network
+    assert 1 <= len(net.cells) <= sim.MAX_CELLS
+
+
+def test_validate_catches_bad_settings():
+    net = sim.default_network()
+    net.cells[0].reset_mv = -40                                     # above threshold
+    with pytest.raises(ValueError, match="reset"):
+        sim.validate(net)
 
 
 # ---------------------------------------------------------------- the tab
-def test_simulation_tab_edits_the_running_settings(app, win):
-    assert "Simulation" in [win.tabs.panes[0].bar.tabText(i) for i in range(win.tabs.panes[0].bar.count())]
+def test_simulation_tab_edits_the_running_network(app, win):
     page = win.sim_page
-    page.input.setCurrentIndex(page.input.findData("ai1"))
-    page.sine_v.setValue(0)
-    page.epsp.setValue(0.5)
-    inp = sim.input_for(win.cfg.sim_inputs, "ai1")
-    assert inp.sine_v == 0 and inp.epsp_v_per_v == 0.5
-    assert win.backend.cfg.sim_inputs is win.cfg.sim_inputs          # the running backend sees it
-    page.table.item(0, 0).setText("700 mV")                          # spike size, with a unit
-    page.table.item(0, 4).setText("0.1")                             # threshold (V)
-    c = sim.input_for(win.cfg.sim_inputs, "ai1").cells[0]
-    assert c.depth_v == pytest.approx(0.7) and c.threshold_v == pytest.approx(0.1)
-    assert float(page.table.item(0, 7).text().split()[0]) == pytest.approx(float(c.rate(0)), rel=0.01)
-    page.table.item(0, 3).setText("lots")                            # bad cell: message, nothing stored
+    assert page.cells.rowCount() == 3 and page.syn.rowCount() == 3
+    page.syn.item(0, 2).setText("-8 mV")                            # 1 inhibits 3
+    page.cells.item(1, 1).setText("-45 mV")                         # cell 2 threshold
+    net = win.cfg.sim_network
+    assert net.weights()[0, 2] == -8 and net.cells[1].threshold_mv == -45
+    assert win.backend.cfg.sim_network is net                       # the running backend sees it
+    page.recs.cellWidget(1, 1).setCurrentIndex(1)                   # ai1: extracellular
+    page.recs.cellWidget(1, 0).setCurrentIndex(2)                   # recording cell 3
+    rec = sim.recording_for(win.cfg.sim_network, "ai1")
+    assert rec.kind == "extracellular" and rec.cell == 2
+    page.cells.item(0, 0).setText("lots")                           # bad: message, nothing stored
     assert "must be a number" in page.message.text()
-    page._show_input()
-    page._add_cell()
-    assert len(sim.input_for(win.cfg.sim_inputs, "ai1").cells) == 4
+    assert win.cfg.sim_network.cells[0].rest_mv == -70
+    page.load()
+    page.n_cells.setValue(6)
+    assert len(win.cfg.sim_network.cells) == 6 and page.syn.columnCount() == 6
+    assert win.cfg.sim_network.weights()[0, 2] == -8                # kept
+    page.n_cells.setValue(2)
+    assert sim.recording_for(win.cfg.sim_network, "ai1").cell == 1  # moved to a cell that exists
     page._reset()
-    assert not any(i.physical == "ai1" for i in win.cfg.sim_inputs)
-    assert page.sine_v.value() == pytest.approx(0.5)                 # defaults shown again
+    assert win.cfg.sim_network == sim.default_network()
+
+
+def test_simulation_tab_shows_live_firing_rates(app, win):
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 1.5)
+    win.tabs.pick(0, "sim")
+    pump(app, 0.1)
+    win.sim_page._show_rates()
+    from neusci_daq.simpage import _LIVE_COL
+    assert win.sim_page.cells.item(0, _LIVE_COL).text().endswith("/s")
+    win.btn_run.setChecked(False)
 
 
 def test_hardware_has_no_simulation_tab(app, tmp_path):
     from pyqtgraph.Qt import QtCore
     from neusci_daq.gui import MainWindow
     cfg = make_cfg(tmp_path)
-    cfg.backend = "multichannelio"                                   # no hardware needed to build it
+    cfg.backend = "multichannelio"
     st = QtCore.QSettings(str(tmp_path / "s.ini"), QtCore.QSettings.Format.IniFormat)
     w = MainWindow(cfg, settings=st, config_path=tmp_path / "config.toml")
     assert w.sim_page is None

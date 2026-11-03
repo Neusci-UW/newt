@@ -225,7 +225,8 @@ def test_fired_stimulus_is_recorded_on_the_stim_channel_and_logged(app, win):
     assert stim.max() == pytest.approx(3, abs=0.02)
     assert (stim > 1.5).sum() == pytest.approx(0.1 * win.cfg.sample_rate, abs=3)   # 100 ms at the AI rate
     assert any(text.startswith("Stim:") and "Step 3 V" in text for _, text in blk["comments"])
-    assert blk["data"][0].max() > 0.5                       # the fake response on the other channels
+    ch1 = blk["data"][0]                                    # cell 1, intracellular at gain 10
+    assert ch1.max() - np.median(ch1) > 0.1                 # depolarized past threshold: > 10 mV
 
 
 def test_limit_and_busy_are_refused_with_a_message(app, win):

@@ -1,9 +1,9 @@
-"""The Simulation tab (only with --backend simulated): what each input records.
+"""The Simulation tab (only with --backend simulated): the network of cells the
+simulated backend records from, the synapses between them, and which cell each
+input records.
 
-Pick an input, then set its noise and sine, the EPSP each stimulus pulse gives,
-and the cells near it: their spike shape and how their firing rate rises with
-depolarization. Changes apply straight away, while recording too, and Setup ›
-Save channel setup writes them to the config's [simulated] section.
+Changes apply straight away, while recording too, and Setup › Save channel setup
+writes them to the config's [simulated] section. See simulation.py for the model.
 """
 from __future__ import annotations
 
@@ -14,23 +14,33 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import config as cfgmod
 from . import simulation as sim
 from . import style, theme
-from .plotzoom import plot_widget
 from .stimwindow import UnitSpinBox, _same_kind, parse_quantity
 
-# Cells table: (heading, SimCell field, unit or "" for a plain number, tooltip)
-_COLUMNS = (
-    ("Spike size", "depth_v", "V", "Depth of the spike's negative trough on the trace"),
-    ("Width", "width_ms", "ms", "Spike trough to repolarization peak: narrow ~0.3 ms, broad ~0.8 ms"),
-    ("Peak ratio", "peak_ratio", "", "Repolarization peak as a fraction of the trough"),
-    ("Max rate", "max_rate", "Hz", "Firing rate when fully depolarized"),
-    ("Threshold", "threshold_v", "V", "Depolarization (EPSP size on the trace) giving half the max rate"),
-    ("Slope", "slope_v", "V", "How sharply the rate rises around threshold: smaller is sharper"),
-    ("Burst chance", "burst", "", "Chance (0-1) that a spike starts a burst of 2-4 spikes, 3-6 ms apart"),
+# Cells table: (heading, Cell field, unit, tooltip)
+_CELL_COLUMNS = (
+    ("Rest", "rest_mv", "mV", "Resting membrane potential"),
+    ("Threshold", "threshold_mv", "mV", "The cell fires when its membrane potential reaches this"),
+    ("Reset", "reset_mv", "mV", "Where the membrane potential goes after a spike (below threshold)"),
+    ("Time const.", "tau_ms", "ms", "Membrane time constant: how quickly PSPs fade"),
+    ("Refractory", "refractory_ms", "ms", "No spikes for this long after one"),
+    ("Drive", "drive_mv", "mV", "Steady depolarization above rest; with noise, sets how often it fires on its own"),
+    ("Noise", "noise_mv", "mV", "Membrane potential fluctuation (SD)"),
+    ("Stimulus", "stimulus", "mV", "PSP from each 1 V stimulus pulse (scales with the pulse); 0 = not driven"),
+    ("Spike size", "spike_depth_v", "V", "Extracellular recordings: depth of this cell's spike trough"),
+    ("Spike width", "spike_width_ms", "ms", "Extracellular recordings: spike trough to repolarization peak"),
 )
+_LIVE_COL = len(_CELL_COLUMNS)
+_KINDS = (("Intracellular", "intracellular"), ("Extracellular", "extracellular"))
 
 
 def _fmt(v: float, unit: str) -> str:
     return f"{v:.4g} {unit}".strip()
+
+
+def _readonly(text: str) -> QtWidgets.QTableWidgetItem:
+    item = QtWidgets.QTableWidgetItem(text)
+    item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+    return item
 
 
 class SimPage(QtWidgets.QWidget):
@@ -43,262 +53,332 @@ class SimPage(QtWidgets.QWidget):
         outer.setContentsMargins(14, 14, 14, 14)
         outer.setSpacing(16)
 
-        # ---- left: settings for one input -----------------------------------
+        # ---- left: the network ---------------------------------------------------
         left = QtWidgets.QVBoxLayout()
         left.setSpacing(10)
         intro = QtWidgets.QLabel(
-            "What each simulated input records: noise, a sine, an EPSP after each stimulus pulse, "
-            "and cells that fire faster as the EPSPs depolarize them. Changes apply straight away.")
+            "A network of integrate-and-fire cells. Each fires when its membrane potential reaches "
+            "threshold; its spikes give the cells it connects to a PSP after the synaptic delay. "
+            "Stimulus pulses give PSPs to the cells they drive. Changes apply straight away.")
         intro.setWordWrap(True)
         left.addWidget(intro)
-        pick = QtWidgets.QHBoxLayout()
-        self.input = QtWidgets.QComboBox()
-        self.input.setToolTip("The input these settings are for")
-        self.btn_reset = QtWidgets.QPushButton("Reset to defaults")
-        self.btn_reset.setToolTip("Put this input back to the default noise, sine, EPSP and three cells")
-        pick.addWidget(QtWidgets.QLabel("Input"))
-        pick.addWidget(self.input, 1)
-        pick.addWidget(self.btn_reset)
-        left.addLayout(pick)
 
-        sig = QtWidgets.QGroupBox("Signal")
-        f = QtWidgets.QFormLayout(sig)
-        self.noise = UnitSpinBox(0, 5, "V", step=0.01)
-        self.sine_v = UnitSpinBox(0, 10, "V", step=0.1)
-        self.sine_v.setToolTip("0 = no sine")
-        self.sine_hz = UnitSpinBox(0, 1000, "Hz", step=1)
-        f.addRow("Noise (RMS)", self.noise)
-        f.addRow("Sine amplitude", self.sine_v)
-        f.addRow("Sine frequency", self.sine_hz)
-        left.addWidget(sig)
+        top = QtWidgets.QHBoxLayout()
+        f = QtWidgets.QFormLayout()
+        self.n_cells = QtWidgets.QSpinBox(minimum=1, maximum=sim.MAX_CELLS)
+        self.n_cells.setToolTip(f"1 to {sim.MAX_CELLS} cells")
+        self.delay = UnitSpinBox(0, 100, "ms", step=0.5)
+        self.delay.setToolTip("From a spike (or stimulus pulse) to the start of the PSP it causes")
+        self.syn_tau = UnitSpinBox(0.1, 100, "ms", step=0.5)
+        self.syn_tau.setToolTip("How long the synaptic current lasts: longer gives slower, broader PSPs")
+        f.addRow("Cells", self.n_cells)
+        f.addRow("Synaptic delay", self.delay)
+        f.addRow("Synaptic time const.", self.syn_tau)
+        top.addLayout(f)
+        top.addStretch(1)
+        self.btn_reset = QtWidgets.QPushButton("Reset to the default network")
+        self.btn_reset.setToolTip("Three cells in a chain: the stimulus drives 1, 1 excites 2, "
+                                  "2 excites 3, and 3 inhibits 1")
+        top.addWidget(self.btn_reset, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        left.addLayout(top)
 
-        ep = QtWidgets.QGroupBox("EPSP after each stimulus pulse")
-        f = QtWidgets.QFormLayout(ep)
-        self.epsp = UnitSpinBox(0, 10, "V", step=0.05)
-        self.epsp.setToolTip("EPSP peak for a 1 V pulse; it scales with the pulse. 0 = no EPSPs")
-        self.epsp_delay = UnitSpinBox(0, 1000, "ms", step=0.5)
-        self.epsp_peak = UnitSpinBox(0.05, 1000, "ms", step=0.5)
-        self.epsp_peak.setToolTip("From the EPSP's start to its peak; it lasts about 8× this")
-        f.addRow("Size for a 1 V pulse", self.epsp)
-        f.addRow("Delay", self.epsp_delay)
-        f.addRow("Time to peak", self.epsp_peak)
-        left.addWidget(ep)
+        box = QtWidgets.QGroupBox("Cells")
+        v = QtWidgets.QVBoxLayout(box)
+        self.cells = QtWidgets.QTableWidget(0, len(_CELL_COLUMNS) + 1)
+        self.cells.setHorizontalHeaderLabels([c[0] for c in _CELL_COLUMNS] + ["Firing now"])
+        for i, (_, _, _, tip) in enumerate(_CELL_COLUMNS):
+            self.cells.horizontalHeaderItem(i).setToolTip(tip)
+        self.cells.horizontalHeaderItem(_LIVE_COL).setToolTip("Spikes/s over the last 10 s, while acquiring")
+        self.cells.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.cells.setToolTip("Cells take units, e.g. -55 mV or 0.5 ms")
+        v.addWidget(self.cells)
+        left.addWidget(box, 3)
 
-        cells = QtWidgets.QGroupBox("Cells")
-        v = QtWidgets.QVBoxLayout(cells)
-        self.table = QtWidgets.QTableWidget(0, len(_COLUMNS) + 1)
-        self.table.setHorizontalHeaderLabels([c[0] for c in _COLUMNS] + ["At rest"])
-        for i, (_, _, _, tip) in enumerate(_COLUMNS):
-            self.table.horizontalHeaderItem(i).setToolTip(tip)
-        self.table.horizontalHeaderItem(len(_COLUMNS)).setToolTip("Firing rate with no EPSP (from the settings)")
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        self.table.verticalHeader().setVisible(True)
-        self.table.setToolTip("Cells take units, e.g. 400 mV or 0.5 ms")
-        rowbtns = QtWidgets.QHBoxLayout()
-        self.btn_add = QtWidgets.QPushButton("Add cell")
-        self.btn_del = QtWidgets.QPushButton("Remove cell")
-        rowbtns.addWidget(self.btn_add)
-        rowbtns.addWidget(self.btn_del)
-        rowbtns.addStretch(1)
-        v.addWidget(self.table, 1)
-        v.addLayout(rowbtns)
-        left.addWidget(cells, 1)
+        box = QtWidgets.QGroupBox("Synapses: PSP (mV) from each spike of the row's cell onto the column's cell")
+        v = QtWidgets.QVBoxLayout(box)
+        self.syn = QtWidgets.QTableWidget(0, 0)
+        self.syn.setToolTip("Positive excites (EPSP), negative inhibits (IPSP), 0 = no synapse")
+        self.syn.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        v.addWidget(self.syn)
+        left.addWidget(box, 3)
+
+        box = QtWidgets.QGroupBox("Recordings: the cell each input records")
+        v = QtWidgets.QVBoxLayout(box)
+        self.recs = QtWidgets.QTableWidget(0, 6)
+        self.recs.setHorizontalHeaderLabels(["Cell", "Recording", "Gain", "Noise", "Sine", "Sine freq."])
+        tips = ("Which cell this input records", "Intracellular: membrane potential with PSPs and action "
+                "potentials. Extracellular: just the spikes", "Intracellular: trace V per V of membrane "
+                "potential (10 shows -70 mV as -0.7 V)", "Recording noise on the trace (RMS)",
+                "Amplitude of a sine added to the trace, e.g. mains hum; 0 = none", "Frequency of that sine")
+        for i, tip in enumerate(tips):
+            self.recs.horizontalHeaderItem(i).setToolTip(tip)
+        self.recs.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        v.addWidget(self.recs)
+        left.addWidget(box, 2)
+
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
         left.addWidget(self.message)
         outer.addLayout(left, 3)
 
-        # ---- right: what the cells look like --------------------------------
+        # ---- right: a picture of the network ---------------------------------------
         right = QtWidgets.QVBoxLayout()
-        self.shape_plot = plot_widget()
-        sp = self.shape_plot.getPlotItem()
-        sp.setTitle("Spike shapes")
-        sp.setLabel("left", "V")
-        sp.setLabel("bottom", "ms from the trough")
-        self.rate_plot = plot_widget()
-        rp = self.rate_plot.getPlotItem()
-        rp.setTitle("Firing rate vs depolarization")
-        rp.setLabel("left", "spikes/s")
-        rp.setLabel("bottom", "depolarization (V)")
-        for p in (sp, rp):
-            p.showGrid(x=True, y=True, alpha=0.25)
-            p.getAxis("left").enableAutoSIPrefix(False)
-            p.getAxis("bottom").enableAutoSIPrefix(False)
-        self.epsp_line = pg.InfiniteLine(0, angle=90, pen=pg.mkPen("#888", style=QtCore.Qt.PenStyle.DashLine),
-                                         label="1 V pulse EPSP", labelOpts={"position": 0.9})
-        rp.addItem(self.epsp_line)
-        right.addWidget(self.shape_plot, 1)
-        right.addWidget(self.rate_plot, 1)
+        self.diagram = pg.PlotWidget()
+        self.diagram.setMenuEnabled(False)
+        self.diagram.setMouseEnabled(False, False)
+        self.diagram.hideButtons()
+        d = self.diagram.getPlotItem()
+        d.hideAxis("left")
+        d.hideAxis("bottom")
+        d.setAspectLocked(True)
+        d.setTitle("Network")
+        right.addWidget(self.diagram, 1)
+        key = QtWidgets.QLabel("Green arrows excite, red inhibit; thicker is stronger. "
+                               "⚡ = driven by the stimulus. Labels show the inputs recording each cell.")
+        key.setWordWrap(True)
+        right.addWidget(key)
         outer.addLayout(right, 2)
 
-        # ---- signals -------------------------------------------------------------
-        self.sync()
-        self.input.currentIndexChanged.connect(lambda *_: self._show_input())
-        for w in (self.noise, self.sine_v, self.sine_hz, self.epsp, self.epsp_delay, self.epsp_peak):
+        # ---- signals ---------------------------------------------------------------
+        self.load()
+        self.n_cells.valueChanged.connect(self._resized)
+        for w in (self.delay, self.syn_tau):
             w.valueChanged.connect(self._changed)
-        self.table.itemChanged.connect(self._changed)
-        self.btn_add.clicked.connect(self._add_cell)
-        self.btn_del.clicked.connect(self._remove_cell)
+        self.cells.itemChanged.connect(self._changed)
+        self.syn.itemChanged.connect(self._changed)
+        self.recs.itemChanged.connect(self._changed)
         self.btn_reset.clicked.connect(self._reset)
+        self._timer = QtCore.QTimer(self, interval=1000, timeout=self._show_rates)
+        self._timer.start()
         self.apply_theme(style.LIGHT)
 
-    # -- which input --------------------------------------------------------------
+    # -- config -> widgets ------------------------------------------------------------
+    @property
+    def net(self) -> sim.Network:
+        return self.main.cfg.sim_network
+
     def sync(self) -> None:
-        """List the inputs (after a channel or wiring change) and show the picked one."""
-        cfg = self.main.cfg
-        cur = self.input.currentData() or (cfg.channels[0].physical if cfg.channels else "ai0")
-        names = {c.physical: c.name for c in cfg.channels}
-        self.input.blockSignals(True)
-        self.input.clear()
-        for phys in cfgmod.valid_inputs(cfg):
-            label = phys + (f" ({names[phys]})" if phys in names else " (not used)")
-            if phys == cfg.stim_monitor:
-                label += " · records the stimulus"
-            self.input.addItem(label, phys)
-        self.input.setCurrentIndex(max(0, self.input.findData(cur)))
-        self.input.blockSignals(False)
-        self._show_input()
+        """After a channel, wiring or stimulus-wire change: the inputs listed may differ."""
+        self.load()
 
-    def current(self) -> sim.SimInput:
-        return sim.input_for(self.main.cfg.sim_inputs, self.input.currentData() or "ai0")
-
-    def _show_input(self) -> None:
-        inp = self.current()
+    def load(self) -> None:
+        net = self.net
+        n = len(net.cells)
         self._loading = True
-        self.noise.setValue(inp.noise_v)
-        self.sine_v.setValue(inp.sine_v)
-        self.sine_hz.setValue(inp.sine_hz)
-        self.epsp.setValue(inp.epsp_v_per_v)
-        self.epsp_delay.setValue(inp.epsp_delay_ms)
-        self.epsp_peak.setValue(inp.epsp_peak_ms)
-        self.table.setRowCount(0)
-        for c in inp.cells:
-            self._append_row(c)
+        self.n_cells.setValue(n)
+        self.delay.setValue(net.synapse_delay_ms)
+        self.syn_tau.setValue(net.synapse_tau_ms)
+        self.cells.setRowCount(n)
+        self.cells.setVerticalHeaderLabels([f"Cell {i + 1}" for i in range(n)])
+        for r, c in enumerate(net.cells):
+            for col, (_, attr, unit, _) in enumerate(_CELL_COLUMNS):
+                self.cells.setItem(r, col, QtWidgets.QTableWidgetItem(_fmt(getattr(c, attr), unit)))
+            self.cells.setItem(r, _LIVE_COL, _readonly("—"))
+        w = net.weights()
+        self.syn.setRowCount(n)
+        self.syn.setColumnCount(n)
+        self.syn.setVerticalHeaderLabels([f"From {i + 1}" for i in range(n)])
+        self.syn.setHorizontalHeaderLabels([f"To {i + 1}" for i in range(n)])
+        for i in range(n):
+            for j in range(n):
+                item = _readonly("—") if i == j else QtWidgets.QTableWidgetItem(f"{w[i, j]:g}")
+                if i == j:
+                    item.setToolTip("A cell has no synapse onto itself")
+                self.syn.setItem(i, j, item)
+        self._tint_synapses()
+        self._load_recordings()
         self._loading = False
-        mon = self.input.currentData() == self.main.cfg.stim_monitor
-        self._show_message("This input is wired to the stimulator (Stimulator tab › Record on): it records "
-                           "the stimulus, not these settings." if mon else "")
+        self._show_message("")
         self._redraw()
 
-    # -- table ----------------------------------------------------------------------
-    def _append_row(self, c: sim.SimCell) -> None:
-        r = self.table.rowCount()
-        self.table.insertRow(r)
-        for col, (_, attr, unit, _) in enumerate(_COLUMNS):
-            self.table.setItem(r, col, QtWidgets.QTableWidgetItem(_fmt(getattr(c, attr), unit)))
-        rest = QtWidgets.QTableWidgetItem(f"{float(c.rate(0.0)):.2g} Hz")
-        rest.setFlags(rest.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-        self.table.setItem(r, len(_COLUMNS), rest)
+    def _load_recordings(self) -> None:
+        cfg = self.main.cfg
+        inputs = [c for c in cfg.channels]
+        self.recs.setRowCount(len(inputs))
+        self.recs.setVerticalHeaderLabels([f"{c.physical} ({c.name})" for c in inputs])
+        n = len(self.net.cells)
+        for r, ch in enumerate(inputs):
+            rec = sim.recording_for(self.net, ch.physical)
+            monitor = ch.physical == cfg.stim_monitor
+            cell = QtWidgets.QComboBox()
+            cell.addItems([f"Cell {i + 1}" for i in range(n)])
+            cell.setCurrentIndex(min(rec.cell, n - 1))
+            kind = QtWidgets.QComboBox()
+            for label, key in _KINDS:
+                kind.addItem(label, key)
+            kind.setCurrentIndex(max(0, kind.findData(rec.kind)))
+            for w in (cell, kind):
+                w.setEnabled(not monitor)
+                w.currentIndexChanged.connect(self._changed)
+            self.recs.setCellWidget(r, 0, cell)
+            self.recs.setCellWidget(r, 1, kind)
+            for col, (attr, unit) in enumerate((("gain", ""), ("noise_v", "V"), ("sine_v", "V"), ("sine_hz", "Hz")), 2):
+                item = QtWidgets.QTableWidgetItem(_fmt(getattr(rec, attr), unit))
+                if monitor:
+                    item = _readonly("")
+                self.recs.setItem(r, col, item)
+            if monitor:
+                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Stimulator tab › Record on): "
+                                                      "it records the stimulus")
+                self.recs.item(r, 2).setText("records the stimulus")
 
-    def _cells(self) -> list[sim.SimCell]:
-        out = []
-        for r in range(self.table.rowCount()):
-            c = sim.SimCell()
-            for col, (head, attr, unit, _) in enumerate(_COLUMNS):
-                item = self.table.item(r, col)
-                text = item.text() if item else ""
-                try:
-                    v = parse_quantity(text, _same_kind(unit))[0] if unit else float(text)
-                except ValueError:
-                    raise ValueError(f"Cell {r + 1}: {head.lower()} must be a number"
-                                     + (f", optionally with a unit (e.g. {_fmt(getattr(c, attr), unit)})."
-                                        if unit else ".")) from None
-                setattr(c, attr, v)
-            out.append(c)
-        return out
+    # -- widgets -> config ------------------------------------------------------------
+    def _read(self) -> sim.Network:
+        """The network the widgets describe. Raises ValueError for a bad cell."""
+        n = self.cells.rowCount()
+        cells = []
+        for r in range(n):
+            c = sim.Cell()
+            for col, (head, attr, unit, _) in enumerate(_CELL_COLUMNS):
+                setattr(c, attr, self._number(self.cells, r, col, unit, f"Cell {r + 1}: {head.lower()}"))
+            cells.append(c)
+        w = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    w[i, j] = self._number(self.syn, i, j, "mV", f"Synapse {i + 1}→{j + 1}")
+        net = sim.Network(cells, self.delay.value(), self.syn_tau.value())
+        net.set_weights(w)
+        cfg = self.main.cfg
+        for r, ch in enumerate(cfg.channels):
+            if ch.physical == cfg.stim_monitor or self.recs.cellWidget(r, 0) is None:
+                continue
+            rec = sim.Recording(ch.physical, self.recs.cellWidget(r, 0).currentIndex(),
+                                self.recs.cellWidget(r, 1).currentData())
+            for col, (attr, unit, name) in enumerate((("gain", "", "gain"), ("noise_v", "V", "noise"),
+                                                      ("sine_v", "V", "sine"), ("sine_hz", "Hz", "sine freq.")), 2):
+                setattr(rec, attr, self._number(self.recs, r, col, unit, f"{ch.physical} {name}"))
+            net.recordings.append(rec)
+        # inputs not shown here (not used by a channel) keep their settings
+        shown = {r.physical for r in net.recordings}
+        net.recordings += [sim.Recording(**vars(r)) for r in self.net.recordings if r.physical not in shown]
+        for r in net.recordings:
+            r.cell = min(r.cell, n - 1)
+        return net
 
-    def _add_cell(self) -> None:
-        cells = self._cells_or_none() or []
-        self.table.blockSignals(True)
-        self._append_row(sim.SimCell(**vars(cells[-1])) if cells else sim.SimCell())
-        self.table.blockSignals(False)
-        self._changed()
-
-    def _remove_cell(self) -> None:
-        rows = sorted({i.row() for i in self.table.selectedIndexes()} or {self.table.rowCount() - 1})
-        self.table.blockSignals(True)
-        for r in reversed(rows):
-            if r >= 0:
-                self.table.removeRow(r)
-        self.table.blockSignals(False)
-        self._changed()
-
-    def _cells_or_none(self):
+    @staticmethod
+    def _number(table, r, c, unit, what) -> float:
+        item = table.item(r, c)
+        text = item.text() if item else ""
         try:
-            return self._cells()
+            return parse_quantity(text, _same_kind(unit))[0] if unit else float(text)
         except ValueError:
-            return None
+            raise ValueError(f"{what} must be a number" + (f", optionally with a unit (e.g. 5 {unit})."
+                                                           if unit else ".")) from None
 
-    # -- edits ----------------------------------------------------------------------
     def _changed(self, *_) -> None:
         if self._loading:
             return
         try:
-            cells = self._cells()
+            net = self._read()
+            sim.validate(net)
         except ValueError as e:
             self._show_message(str(e), error=True)
             return
-        inp = sim.SimInput(self.input.currentData(), self.noise.value(), self.sine_v.value(),
-                           self.sine_hz.value(), self.epsp.value(), self.epsp_delay.value(),
-                           self.epsp_peak.value(), cells)
-        try:
-            sim.validate([inp])
-        except ValueError as e:
-            self._show_message(str(e), error=True)
-            return
-        self._store(inp)
-        # refresh the "At rest" column without re-entering this
-        self.table.blockSignals(True)
-        for r, c in enumerate(cells):
-            self.table.item(r, len(_COLUMNS)).setText(f"{float(c.rate(0.0)):.2g} Hz")
-        self.table.blockSignals(False)
+        # A new object, so the acquisition thread picks up the change all at once.
+        self.main.cfg.sim_network = net
+        self._tint_synapses()
         self._show_message("")
         self._redraw()
 
-    def _store(self, inp: sim.SimInput) -> None:
-        """Put `inp` in the config. A new list, so the acquisition thread never sees
-        it half changed."""
-        others = [i for i in self.main.cfg.sim_inputs if i.physical != inp.physical]
-        self.main.cfg.sim_inputs = sorted(others + [inp], key=lambda i: i.physical)
+    def _resized(self, n: int) -> None:
+        if self._loading:
+            return
+        try:
+            net = self._read()
+        except ValueError:
+            net = sim.copy_network(self.net)
+        sim.resize(net, n)
+        self.main.cfg.sim_network = net
+        self.load()
 
     def _reset(self) -> None:
-        phys = self.input.currentData()
-        self.main.cfg.sim_inputs = [i for i in self.main.cfg.sim_inputs if i.physical != phys]
-        self._show_input()
+        self.main.cfg.sim_network = sim.default_network()
+        self.load()
 
     def _show_message(self, text: str, error: bool = False) -> None:
         t = style.tokens(self._mode)
         self.message.setStyleSheet(f"color: {t['error'] if error else t['muted']}")
         self.message.setText(text)
 
-    # -- plots ----------------------------------------------------------------------
+    def _show_rates(self) -> None:
+        be = self.main.backend
+        if not self.isVisible() or not hasattr(be, "rates"):
+            return
+        rates = be.rates() if be.running else None
+        self.cells.blockSignals(True)
+        for r in range(self.cells.rowCount()):
+            item = self.cells.item(r, _LIVE_COL)
+            if item is not None:
+                item.setText(f"{rates[r]:.1f} /s" if rates and r < len(rates) else "—")
+        self.cells.blockSignals(False)
+
+    # -- looks --------------------------------------------------------------------------
+    def _tint_synapses(self) -> None:
+        self.syn.blockSignals(True)
+        for i in range(self.syn.rowCount()):
+            for j in range(self.syn.columnCount()):
+                item = self.syn.item(i, j)
+                if item is None or i == j:
+                    continue
+                try:
+                    v = float(parse_quantity(item.text(), _same_kind("mV"))[0])
+                except ValueError:
+                    v = 0.0
+                a = int(min(110, 25 + 6 * abs(v)))
+                item.setBackground(QtGui.QColor(0, 160, 80, a) if v > 0 else
+                                   QtGui.QColor(220, 50, 50, a) if v < 0 else QtGui.QBrush())
+        self.syn.blockSignals(False)
+
     def _redraw(self) -> None:
-        inp = self.current()
-        sp, rp = self.shape_plot.getPlotItem(), self.rate_plot.getPlotItem()
-        for p in (sp, rp):
-            for item in list(p.listDataItems()):
-                p.removeItem(item)
-        fs = 100_000.0                                    # smooth curves, whatever the sample rate
-        top = max([0.6, 2.0 * inp.epsp_v_per_v] + [c.threshold_v + 6 * c.slope_v for c in inp.cells])
-        d = np.linspace(0, top, 300)
-        for n, c in enumerate(inp.cells):
-            color = cfgmod.PALETTE[n % len(cfgmod.PALETTE)]
-            w, trough = sim.spike_shape(c, fs)
-            sp.plot((np.arange(len(w)) - trough) / fs * 1e3, w, pen=pg.mkPen(color, width=2))
-            rp.plot(d, c.rate(d), pen=pg.mkPen(color, width=2))
-        self.epsp_line.setValue(inp.epsp_v_per_v)
-        self.epsp_line.setVisible(inp.epsp_v_per_v > 0)
+        d = self.diagram.getPlotItem()
+        d.clear()
+        net = self.net
+        n = len(net.cells)
+        th = theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT]
+        ang = np.pi / 2 - 2 * np.pi * np.arange(n) / n
+        pos = np.column_stack([np.cos(ang), np.sin(ang)]) * (0 if n == 1 else 1.0)
+        r_cell = 0.18
+        w = net.weights()
+        biggest = max(1e-9, np.abs(w).max())
+        for i in range(n):
+            for j in range(n):
+                if i == j or not w[i, j]:
+                    continue
+                a, b = pos[i], pos[j]
+                u = (b - a) / np.linalg.norm(b - a)
+                side = np.array([-u[1], u[0]]) * 0.06           # two-way synapses side by side
+                start, end = a + u * r_cell + side, b - u * (r_cell + 0.02) + side
+                color = "#2fae6a" if w[i, j] > 0 else "#e0524f"
+                width = 1.5 + 4 * abs(w[i, j]) / biggest
+                d.addItem(pg.PlotCurveItem([start[0], end[0]], [start[1], end[1]], pen=pg.mkPen(color, width=width)))
+                arrow = pg.ArrowItem(pos=tuple(end), angle=180 - np.degrees(np.arctan2(u[1], u[0])),
+                                     headLen=14, tipAngle=35, pen=pg.mkPen(color), brush=color)
+                d.addItem(arrow)
+        recorded: dict[int, list[str]] = {}
+        for ch in self.main.cfg.channels:
+            if ch.physical != self.main.cfg.stim_monitor:
+                rec = sim.recording_for(net, ch.physical)
+                recorded.setdefault(min(rec.cell, n - 1), []).append(
+                    ch.physical + (" (in)" if rec.kind == "intracellular" else " (ex)"))
+        d.addItem(pg.ScatterPlotItem(pos[:, 0], pos[:, 1], size=46, pen=pg.mkPen(th.foreground, width=2),
+                                     brush=pg.mkBrush(cfgmod.PALETTE[1])))
+        for i in range(n):
+            label = pg.TextItem(str(i + 1), color="#000000", anchor=(0.5, 0.5))
+            label.setPos(*pos[i])
+            d.addItem(label)
+            out = pos[i] * 1.38 if n > 1 else np.array([0, -0.35])
+            extra = (["⚡"] if net.cells[i].stimulus else []) + recorded.get(i, [])
+            if extra:
+                t = pg.TextItem("  ".join(extra), color=th.foreground, anchor=(0.5, 0.5))
+                t.setPos(*out)
+                d.addItem(t)
+        d.setXRange(-1.7, 1.7, padding=0)
+        d.setYRange(-1.6, 1.6, padding=0)
 
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
-        for pw in (self.shape_plot, self.rate_plot):
-            pw.setBackground(th.background)
-            p = pw.getPlotItem()
-            p.setTitle(p.titleLabel.text, color=th.foreground)
-            for ax in ("left", "bottom"):
-                p.getAxis(ax).setPen(th.foreground)
-                p.getAxis(ax).setTextPen(th.foreground)
-        self.epsp_line.setPen(pg.mkPen(th.foreground, style=QtCore.Qt.PenStyle.DashLine))
-        self.epsp_line.label.setColor(th.foreground)
+        self.diagram.setBackground(th.background)
+        self.diagram.getPlotItem().setTitle("Network", color=th.foreground)
         self._redraw()

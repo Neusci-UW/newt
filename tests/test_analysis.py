@@ -643,3 +643,74 @@ def test_datapad_counts_spikes_found_on_the_raw_tab(app, win):
     assert [r["values"][("Ch2", "spikes")] for r in pad.rows[1:]] == \
         [float(np.sum(ev.block == i)) for i in range(4)]
 
+
+
+def test_fitting_models():
+    from neusci_daq import fitting as F
+    x = np.linspace(-2, 5, 60)
+    r = F.fit("poly", x, 0.5 * x ** 3 - 2 * x + 1, 3)
+    assert np.allclose(r.params, [1, -2, 0, 0.5], atol=1e-8) and r.r2 == pytest.approx(1)
+    assert r.equation == "y = 0.5·x^3 − 2·x + 1"
+    assert F.fit("poly", x, 3 * x + 2, 1).equation == "y = 3·x + 2"
+    t = np.linspace(0, 0.1, 200)
+    assert F.fit("exp", t, 5 * np.exp(-t / 0.02) + 1).params == pytest.approx([5, 0.02, 1], rel=1e-6)
+    v = np.linspace(-80, 20, 40)
+    assert F.fit("boltzmann", v, 1 / (1 + np.exp((-30 - v) / 6))).params[2:] == pytest.approx([-30, 6], rel=1e-6)
+    assert F.fit("power", x[x > 0], 2 * x[x > 0] ** 1.5).params == pytest.approx([2, 1.5])
+    with pytest.raises(ValueError, match="at least 4 points"):
+        F.fit("poly", [1, 2, 3], [1, 2, 3], 3)
+    with pytest.raises(ValueError, match="above zero"):
+        F.fit("log", x, x, 1)
+
+
+def test_datapad_overlays_scatters_fits_and_recomputes(app, win):
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    pad = ap.datapad
+    ap.tabs.setCurrentWidget(pad)
+    pump(app, 0.1)
+    # the preview overlays the ticked channels
+    assert list(pad.show_boxes) == ap.names()
+    pad.set_shown(["Ch1", "Ch2", "Stim"])
+    on = [n for n, c in pad.traces.items() if c.scene() is not None]
+    assert on == ["Ch1", "Ch2", "Stim"]
+    pad.show_boxes["Ch2"].setChecked(False)
+    assert pad.traces["Ch2"].scene() is None and pad.traces["Ch1"].scene() is not None
+    # a repeating window gives a row per range
+    pad.columns = []
+    pad.add_column("Stim", "max")
+    pad.whole.setChecked(False)
+    pad.t0.setValue(0.0)
+    pad.t1.setValue(0.05)
+    pad.every.setValue(0.25)
+    dur = ap.blocks[0]["duration_s"]
+    assert pad.add_rows("current") == len(np.arange(0, dur, 0.25))
+    assert [r["t0"] for r in pad.rows] == pytest.approx(list(np.arange(0, dur, 0.25)))
+    # scatter: Y against X, coloured by group
+    pad.set_axes("t0", ("Stim", "max"))
+    assert pad.sy.currentData() == ("Stim", "max")
+    pts = [i for i in pad.scatter.getPlotItem().items if isinstance(i, __import__("pyqtgraph").ScatterPlotItem)]
+    assert sum(len(i.getData()[0]) for i in pts) == len(pad.rows)
+    # fits: a polynomial on the scatter, an exponential on the trace
+    pad.fit_model.setCurrentIndex(pad.fit_model.findData("poly"))
+    pad.fit_degree.setValue(2)
+    r = pad.run_fit()
+    assert r is not None and len(r.params) == 3 and pad.fit_params.rowCount() == 3
+    pad.fit_on.setCurrentIndex(1)
+    pad.set_shown(["Ch1"])
+    pad.fit_model.setCurrentIndex(pad.fit_model.findData("poly"))
+    pad.fit_degree.setValue(1)
+    assert pad.run_fit() is not None and pad._fit_items[0][0] is pad.preview.getPlotItem()
+    pad.clear_fit()
+    assert pad.fit_result is None and not pad._fit_items
+    # recompute: the same rows, measured again with new columns
+    pad.add_column("Stim", "mean")
+    n = len(pad.rows)
+    assert pad.recompute() == n
+    assert all(("Stim", "mean") in r["values"] for r in pad.rows)
+    first = pad.rows[0]
+    w = slice(0, int(0.05 * ap.blocks[0]["sample_rate"]) + 1)
+    assert first["values"][("Stim", "mean")] == pytest.approx(ap.trace(ap.index(), "Stim")[w].mean())

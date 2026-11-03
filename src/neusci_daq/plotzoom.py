@@ -15,7 +15,63 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore
 
 
+# Ctrl (or Cmd: Qt reports Cmd as Control on macOS, and Ctrl as Meta) + drag: box zoom.
+ZOOM_MODS = QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.MetaModifier
+
+
 class WheelViewBox(pg.ViewBox):
+    """The app's mouse rules: the wheel zooms time (Cmd+wheel: the y axis, Shift+wheel:
+    pans time); Ctrl+drag draws a box and zooms to it; Ctrl+click goes back a zoom."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._zoom_history: list = []
+
+    def mouseDragEvent(self, ev, axis=None):
+        if axis is None and ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
+            ev.accept()
+            if ev.isFinish():
+                self.rbScaleBox.hide()
+                r = QtCore.QRectF(pg.Point(ev.buttonDownPos(ev.button())), pg.Point(ev.pos())).normalized()
+                r = self.childGroup.mapRectFromParent(r).normalized()
+                if r.width() > 0 and r.height() > 0:
+                    self.zoom_box(r.left(), r.right(), r.top(), r.bottom())
+            else:
+                self.updateScaleBox(ev.buttonDownPos(), ev.pos())
+            return
+        super().mouseDragEvent(ev, axis)
+
+    def mouseClickEvent(self, ev):
+        if ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
+            ev.accept()
+            self.zoom_back()
+            return
+        super().mouseClickEvent(ev)
+
+    def zoom_box(self, x0: float, x1: float, y0: float, y1: float) -> None:
+        """Show just this box (data coordinates); Ctrl+click goes back."""
+        self._zoom_history.append((self.viewRange(), bool(self.state["autoRange"][1])))
+        self.set_time_range(x0, x1)
+        self.enableAutoRange(axis="y", enable=False)
+        self.setYRange(y0, y1, padding=0)
+        self.sigRangeChangedManually.emit([True, True])     # overlaid axes follow (MultiAxis)
+
+    def zoom_back(self) -> None:
+        """Undo the last box zoom; with none left, fit the y axis to the data."""
+        if not self._zoom_history:
+            self.enableAutoRange(axis="y")
+            return
+        (xr, yr), auto = self._zoom_history.pop()
+        self.set_time_range(*xr)
+        if auto:
+            self.enableAutoRange(axis="y")
+        else:
+            self.setYRange(*yr, padding=0)
+        self.sigRangeChangedManually.emit([True, True])
+
+    def set_time_range(self, x0: float, x1: float) -> None:
+        self.setXRange(x0, x1, padding=0)
+
     def wheelEvent(self, ev, axis=None):
         mods = ev.modifiers()
         # Qt reports Cmd as Control on macOS.
@@ -228,3 +284,164 @@ def plot_widget(**kw) -> pg.PlotWidget:
     pw = pg.PlotWidget(viewBox=WheelViewBox(), **kw)
     light_grid(pw.getPlotItem())
     return pw
+
+
+class _FollowerViewBox(pg.ViewBox):
+    """An extra y axis's view: it shares the plot's time axis, and leaves the mouse to
+    the plot, except on its own axis, where the wheel and dragging scale just it."""
+
+    def wheelEvent(self, ev, axis=None):
+        if axis == 1:
+            super().wheelEvent(ev, axis=1)
+            ev.accept()
+        else:
+            ev.ignore()
+
+    def mouseDragEvent(self, ev, axis=None):
+        if axis == 1:
+            super().mouseDragEvent(ev, axis=1)
+        else:
+            ev.ignore()
+
+    def mouseClickEvent(self, ev):
+        ev.ignore()
+
+
+def _si(unit: str) -> bool:
+    return unit.split("/")[0] in ("V", "A", "s")
+
+
+class MultiAxis:
+    """Overlaid traces on one plot, each with its own y axis by default.
+
+    The first trace uses the plot's own (left) axis; each other one gets a view and an
+    axis on the right, in its colour. Every trace starts fitted to the plot's height, so
+    they overlay as closely as they can. The wheel (Cmd) or a drag on the plot scales
+    them all together; on a trace's own axis, it scales just that trace.
+    With separate=False they all share the left axis.
+    """
+
+    def __init__(self, plot: pg.PlotItem, separate: bool = True):
+        self.plot = plot
+        self.separate = separate
+        self.views: list[pg.ViewBox] = []     # one per trace (the first is the plot's own)
+        self.axes: list[pg.AxisItem] = []     # the extra (right) axes
+        self.items: list = []
+        self._added: list = []                # items this put in the plot (not ones already there)
+        self._labels: list = []               # (axis, name, unit, colour) to restore after a restyle
+        self._auto = True
+        self._prev = self._last = tuple(plot.vb.viewRange()[1])
+        plot.vb.sigResized.connect(self._sync_geometry)
+        plot.vb.sigYRangeChanged.connect(self._main_y_changed)
+        plot.vb.sigRangeChangedManually.connect(self._main_zoomed)
+
+    def add(self, item, name: str, unit: str, color) -> pg.ViewBox:
+        p = self.plot
+        if not self.items or not self.separate:
+            if item.getViewBox() is not p.vb:
+                p.addItem(item)
+                self._added.append(item)
+            vb = p.vb
+            if not self.items:
+                self._label(p.getAxis("left"), name if self.separate else "", unit, color if self.separate else None)
+        else:
+            vb = _FollowerViewBox()
+            vb.setZValue(p.vb.zValue() - 1)                   # under the plot, which takes the mouse
+            p.scene().addItem(vb)
+            vb.setXLink(p.vb)
+            vb.addItem(item)
+            vb.enableAutoRange(axis="y", enable=self._auto)
+            ax = pg.AxisItem("right")
+            ax.linkToView(vb)
+            self._label(ax, name, unit, color)
+            p.layout.addItem(ax, 2, 3 + len(self.axes))
+            self.axes.append(ax)
+            self._sync_geometry()
+        self.views.append(vb)
+        self.items.append(item)
+        return vb
+
+    def _extras(self) -> list[pg.ViewBox]:
+        """The extra views (not the plot's own), once each."""
+        return [vb for vb in self.views if vb is not self.plot.vb]
+
+    def recolor(self) -> None:
+        """Put the axes' colours and labels back (after a theme restyled the plot)."""
+        for args in list(self._labels):
+            self._label(*args, keep=False)
+
+    def _label(self, ax: pg.AxisItem, name: str, unit: str, color, keep: bool = True) -> None:
+        if keep:
+            self._labels.append((ax, name, unit, color))
+        kw = {"color": pg.mkColor(color).name()} if color is not None else {}
+        if _si(unit):
+            ax.setLabel(name, units=unit, **kw)
+        else:
+            ax.setLabel(f"{name} ({unit})" if unit else name, **kw)
+        ax.enableAutoSIPrefix(_si(unit))
+        if color is not None:
+            ax.setPen(pg.mkPen(color))
+            ax.setTextPen(pg.mkPen(color))
+
+    def clear(self) -> None:
+        p = self.plot
+        for item, vb in zip(self.items, self.views):
+            if vb is not p.vb:
+                vb.removeItem(item)
+            elif item in self._added:
+                p.removeItem(item)
+        for vb in self.views:
+            if vb is not p.vb and vb.scene() is not None:
+                vb.scene().removeItem(vb)
+        for ax in self.axes:
+            p.layout.removeItem(ax)
+            if ax.scene() is not None:
+                ax.scene().removeItem(ax)
+        self.views, self.axes, self.items, self._added, self._labels = [], [], [], [], []
+
+    def disconnect(self) -> None:
+        self.clear()
+        vb = self.plot.vb
+        for sig, slot in ((vb.sigResized, self._sync_geometry), (vb.sigYRangeChanged, self._main_y_changed),
+                          (vb.sigRangeChangedManually, self._main_zoomed)):
+            try:
+                sig.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
+
+    def set_auto(self, on: bool) -> None:
+        """Keep every extra trace fitted to the height as its data changes (or not)."""
+        self._auto = bool(on)
+        for vb in self._extras():
+            vb.enableAutoRange(axis="y", enable=self._auto)
+
+    def fit(self) -> None:
+        """Fit every extra trace to the plot's height now (the plot's own trace is the
+        host's: it may be auto-scaled or not)."""
+        for vb in self._extras():
+            vb.enableAutoRange(axis="y", enable=True)
+            vb.updateAutoRange()
+            vb.enableAutoRange(axis="y", enable=self._auto)
+
+    def _sync_geometry(self, *_) -> None:
+        r = self.plot.vb.sceneBoundingRect()
+        for vb in self._extras():
+            vb.setGeometry(r)
+            vb.linkedViewChanged(self.plot.vb, vb.XAxis)
+
+    def _main_y_changed(self, _vb, rng) -> None:
+        self._prev, self._last = self._last, tuple(rng)
+
+    def _main_zoomed(self, mask) -> None:
+        """The plot was zoomed or dragged in y: do the same to every extra trace,
+        relative to its own range, so they stay overlaid."""
+        if len(mask) > 1 and not mask[1]:
+            return
+        (a0, b0), (a1, b1) = self._prev, self._last
+        if b0 == a0 or (a0, b0) == (a1, b1):
+            return
+        for vb in self._extras():
+            lo, hi = vb.viewRange()[1]
+            k = (hi - lo) / (b0 - a0)
+            vb.enableAutoRange(axis="y", enable=False)
+            vb.setYRange(lo + (a1 - a0) * k, lo + (b1 - a0) * k, padding=0)

@@ -34,7 +34,7 @@ from . import dsp
 from . import pages
 from . import style, theme
 from .datapadview import DataPadView
-from .plotzoom import OverlayCurve, TraceCurve, plot_widget
+from .plotzoom import MultiAxis, OverlayCurve, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
 from .viewkit import View, label_axis, style_plot, unit_color, with_unit
@@ -188,14 +188,9 @@ class AnalysisPage(QtWidgets.QWidget):
             w.blockSignals(False)
         self.n_label.setText(f"of {n}")
         recorded = good[0]["channel_names"] if good else []
-        self._calcs = {}
-        for c in self.main.cfg.calculations:          # calculated channels these blocks can have
-            try:
-                f = dsp.Formula(c.formula, recorded)
-                f.check(good[0]["sample_rate"])
-                self._calcs[c.name] = (c, f)
-            except (ValueError, IndexError):
-                pass
+        self._chain = dsp.Chain(self.main.cfg.calculations, recorded, good[0]["sample_rate"] if good else None)
+        # calculated channels these blocks can have (each may use the ones above it)
+        self._calcs = {c.name: (c, f) for c, f in zip(self._chain.calcs, self._chain.formulas) if f is not None}
         names = self.names()
         self._fill_stim_channel(recorded)             # the stimulus is a recorded channel
         self.raw.set_channels(names)
@@ -213,7 +208,8 @@ class AnalysisPage(QtWidgets.QWidget):
         if b is None:
             return False
         calc = getattr(self, "_calcs", {}).get(name)
-        return name in b["channel_names"] or (calc is not None and calc[1].refs <= set(b["channel_names"]))
+        return name in b["channel_names"] or (calc is not None and
+                                              self._chain.needs.get(name, {""}) <= set(b["channel_names"]))
 
     def trace(self, i: int, name: str) -> np.ndarray | None:
         b = self.blocks[i] if 0 <= i < len(self.blocks) else None
@@ -222,13 +218,13 @@ class AnalysisPage(QtWidgets.QWidget):
         if name in b["channel_names"]:
             return b["data"][b["channel_names"].index(name)]
         calc = getattr(self, "_calcs", {}).get(name)
-        if calc is None or not calc[1].refs <= set(b["channel_names"]):
+        if calc is None or not self._chain.needs.get(name, {""}) <= set(b["channel_names"]):
             return None
-        c, f = calc
         env = dict(zip(b["channel_names"], b["data"]))
         # worked out once per block file (zero-phase), shared with the Acquisition tab
-        return self.main.store.memo(self._paths[i], ("calc", c.formula),
-                                    lambda: f.offline(env, b["sample_rate"]))
+        ys = self.main.store.memo(self._paths[i], ("calcs", self._chain.key()),
+                                  lambda: self._chain.offline(env, b["sample_rate"]))
+        return ys[[c.name for c in self._chain.calcs].index(name)]
 
     def unit_of(self, name: str) -> str:
         calc = getattr(self, "_calcs", {}).get(name)
@@ -1253,16 +1249,17 @@ class CompareView(View):
         if self.layout_mode.currentData() == "overlaid":
             pw = plot_widget()
             p = pw.getPlotItem()
-            p.addLegend(offset=(10, 10))
-            p.setLabel("left", "each scaled to fit")
+            legend = p.addLegend(offset=(10, 10))
+            multi = MultiAxis(p)                          # each on its own axis, fitted to the height
             for (label, unit, y), color in zip(series, colors):
-                d = y - np.median(y)
-                scale = np.percentile(np.abs(d), 99.9) or 1.0
-                curve = TraceCurve(name=f"{label} (±{with_unit(scale, unit)})")
+                curve = TraceCurve()
                 curve.mode = "peak"
                 curve.setPen(pg.mkPen(color, width=1.5))
-                p.addItem(curve)
-                curve.setData(t, d / scale)
+                curve.setData(t, y)
+                multi.add(curve, label, unit, color)
+                legend.addItem(curve, label)
+            multi.fit()
+            self._multi = multi                           # keep it (and its axes) alive
             plots = [pw]
         else:
             plots = []
@@ -1288,6 +1285,8 @@ class CompareView(View):
         # plain seconds on every row, so they read the same
         for pw in plots:
             pw.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
+        if self.layout_mode.currentData() == "overlaid":
+            self._multi.recolor()                         # the theme reset the left axis's colour
         plots[-1].getPlotItem().setLabel("bottom", f"time in block {i + 1} (s)")
         plots[0].getPlotItem().setXRange(0, n / fs, padding=0)
         self._plots = plots
@@ -1378,3 +1377,5 @@ class CompareView(View):
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
         for pw in [self.psth, self.sta] + self._plots:
             style_plot(pw, th)
+        if getattr(self, "_multi", None) is not None and self.layout_mode.currentData() == "overlaid":
+            self._multi.recolor()

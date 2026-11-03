@@ -518,9 +518,10 @@ def test_averages_show_and_export_sd_and_sem(app, win, tmp_path):
     ap.spread_box.setCurrentIndex(1)                                 # ± SD
     assert len(raw.group_avgs) == 2 and len(raw.bands) == 2 * 3      # each group: line + band
     chosen = raw.chosen_or_none()
-    Y = np.array([ap.trace(i, "Ch1") for i in chosen if i in ap.groups[0][1]][:2])
-    n = min(len(y) for y in Y)
-    mean, sd = Y[:, :n].mean(0), Y[:, :n].std(0, ddof=1)
+    rows = [ap.trace(i, "Ch1") for i in chosen if i in ap.groups[0][1]][:2]
+    n = min(len(y) for y in rows)                                    # blocks can differ by a chunk
+    Y = np.array([y[:n] for y in rows])
+    mean, sd = Y.mean(0), Y.std(0, ddof=1)
     up = raw.bands[0].getOriginalDataset()[1][:n]
     assert np.allclose(up, mean + sd)                                # the band is mean ± SD
     ap.spread_box.setCurrentIndex(2)                                 # ± SEM
@@ -607,7 +608,7 @@ def test_datapad_measures_blocks_averages_and_groups(app, win, tmp_path):
     pad.add_rows("avg")                                               # each group's average trace
     blocks = ap.groups[0][1]
     Y = np.array([ap.trace(i, "Stim")[:int(0.0005 * fs) + 1] for i in blocks])
-    assert pad.rows[0]["values"][("Stim", "mean")] == pytest.approx(Y.mean(0).mean(), abs=1e-9)
+    assert pad.rows[0]["values"][("Stim", "mean")] == pytest.approx(Y.mean(0).mean(), rel=1e-6)
     assert pad.rows[0]["window"] == "0–0.0005 s"
 
     pad.region.setRegion((0.1, 0.2))                                  # dragging sets the boxes

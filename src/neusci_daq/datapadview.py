@@ -24,7 +24,7 @@ from . import analysis as A
 from . import datapad as D
 from . import fitting as FIT
 from . import style, theme
-from .plotzoom import TraceCurve, plot_widget
+from .plotzoom import MultiAxis, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
 from .viewkit import View, label_axis, style_plot, unit_color
@@ -143,6 +143,12 @@ class DataPadView(View):
         self.show_bar = QtWidgets.QHBoxLayout()
         bar.addLayout(self.show_bar)
         bar.addStretch(1)
+        self.separate = QtWidgets.QCheckBox("Separate y axes")
+        self.separate.setChecked(True)
+        self.separate.setToolTip("Each channel on its own y axis (in its colour), scaled to fill the plot. "
+                                 "Scroll or drag on an axis to scale just that channel. Off: one shared axis")
+        self.separate.toggled.connect(lambda *_: self.redraw())
+        bar.addWidget(self.separate)
         tv.addLayout(bar)
         self.show_boxes: dict[str, QtWidgets.QCheckBox] = {}
         self.traces: dict[str, TraceCurve] = {}
@@ -152,6 +158,7 @@ class DataPadView(View):
         p.setLabel("bottom", "time in block", units="s")
         p.showGrid(x=True, y=True, alpha=0.2)
         self.legend = p.addLegend(offset=(10, 5))
+        self.multi = MultiAxis(p)
         self.region = pg.LinearRegionItem((0.0, 0.1))
         self.region.setZValue(10)
         self.region.setToolTip("The window measured: drag it, or its edges")
@@ -227,9 +234,7 @@ class DataPadView(View):
             self.show_bar.removeWidget(b)
             b.deleteLater()
         self.show_boxes = {}
-        p = self.preview.getPlotItem()
-        for c in self.traces.values():
-            p.removeItem(c)
+        self.multi.clear()
         self.traces = {}
         self.legend.clear()
         for k, n in enumerate(names):
@@ -326,17 +331,16 @@ class DataPadView(View):
         i = page.index()
         p = self.preview.getPlotItem()
         self.legend.clear()
+        self.multi.clear()
+        self.multi.separate = self.separate.isChecked()
         dur, units = 0.0, []
         for name, c in self.traces.items():
             y = page.trace(i, name) if name in self.shown() else None
             if y is None:
-                if c.scene() is not None:
-                    p.removeItem(c)
                 continue
             fs = page.blocks[i]["sample_rate"]
             c.setData(np.arange(len(y)) / fs, y)
-            if c.scene() is None:
-                p.addItem(c)
+            self.multi.add(c, name, page.unit_of(name), c.opts["pen"].color())
             self.legend.addItem(c, name)
             dur = max(dur, len(y) / fs)
             units.append(page.unit_of(name))
@@ -344,10 +348,15 @@ class DataPadView(View):
             p.setTitle("Tick a channel to show it", color=self._fg())
             return
         shown = self.shown()
-        if len(set(units)) == 1:
-            label_axis(p, "left", shown[0] if len(shown) == 1 else "", units[0])
-        else:
-            p.setLabel("left", "mixed units: " + ", ".join(dict.fromkeys(units)), units=None)
+        if not self.multi.separate:
+            if len(set(units)) == 1:
+                label_axis(p, "left", shown[0] if len(shown) == 1 else "", units[0])
+            else:
+                p.setLabel("left", "mixed units: " + ", ".join(dict.fromkeys(units)), units=None)
+            p.getAxis("left").setPen(pg.mkPen(self._fg()))
+            p.getAxis("left").setTextPen(pg.mkPen(self._fg()))
+        p.enableAutoRange(axis="y")                       # every trace fits the height
+        self.multi.fit()
         p.setTitle(f"Block {i + 1}: drag the shaded window", color=self._fg())
         if self.t1.value() <= 0 or self.t0.value() >= dur:     # a first window: the middle fifth
             self.t0.setValue(0.4 * dur)
@@ -735,6 +744,7 @@ class DataPadView(View):
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
         style_plot(self.preview, th)
         style_plot(self.scatter, th)
+        self.redraw()                                    # re-colour the channel axes
         self.draw_scatter()
         c = QtGui.QColor("#E69F00")
         c.setAlpha(50)

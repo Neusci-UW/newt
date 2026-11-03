@@ -820,8 +820,8 @@ class TrialsPage(QtWidgets.QWidget):
         problem = None
         if main.stim_out is None:
             problem = "Trials needs the nidaqmx (or simulated) backend to send stimuli."
-        elif main.mode != "live" or not main.backend.running:
-            problem = "Press Start first: trials run while acquiring."
+        elif main.mode != "live":
+            problem = "Go back to live mode first (Blocks panel › Live): trials record new data."
         elif not cfg.stim_monitor or not any(ch.physical == cfg.stim_monitor for ch in cfg.channels):
             problem = "Record the stimulus on a spare input first (Line up on › Choose…)."
         elif not c or not c.ok:
@@ -831,6 +831,11 @@ class TrialsPage(QtWidgets.QWidget):
         if problem:
             self.show_message(problem, error=True)
             return False
+        if not main.backend.running:                     # start acquiring for the protocol
+            main.btn_run.setChecked(True)
+            if not main.backend.running:
+                self.show_message("Couldn't start acquiring.", error=True)
+                return False
         main.set_repeat(False)
         p = self.protocol
         self.trials = T.sequence(p, c.a_vals, c.b_vals)

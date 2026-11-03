@@ -14,6 +14,16 @@ Functions (frequencies in Hz, times in ms):
     derivative(x)               per second          integral(x)   × seconds, from the start
     abs sqrt exp log log10 sin cos tan sign  clip(x, lo, hi)  max(a, b)  min(a, b)
     + - * / ** and brackets
+  cyclic measurements, LabChart-style: an event is each rise through `level`, at least
+  `dead_ms` (default 1 ms) after the last; the value is held until the next event:
+    rate(x, level[, dead_ms])     events per second (× 60 for per minute), falling
+                                  when events stop
+    period(x, level[, dead_ms])   seconds between events
+    height(x, level[, dead_ms])   cyclic height: max − min over the last cycle
+    count(x, level[, dead_ms])    events so far
+
+A calculated channel can also use the calculated channels above it (Chain), so
+calculations build on each other: Ch2 band-pass, then rate("Ch2 band-pass", 0.1).
 
 The recorded data is never changed: calculations are worked out for display and
 analysis. Two ways, giving the same result apart from timing:
@@ -56,7 +66,8 @@ _POINTWISE = {
 _FILTERS = {"lowpass": (1, "lowpass"), "highpass": (1, "highpass"), "bandpass": (2, "bandpass"),
             "bandstop": (2, "bandstop")}
 _WINDOWED = {"smooth", "rms", "envelope"}
-FUNCTIONS = sorted(list(_POINTWISE) + list(_FILTERS) + list(_WINDOWED) +
+_CYCLIC = {"rate", "period", "height", "count"}
+FUNCTIONS = sorted(list(_POINTWISE) + list(_FILTERS) + list(_WINDOWED) + list(_CYCLIC) +
                    ["notch", "derivative", "integral", "clip", "max", "min"])
 
 
@@ -100,6 +111,54 @@ def _moving_mean(x: np.ndarray, n: int, centred: bool, tail: np.ndarray | None =
     full = np.concatenate([head, x])
     c = np.cumsum(np.insert(full, 0, 0.0))
     return (c[n:] - c[:-n]) / n, full[-(n - 1):]
+
+
+def _cyclic(kind: str, x: np.ndarray, level: float, dead: int, fs: float, st: dict) -> np.ndarray:
+    """A cyclic measurement of x (see the module notes), carrying on from st (updated)."""
+    m = len(x)
+    out = np.empty(m)
+    if not m:
+        return out
+    above = x >= level
+    prev = st.get("above", bool(above[0]))
+    rising = np.flatnonzero(above & ~np.r_[prev, above[:-1]])
+    n0 = st.get("n", 0)
+    last = st.get("last")
+    held = st.get("held", 0.0 if kind == "count" else np.nan)
+    count = st.get("count", 0)
+    lo, hi = st.get("lo", np.inf), st.get("hi", -np.inf)
+
+    def fill(a, b):                       # samples a..b-1 hold the value; rate/period follow the gap
+        if b <= a:
+            return
+        out[a:b] = held
+        if last is not None and kind in ("rate", "period"):
+            gap = (n0 + np.arange(a, b) - last) / fs
+            with np.errstate(all="ignore"):
+                out[a:b] = np.minimum(held, 1 / gap) if kind == "rate" else np.maximum(held, gap)
+
+    pos = 0
+    for i in rising:
+        g = n0 + int(i)
+        if last is not None and g - last < dead:
+            continue
+        fill(pos, i)
+        if i > pos:
+            lo, hi = min(lo, float(np.min(x[pos:i]))), max(hi, float(np.max(x[pos:i])))
+        if last is not None:
+            held = {"rate": fs / (g - last), "period": (g - last) / fs,
+                    "height": hi - lo, "count": held}[kind]
+        count += 1
+        if kind == "count":
+            held = float(count)
+        lo, hi = np.inf, -np.inf
+        last, pos = g, int(i)
+    fill(pos, m)
+    lo, hi = min(lo, float(np.min(x[pos:]))), max(hi, float(np.max(x[pos:])))
+    if kind == "count" and not len(rising) and last is None:
+        out[:] = held
+    st.update(above=bool(above[-1]), n=n0 + m, last=last, held=held, count=count, lo=lo, hi=hi)
+    return out
 
 
 # -- the tree ---------------------------------------------------------------------
@@ -209,6 +268,9 @@ class _Call(_Node):
             if len(x):
                 mine["prev"] = x[-1]
             return d
+        if name in _CYCLIC:
+            dead = int(round((self.consts[1] if len(self.consts) > 1 else 1.0) / 1000 * fs))
+            return _cyclic(name, x, self.consts[0], max(1, dead), fs, {} if mine is None else mine)
         if name == "integral":
             start = 0.0 if mine is None else mine.get("sum", 0.0)
             out = start + np.cumsum(x) / fs
@@ -224,11 +286,11 @@ _SIGNATURES = {**{f: (1, 0, 0) for f in _POINTWISE},
                "lowpass": (1, 1, 2), "highpass": (1, 1, 2), "bandpass": (1, 2, 3), "bandstop": (1, 2, 3),
                "notch": (1, 1, 2), "smooth": (1, 1, 1), "rms": (1, 1, 1), "envelope": (1, 1, 1),
                "derivative": (1, 0, 0), "integral": (1, 0, 0), "clip": (1, 2, 2), "max": (2, 0, 0),
-               "min": (2, 0, 0)}
+               "min": (2, 0, 0), **{f: (1, 1, 2) for f in _CYCLIC}}
 _USAGE = {"lowpass": "lowpass(x, Hz)", "highpass": "highpass(x, Hz)", "bandpass": "bandpass(x, low Hz, high Hz)",
           "bandstop": "bandstop(x, low Hz, high Hz)", "notch": "notch(x, Hz)", "smooth": "smooth(x, ms)",
           "rms": "rms(x, ms)", "envelope": "envelope(x, ms)", "clip": "clip(x, low, high)",
-          "max": "max(a, b)", "min": "min(a, b)"}
+          "max": "max(a, b)", "min": "min(a, b)", **{f: f"{f}(x, level[, dead ms])" for f in _CYCLIC}}
 
 
 class Formula:
@@ -316,6 +378,65 @@ class Formula:
         self.state = {}
 
 
+class Chain:
+    """The calculated channels in order: each can use the recorded channels and the
+    calculated ones above it. Broken ones (and those using them) give None."""
+
+    def __init__(self, calcs: list[Calculation], channels: list[str], fs: float | None = None):
+        self.calcs = list(calcs)
+        self.formulas: list[Formula | None] = []
+        self.problems: list[str] = []
+        self.needs: dict[str, set[str]] = {}          # name -> the recorded channels it needs
+        known, broken = list(channels), set()
+        for c in self.calcs:
+            f, why = None, ""
+            try:
+                f = Formula(c.formula, known)
+                if fs:
+                    f.check(fs)
+                bad = sorted(f.refs & broken)
+                if bad:
+                    why = f"uses {bad[0]}, which can't be calculated"
+                    f = None
+            except ValueError as e:
+                why = str(e)
+            if f is None:
+                broken.add(c.name)
+            else:
+                need = set()
+                for r in f.refs:
+                    need |= self.needs.get(r, {r})
+                self.needs[c.name] = need
+            self.formulas.append(f)
+            self.problems.append(why)
+            known.append(c.name)
+
+    def key(self) -> tuple:
+        return tuple((c.name, c.formula) for c in self.calcs)
+
+    def _run(self, env: dict, fs: float, live: bool) -> list:
+        env, out = dict(env), []
+        for c, f in zip(self.calcs, self.formulas):
+            y = None
+            if f is not None and f.refs <= env.keys():
+                y = f.stream(env, fs) if live else f.offline(env, fs)
+                env[c.name] = y
+            out.append(y)
+        return out
+
+    def offline(self, env: dict, fs: float) -> list:
+        """Each calculated trace of a whole block (None where it can't be)."""
+        return self._run(env, fs, False)
+
+    def stream(self, env: dict, fs: float) -> list:
+        return self._run(env, fs, True)
+
+    def reset(self) -> None:
+        for f in self.formulas:
+            if f is not None:
+                f.reset()
+
+
 def _walk(node):
     yield node
     for attr in ("a", "b"):
@@ -337,6 +458,8 @@ PRESETS = [
     ("Derivative (dV/dt)", "d{ch}/dt", "derivative({q})", "{u}/s"),
     ("Integral", "∫{ch}", "integral({q})", "{u}·s"),
     ("Difference of two channels", "{ch} − {ch2}", "{q} - {q2}", "{u}"),
+    ("Rate meter (events/min above 50% of 1 V)", "{ch} rate", "60 * rate({q}, 0.5)", "/min"),
+    ("Cyclic height", "{ch} cyclic height", "height({q}, 0.5)", "{u}"),
 ]
 
 

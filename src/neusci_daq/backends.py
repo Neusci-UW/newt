@@ -104,8 +104,8 @@ class SimulatedBackend(Backend):
         self._time = 0.0
 
     def inject(self, monitor: str, wave: np.ndarray, rate: float) -> None:
-        """Play a stimulus: `wave` appears on the `monitor` input, and its pulses
-        reach the cells that the stimulus drives."""
+        """Play a stimulus: `wave` appears on the `monitor` input, and is injected as a
+        current into the cells that the stimulus drives."""
         fs = self.cfg.sample_rate
         t_in = np.arange(len(wave)) / rate
         t_ai = np.arange(0, len(wave) / rate, 1.0 / fs)
@@ -177,7 +177,8 @@ class SimulatedBackend(Backend):
                 monitor, w = self._pending
                 self._pending = None
                 self._stim = (monitor, w, 0)
-                state.stimulate([(i / fs, amp) for i, amp in sim.pulse_onsets(w)])
+                state.stim = []                    # a new stimulus (or Stop) replaces the one playing
+                state.stimulate(w, fs)
             # run the network up to the end of this chunk
             steps = int(round((idx + cs) / fs / sim.SIM_DT)) - steps_done
             v, spikes = state.run(max(steps, 0))

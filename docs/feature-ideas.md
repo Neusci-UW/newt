@@ -27,6 +27,7 @@ Programs referred to:
 | Stimulator with units and pulse trains | LabChart Stimulator panel, Clampex | ✅ Stimulator tab |
 | Protocols that step a stimulus setting, then line up and measure the responses | Clampex episodic protocols, LabChart Scope | ✅ Trials tab |
 | Open and save LabChart `.mat` files | LabChart export | ✅ File menu |
+| Analysis channels built in a dialog, which can use each other, with cyclic measurements (rate meter, period, cyclic height, event count) | LabChart Channel Calculations | ✅ + Analysis channel |
 | Calculated channels: digital filters (low-pass, high-pass, band-pass, band-stop, notch), smoothing, RMS, envelope, derivative, integral and arithmetic | LabChart Channel Calculations, Spike2 virtual channels | ✅ Calculations… |
 | DataPad: a table of measurements in a time window, exported or copied | LabChart DataPad, Clampfit Statistics | ✅ Analysis › DataPad |
 | Mean ± SD or SEM across trials, shaded on averages | Clampfit, AxoGraph | ✅ Spread, at the top of Analysis |
@@ -50,7 +51,7 @@ The top picks for a teaching lab, roughly in order:
    - From: LabChart Scope, Clampex.
    - Why: the response emerges from the noise as you watch, which teaches signal averaging.
    - How: the Trials tab does this after the fact; a live version would reuse its `cut()`.
-4. **Cyclic and rate measurements as live channels.** Rate meter (spikes/s or beats/min), cyclic height, and period.
+4. ✅ **Cyclic and rate measurements as live channels** (now in **+ Analysis channel**). Rate meter (spikes/s or beats/min), cyclic height, and period.
    - From: LabChart Channel Calculations (Cyclic Measurements).
    - Why: they're needed for heart-rate and breathing labs, and for firing rate against stimulus strength, live.
    - How: add `rate(x, threshold)` and `period(x, threshold)` to the formula language in `dsp.py`.

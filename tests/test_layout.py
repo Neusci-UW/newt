@@ -1,6 +1,7 @@
 """Tabs, split view, hover strips, line thickness, whole-app light/dark, stimulator chip."""
 import numpy as np
 import pytest
+import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from neusci_daq import config, style, theme
@@ -229,7 +230,7 @@ def test_stim_tab_output_and_record_on(app, win):
     page.output.activated.emit(page.output.currentIndex())
     assert win.cfg.stim_output == "ao1"
     labels = [page.monitor.itemText(i) for i in range(page.monitor.count())]
-    assert labels[0].startswith("None") and "ai0 (used by Ch1)" in labels
+    assert labels[0].startswith("None") and "ai0 (Ch1)" in labels                 # picking it makes Ch1 the stimulus channel
     page.monitor.setCurrentIndex(page.monitor.findData("ai3"))
     page._monitor_picked()
     assert win.cfg.stim_monitor == "ai3" and [c.name for c in win.cfg.channels][-1] == "Stim"
@@ -663,3 +664,68 @@ def test_real_wheel_events_zoom_only_time(app, win):
         assert win.window_box.value() < before
         assert vb.viewRange()[1] == pytest.approx([-1, 1])
     win.set_auto_scale_y(True)
+
+
+class _Drag:
+    """Enough of a pyqtgraph drag event for WheelViewBox.mouseDragEvent."""
+    def __init__(self, vb, a, b, finish, mods):
+        self._a, self._b, self._finish, self._mods = vb.mapViewToScene(pg.Point(*a)), vb.mapViewToScene(pg.Point(*b)), finish, mods
+        self._vb = vb
+    def button(self):
+        return QtCore.Qt.MouseButton.LeftButton
+    def modifiers(self):
+        return self._mods
+    def isFinish(self):
+        return self._finish
+    def buttonDownPos(self, *_):
+        return self._vb.mapFromScene(self._a)
+    def pos(self):
+        return self._vb.mapFromScene(self._b)
+    def accept(self):
+        pass
+    def ignore(self):
+        pass
+
+
+def _box_drag(vb, a, b, mods=QtCore.Qt.KeyboardModifier.ControlModifier):
+    vb.mouseDragEvent(_Drag(vb, a, b, False, mods))
+    vb.mouseDragEvent(_Drag(vb, a, b, True, mods))
+
+
+def test_ctrl_drag_zooms_to_a_box_and_ctrl_click_goes_back(app):
+    from neusci_daq.plotzoom import plot_widget
+    pw = plot_widget()
+    pw.resize(600, 400)
+    pw.show()
+    pw.plot(np.linspace(0, 10, 1000), np.sin(np.linspace(0, 10, 1000)))
+    vb = pw.getPlotItem().vb
+    pump(app, 0.05)
+    vb.setRange(xRange=(0, 10), yRange=(-1, 1), padding=0)
+    before = vb.viewRange()
+    _box_drag(vb, (2, -0.5), (4, 0.5))
+    (x0, x1), (y0, y1) = vb.viewRange()
+    assert (x0, x1) == pytest.approx((2, 4), abs=0.02) and (y0, y1) == pytest.approx((-0.5, 0.5), abs=0.02)
+    _box_drag(vb, (2.5, 0), (3, 0.25), mods=QtCore.Qt.KeyboardModifier.MetaModifier)   # Ctrl on a Mac
+    assert vb.viewRange()[0] == pytest.approx([2.5, 3], abs=0.02)
+    vb.zoom_back()
+    vb.zoom_back()                                                   # Ctrl+click twice: back to the start
+    assert vb.viewRange()[0] == pytest.approx(before[0], abs=0.02)
+    pw.close()
+
+
+def test_box_zoom_in_review_sets_window_and_position(app, win, tmp_path):
+    win.resize(1200, 800)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 1.2)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.open_session(win.session_dir)
+    pump(app, 0.1)
+    vb = win.plots[0].vb
+    _box_drag(vb, (0.2, -0.5), (0.6, 0.5))
+    assert win.window_box.value() == pytest.approx(0.4, abs=0.01)
+    assert win.plots[1].vb.viewRange()[0] == pytest.approx([0.2, 0.6], abs=0.01)   # every plot follows
+    assert vb.viewRange()[1] == pytest.approx([-0.5, 0.5], abs=0.02)

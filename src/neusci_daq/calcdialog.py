@@ -97,8 +97,8 @@ class CalcDialog(QtWidgets.QDialog):
             elif c.name in self.channels or c.name in seen:
                 why = f"{c.name!r} is already used: give it another name"
             else:
-                try:
-                    dsp.Formula(c.formula, self.channels).check(self.fs)
+                try:                                     # it can use the rows above it too
+                    dsp.Formula(c.formula, self.channels + [x.name for x in self.calculations()[:r]]).check(self.fs)
                 except ValueError as e:
                     why = str(e)
             seen.add(c.name)

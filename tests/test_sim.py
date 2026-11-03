@@ -16,6 +16,10 @@ def spikes_of(spikes, cell):
     return [k for k, c in spikes if c == cell]
 
 
+def pulse(width_ms=1.0, volts=1.0):
+    return np.full(int(round(width_ms / 1000 * FS)), volts)
+
+
 # ---------------------------------------------------------------- the cells
 def test_cells_fire_now_and_then_at_rest():
     st = sim.NetworkState(sim.default_network(), np.random.default_rng(0))
@@ -33,16 +37,73 @@ def test_a_cell_fires_at_threshold_and_respects_its_refractory_period():
     assert len(spikes) > 10 and gaps.min() >= 0.005 - 1e-9
 
 
-def test_synapse_sizes_are_the_psp_in_mv():
-    net = sim.Network([sim.Cell(drive_mv=0, noise_mv=0, stimulus=10.0), sim.Cell(drive_mv=0, noise_mv=0)],
-                      synapse_delay_ms=2)
+def test_stimulus_is_the_depolarization_from_a_1_v_1_ms_pulse():
+    net = sim.Network([sim.Cell(drive_mv=0, noise_mv=0, stimulus=10.0), sim.Cell(drive_mv=0, noise_mv=0)])
     net.set_weights(np.zeros((2, 2)))
     st = sim.NetworkState(net, np.random.default_rng(0))
-    st.stimulate([(0.0, 1.0)])                                      # 1 V pulse: a 10 mV PSP on cell 1
+    st.stimulate(pulse(), FS)                                       # 1 V, 1 ms: 10 mV on cell 1
     v, _ = st.run(int(0.1 / sim.SIM_DT))
     assert v[:, 0].max() - (-70) == pytest.approx(10, abs=0.1)
     assert v[:, 1].max() == pytest.approx(-70, abs=1e-6)            # cell 2 isn't driven
-    assert np.argmax(v[:, 0]) * sim.SIM_DT > 0.002                  # after the synaptic delay
+    assert np.argmax(v[:, 0]) * sim.SIM_DT == pytest.approx(0.001, abs=2e-4)   # at the pulse's end
+
+
+def test_synapse_sizes_are_the_psp_in_mv():
+    net = sim.Network([sim.Cell(drive_mv=0, noise_mv=0, stimulus=60.0), sim.Cell(drive_mv=0, noise_mv=0)],
+                      synapse_delay_ms=2)
+    net.set_weights(np.array([[0, 5.0], [0, 0]]))
+    st = sim.NetworkState(net, np.random.default_rng(0))
+    st.stimulate(pulse(), FS)                                       # cell 1 fires once
+    v, sp = st.run(int(0.1 / sim.SIM_DT))
+    assert len(spikes_of(sp, 0)) == 1
+    assert v[:, 1].max() - (-70) == pytest.approx(5, abs=0.1)       # a 5 mV EPSP on cell 2
+    assert (np.argmax(v[:, 1]) - spikes_of(sp, 0)[0]) * sim.SIM_DT > 0.002   # after the synaptic delay
+
+
+def quiet_cell(**kw):
+    net = sim.Network([sim.Cell(drive_mv=0, noise_mv=0, **kw)])
+    net.set_weights(np.zeros((1, 1)))
+    return sim.NetworkState(net, np.random.default_rng(0))
+
+
+def test_pulse_width_matters_strength_duration():
+    fired = {}
+    for w in (0.2, 0.5, 1, 2, 5):
+        st = quiet_cell(stimulus=12.0)                              # threshold is 20 mV above rest
+        st.stimulate(pulse(w), FS)
+        fired[w] = len(st.run(int(0.05 / sim.SIM_DT))[1])
+    assert fired[0.2] == fired[0.5] == fired[1] == 0 and fired[2] == 1 and fired[5] >= 1
+    need = []                                                       # the volts needed fall with width
+    for w in (0.5, 1, 2, 5):
+        for volts in np.arange(0.1, 10, 0.05):
+            st = quiet_cell(stimulus=12.0)
+            st.stimulate(pulse(w, volts), FS)
+            if st.run(int(0.05 / sim.SIM_DT))[1]:
+                need.append(volts)
+                break
+    assert all(a > b for a, b in zip(need, need[1:]))
+
+
+def test_a_long_step_fires_repeatedly_faster_when_stronger():
+    counts = []
+    for volts in (0.15, 0.3, 0.6):                                  # 16, 32, 63 mV held
+        st = quiet_cell(stimulus=10.0)
+        st.stimulate(pulse(500, volts), FS)
+        counts.append(len(st.run(int(0.5 / sim.SIM_DT))[1]))
+    assert counts[0] == 0 and 3 < counts[1] < counts[2]
+
+
+def test_a_slow_sine_entrains_the_cell_and_a_fast_one_is_filtered_out():
+    t = np.arange(int(FS)) / FS
+    st = quiet_cell(stimulus=4.0)
+    st.stimulate(np.sin(2 * np.pi * 5 * t), FS)
+    sp = np.array([k for k, _ in st.run(int(1 / sim.SIM_DT))[1]]) * sim.SIM_DT
+    assert len(sp) >= 5
+    phase = (sp * 5) % 1
+    assert np.all(phase < 0.5)                                      # only on the rising, positive half
+    st = quiet_cell(stimulus=4.0)
+    st.stimulate(np.sin(2 * np.pi * 500 * t), FS)
+    assert not st.run(int(1 / sim.SIM_DT))[1]
 
 
 def test_activity_spreads_along_excitatory_synapses_and_inhibition_hyperpolarizes():
@@ -50,7 +111,7 @@ def test_activity_spreads_along_excitatory_synapses_and_inhibition_hyperpolarize
     st = sim.NetworkState(net, np.random.default_rng(1))
     hits = np.zeros(3)
     for _ in range(30):
-        st.stimulate([(0.0, 1.0)])
+        st.stimulate(pulse(), FS)
         _, sp = st.run(int(1 / sim.SIM_DT))
         for i in range(3):
             hits[i] += any(c == i and k * sim.SIM_DT < 0.03 for k, c in sp)
@@ -58,7 +119,7 @@ def test_activity_spreads_along_excitatory_synapses_and_inhibition_hyperpolarize
     quiet = sim.Network([sim.Cell(noise_mv=0, drive_mv=0, stimulus=40), sim.Cell(noise_mv=0, drive_mv=0)])
     quiet.set_weights(np.array([[0, -10.0], [0, 0]]))               # 1 inhibits 2
     st = sim.NetworkState(quiet, np.random.default_rng(0))
-    st.stimulate([(0.0, 1.0)])
+    st.stimulate(pulse(), FS)
     v, sp = st.run(int(0.1 / sim.SIM_DT))
     assert spikes_of(sp, 0) and v[:, 1].min() == pytest.approx(-80, abs=0.2)   # a 10 mV IPSP
 
@@ -219,3 +280,47 @@ def test_hardware_has_no_simulation_tab(app, tmp_path):
     w = MainWindow(cfg, settings=st, config_path=tmp_path / "config.toml")
     assert w.sim_page is None
     w.close()
+
+
+def test_simulation_tab_shows_and_sets_what_the_stimulator_drives(app, win):
+    page = win.sim_page
+    assert [t.isChecked() for t, _ in page.stim_boxes] == [True, False, False]   # the default chain
+    assert "drives cell 1" in page.stim_wire.text() and page.btn_record_stim.isVisible() is not None
+    tick, strength = page.stim_boxes[1]
+    tick.setChecked(True)                                            # cell 2 too
+    strength.setValue(15)
+    assert [c.stimulus for c in win.cfg.sim_network.cells] == [25.0, 15.0, 0.0]
+    page.stim_boxes[0][0].setChecked(False)                          # not cell 1
+    assert win.cfg.sim_network.cells[0].stimulus == 0
+    page.stim_boxes[0][0].setChecked(True)                           # back, with its old strength
+    assert win.cfg.sim_network.cells[0].stimulus == 25.0
+    col = [c[1] for c in __import__("neusci_daq.simpage", fromlist=["x"])._CELL_COLUMNS].index("stimulus")
+    page.cells.item(2, col).setText("5 mV")                          # the table and the box agree
+    assert page.stim_boxes[2][0].isChecked() and page.stim_boxes[2][1].value() == 5
+    assert not win.cfg.stim_monitor
+    page.btn_record_stim.click()                                     # record the stimulus for Trials
+    assert win.cfg.stim_monitor and "recorded on" in page.stim_wire.text()
+    win.stim_page._show_sim_note()
+    assert "cell 1 (25 mV), cell 2 (15 mV), cell 3 (5 mV)" in win.stim_page.sim_note.text()
+
+
+def test_the_backend_injects_the_waveform_and_stop_cuts_it_off():
+    cfg = config.Config(backend="simulated", sample_rate=FS, chunk_size=200, stim_monitor="ai0",
+                        channels=[config.Channel("ai0", "Stim"), config.Channel("ai1", "Cell")])
+    net = sim.Network([sim.Cell(drive_mv=0, noise_mv=0, stimulus=10.0)])
+    net.set_weights(np.zeros((1, 1)))
+    net.recordings = [sim.Recording("ai1", 0, "intracellular", gain=1, noise_v=0)]
+    cfg.sim_network = net
+    be = SimulatedBackend(cfg)
+    q = be.subscribe()
+    be.start()
+    time.sleep(0.1)
+    be.inject("ai0", np.full(int(0.2 * FS), 0.1), FS)                # 0.1 V for 200 ms: ~10 mV held
+    time.sleep(0.1)
+    be.inject("ai0", np.zeros(1), FS)                                # Stop
+    time.sleep(0.2)
+    be.stop()
+    d = np.concatenate([q.get_nowait().data for _ in range(q.qsize())], axis=1)
+    dep = d[1] * 1000 + 70                                           # mV above rest
+    assert 5 < dep.max() < 12                                        # charged toward ~10.5 mV
+    assert dep[-int(0.05 * FS):].max() < 1                           # and relaxed after Stop

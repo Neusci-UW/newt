@@ -202,11 +202,39 @@ def test_record_stimulus_on_adds_and_removes_a_stim_channel(app, win):
     assert win.set_stim_monitor("ai3")
     assert [c.name for c in win.cfg.channels] == ["Ch1", "Ch2", "Stim"]
     assert win.cfg.channels[2].physical == "ai3" and win.cfg.stim_monitor == "ai3"
-    assert not win.set_stim_monitor("ai0")                  # used by Ch1
     assert win.set_stim_monitor("ai4")                      # move it
     assert [c.physical for c in win.cfg.channels] == ["ai0", "ai1", "ai4"]
     assert win.set_stim_monitor("")
     assert [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"] and win.cfg.stim_monitor == ""
+
+
+def test_an_existing_channel_can_record_the_stimulus_from_acquisition(app, win):
+    from neusci_daq.channels import ChannelStrip
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    assert [s.stim.isVisible() or not s.stim.isHidden() for s in strips] == [True, True]
+    assert not any(s.stim.isChecked() for s in strips)
+    strips[1].stim.setChecked(True)                         # Ch2 records the stimulus
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == "ai1" and [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"]
+    assert win.stim_page.monitor.currentData() == "ai1"     # the Stimulator tab agrees
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    strips[0].stim.setChecked(True)                         # only one at a time
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == "ai0"
+    assert [s.stim.isChecked() for s in win.strips if isinstance(s, ChannelStrip)] == [True, False]
+    assert win.set_stim_monitor("ai3")                      # a new Stim channel, then back to Ch1
+    assert win.set_stim_monitor("ai0")
+    assert [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"]   # the added Stim channel goes
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    strips[0].stim.setChecked(False)
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == "" and len(win.cfg.channels) == 2
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    strips[1].stim.setChecked(True)
+    pump(app, 0.05)
+    win._channel_removed([s for s in win.strips if isinstance(s, ChannelStrip)][1])   # remove it: unmarked
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == ""
 
 
 def test_fired_stimulus_is_recorded_on_the_stim_channel_and_logged(app, win):

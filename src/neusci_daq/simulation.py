@@ -10,8 +10,12 @@ The network is 1-10 leaky integrate-and-fire cells:
 - Each spike gives every other cell a PSP of synapses[pre][post] mV (positive
   excites, negative inhibits) synapse_delay_ms later. PSPs rise and fall with
   synapse_tau_ms, and sum.
-- Each stimulus pulse gives each cell a PSP of `stimulus` mV per volt of the
-  pulse, also synapse_delay_ms later.
+- The stimulus is injected as a current that follows its waveform exactly, into
+  each cell it drives. `stimulus` is the depolarization (mV) a 1 V, 1 ms pulse
+  gives; it charges and leaks with the membrane time constant, so longer pulses
+  depolarize more (a strength-duration curve), a long step makes the cell fire
+  repeatedly (faster for a stronger step), and a slow sine can entrain it while
+  a fast one is filtered out.
 
 Each input records one cell: intracellularly (its membrane potential × gain:
 resting level, PSPs, full action potentials) or extracellularly (its spikes as
@@ -39,7 +43,7 @@ class Cell:
     refractory_ms: float = 2.0
     drive_mv: float = 8.0         # steady depolarization: with noise, sets the firing at rest (~1-2/s)
     noise_mv: float = 4.0         # membrane potential fluctuation (SD)
-    stimulus: float = 0.0         # PSP (mV) per volt of each stimulus pulse; 0 = not driven
+    stimulus: float = 0.0         # depolarization (mV) from a 1 V, 1 ms stimulus pulse; 0 = not driven
     spike_depth_v: float = 0.9    # extracellular recordings: spike trough on the trace
     spike_width_ms: float = 0.55  # extracellular: trough to repolarization peak
     synapses: list = field(default_factory=list)   # PSP (mV) this cell gives cell 1, 2, ...
@@ -145,6 +149,7 @@ class NetworkState:
         self.syn = np.zeros(len(net.cells))
         self.refr = np.zeros(len(net.cells), int)
         self.pending: dict[int, np.ndarray] = {}     # step -> kicks arriving then
+        self.stim: list[tuple[int, np.ndarray]] = []  # (first step, volts per step) being injected
         self.step = 0
         self.configure(net)
 
@@ -167,14 +172,31 @@ class NetworkState:
         self.sdecay = np.exp(-SIM_DT / (net.synapse_tau_ms / 1e3))
         scale = np.array([psp_scale(x.tau_ms, net.synapse_tau_ms) for x in c])
         self.kick = net.weights() / scale[None, :]          # [pre, post]
-        self.stim_kick = np.array([x.stimulus for x in c]) / scale
+        # injected current: 1 V held gives stim_gain mV at steady state; 1 V for 1 ms gives `stimulus`
+        self.stim_gain = np.array([x.stimulus for x in c]) / (1 - np.exp(-1e-3 / tau))
         self.delay = max(1, int(round(net.synapse_delay_ms / 1e3 / SIM_DT)))
 
-    def stimulate(self, onsets_s: list[tuple[float, float]]) -> None:
-        """Stimulus pulses (seconds from now, volts) reach the cells after the synaptic delay."""
-        for t, amp in onsets_s:
-            k = self.step + int(round(t / SIM_DT)) + self.delay
-            self.pending[k] = self.pending.get(k, 0) + amp * self.stim_kick
+    def stimulate(self, wave: np.ndarray, fs: float, start_s: float = 0.0) -> None:
+        """Inject a stimulus waveform (volts sampled at fs) starting start_s from now."""
+        wave = np.asarray(wave, float)
+        if not len(wave):
+            return
+        t = np.arange(int(np.ceil(len(wave) / fs / SIM_DT))) * SIM_DT
+        per_step = np.interp(t, np.arange(len(wave)) / fs, wave, right=0.0)
+        self.stim.append((self.step + int(round(start_s / SIM_DT)), per_step))
+
+    def _drive(self, steps: int) -> np.ndarray:
+        """The stimulus (V) at each of the next `steps` steps; forgets finished ones."""
+        out = np.zeros(steps)
+        keep = []
+        for first, w in self.stim:
+            a, b = max(first, self.step), min(first + len(w), self.step + steps)
+            if b > a:
+                out[a - self.step:b - self.step] += w[a - first:b - first]
+            if first + len(w) > self.step + steps:
+                keep.append((first, w))
+        self.stim = keep
+        return out
 
     def run(self, steps: int) -> tuple[np.ndarray, list[tuple[int, int]]]:
         """Advance `steps`. Returns the membrane potential (steps × cells, mV, held at
@@ -183,6 +205,8 @@ class NetworkState:
         out = np.empty((steps, n))
         spikes = []
         noise = self.rng.standard_normal((steps, n)) * self.sigma
+        inject = (1 - self.a) * self.stim_gain                  # exact for a constant current per step
+        drive = self._drive(steps)
         v, syn, refr = self.v, self.syn, self.refr
         for k in range(steps):
             arriving = self.pending.pop(self.step, None)
@@ -190,6 +214,8 @@ class NetworkState:
             if arriving is not None:
                 syn = syn + arriving
             v = self.vinf + (v - self.vinf) * self.a + self.b * syn + noise[k]
+            if drive[k]:
+                v = v + inject * drive[k]
             refr = refr - 1
             held = refr > 0
             if held.any():
@@ -238,18 +264,6 @@ def spike_shape(cell: Cell, fs: float) -> tuple[np.ndarray, int]:
     w = pre + trough + peak
     i = int(-k[0])
     return w * cell.spike_depth_v / -w[i], i
-
-
-def pulse_onsets(wave: np.ndarray) -> list[tuple[int, float]]:
-    """(sample, peak V) for each pulse in a stimulus: where |wave| rises above 5% of
-    its peak, and the largest |value| until it falls back. A ramp or a sine is one
-    pulse."""
-    a = np.abs(np.asarray(wave, float))
-    if not a.size or a.max() <= 0:
-        return []
-    on = a > 0.05 * a.max()
-    edges = np.flatnonzero(np.diff(np.r_[0, on.astype(int), 0]))
-    return [(int(s), float(a[s:e].max())) for s, e in zip(edges[::2], edges[1::2])]
 
 
 # -- config ------------------------------------------------------------------

@@ -25,7 +25,9 @@ _CELL_COLUMNS = (
     ("Refractory", "refractory_ms", "ms", "No spikes for this long after one"),
     ("Drive", "drive_mv", "mV", "Steady depolarization above rest; with noise, sets how often it fires on its own"),
     ("Noise", "noise_mv", "mV", "Membrane potential fluctuation (SD)"),
-    ("Stimulus", "stimulus", "mV", "PSP from each 1 V stimulus pulse (scales with the pulse); 0 = not driven"),
+    ("Stimulus", "stimulus", "mV", "How strongly the stimulus drives this cell: the depolarization from a 1 V, "
+                                   "1 ms pulse. The stimulus is injected as a current, so longer or stronger "
+                                   "pulses depolarize more; 0 = not driven"),
     ("Spike size", "spike_depth_v", "V", "Extracellular recordings: depth of this cell's spike trough"),
     ("Spike width", "spike_width_ms", "ms", "Extracellular recordings: spike trough to repolarization peak"),
 )
@@ -59,7 +61,8 @@ class SimPage(QtWidgets.QWidget):
         intro = QtWidgets.QLabel(
             "A network of integrate-and-fire cells. Each fires when its membrane potential reaches "
             "threshold; its spikes give the cells it connects to a PSP after the synaptic delay. "
-            "Stimulus pulses give PSPs to the cells they drive. Changes apply straight away.")
+            "The stimulus is injected as a current into the cells it drives, following its waveform: "
+            "pulse width, trains and sines all matter. Changes apply straight away.")
         intro.setWordWrap(True)
         left.addWidget(intro)
 
@@ -81,6 +84,30 @@ class SimPage(QtWidgets.QWidget):
                                   "2 excites 3, and 3 inhibits 1")
         top.addWidget(self.btn_reset, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         left.addLayout(top)
+
+        box = QtWidgets.QGroupBox("⚡ Stimulator → network: which cells the stimulus drives")
+        v = QtWidgets.QVBoxLayout(box)
+        hint = QtWidgets.QLabel("Whatever the Stimulator or Trials tab sends is injected as a current into the "
+                                "ticked cells. Strength: the depolarization from a 1 V, 1 ms pulse.")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        self.stim_grid = QtWidgets.QGridLayout()
+        self.stim_grid.setHorizontalSpacing(14)
+        v.addLayout(self.stim_grid)
+        self.stim_boxes: list[tuple[QtWidgets.QCheckBox, UnitSpinBox]] = []
+        self._strength: dict[int, float] = {}      # the last strength of an unticked cell
+        wire = QtWidgets.QHBoxLayout()
+        self.stim_wire = QtWidgets.QLabel()
+        self.stim_wire.setWordWrap(True)
+        self.btn_record_stim = QtWidgets.QPushButton()
+        self.btn_record_stim.setToolTip("Record the stimulus on a spare input (a channel named Stim). "
+                                        "Trials needs it to line the responses up with each stimulus")
+        self.btn_open_stim = QtWidgets.QPushButton("Open the Stimulator")
+        wire.addWidget(self.stim_wire, 1)
+        wire.addWidget(self.btn_record_stim)
+        wire.addWidget(self.btn_open_stim)
+        v.addLayout(wire)
+        left.addWidget(box)
 
         box = QtWidgets.QGroupBox("Cells")
         v = QtWidgets.QVBoxLayout(box)
@@ -134,7 +161,8 @@ class SimPage(QtWidgets.QWidget):
         d.setTitle("Network")
         right.addWidget(self.diagram, 1)
         key = QtWidgets.QLabel("Green arrows excite, red inhibit; thicker is stronger. "
-                               "⚡ = driven by the stimulus. Labels show the inputs recording each cell.")
+                               "⚡ = the stimulator and the cells it drives. Labels show the inputs "
+                               "recording each cell.")
         key.setWordWrap(True)
         right.addWidget(key)
         outer.addLayout(right, 2)
@@ -148,6 +176,8 @@ class SimPage(QtWidgets.QWidget):
         self.syn.itemChanged.connect(self._changed)
         self.recs.itemChanged.connect(self._changed)
         self.btn_reset.clicked.connect(self._reset)
+        self.btn_record_stim.clicked.connect(self._record_stimulus)
+        self.btn_open_stim.clicked.connect(lambda: self.main.tabs.show_tab("stim"))
         self._timer = QtCore.QTimer(self, interval=1000, timeout=self._show_rates)
         self._timer.start()
         self.apply_theme(style.LIGHT)
@@ -187,6 +217,7 @@ class SimPage(QtWidgets.QWidget):
                 self.syn.setItem(i, j, item)
         self._tint_synapses()
         self._load_recordings()
+        self._load_stimulus()
         self._loading = False
         self._show_message("")
         self._redraw()
@@ -221,6 +252,80 @@ class SimPage(QtWidgets.QWidget):
                 self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Stimulator tab › Record on): "
                                                       "it records the stimulus")
                 self.recs.item(r, 2).setText("records the stimulus")
+
+    def _load_stimulus(self) -> None:
+        """The ⚡ box: a tick and a strength per cell, and where the stimulus is recorded."""
+        while self.stim_grid.count():
+            w = self.stim_grid.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self.stim_boxes = []
+        for i, c in enumerate(self.net.cells):
+            tick = QtWidgets.QCheckBox(f"Cell {i + 1}")
+            tick.setChecked(c.stimulus != 0)
+            strength = UnitSpinBox(-1000, 1000, "mV", step=1)
+            strength.setValue(c.stimulus if c.stimulus else self._strength.get(i, 25.0))
+            strength.setEnabled(c.stimulus != 0)
+            strength.setToolTip("Depolarization from a 1 V, 1 ms pulse; negative hyperpolarizes")
+            tick.toggled.connect(lambda on, i=i: self._stimulus_edited(i))
+            strength.valueChanged.connect(lambda *_, i=i: self._stimulus_edited(i))
+            row, col = divmod(i, 5)
+            self.stim_grid.addWidget(tick, row, 2 * col)
+            self.stim_grid.addWidget(strength, row, 2 * col + 1)
+            self.stim_boxes.append((tick, strength))
+        self._show_wire()
+
+    def _show_wire(self) -> None:
+        cfg = self.main.cfg
+        ch = next((c for c in cfg.channels if c.physical == cfg.stim_monitor), None) if cfg.stim_monitor else None
+        driven = [i + 1 for i, c in enumerate(self.net.cells) if c.stimulus]
+        drives = (f"The stimulus drives cell{'s' if len(driven) > 1 else ''} "
+                  f"{', '.join(map(str, driven))}." if driven else
+                  "<span style='color:#e0524f'>No cell is ticked: stimuli won't affect the network.</span>")
+        if ch is not None:
+            self.stim_wire.setText(f"{drives} It's recorded on {ch.physical} ({ch.name}).")
+            self.btn_record_stim.setVisible(False)
+        else:
+            spare = self._spare_input()
+            self.stim_wire.setText(f"{drives} It isn't recorded on an input yet: Trials needs that.")
+            self.btn_record_stim.setText(f"Record it on {spare}" if spare else "No spare input")
+            self.btn_record_stim.setEnabled(bool(spare))
+            self.btn_record_stim.setVisible(True)
+
+    def _spare_input(self) -> str:
+        return next((phys for _, phys, ok, _ in self.main.monitor_choices() if phys and ok), "")
+
+    def _record_stimulus(self) -> None:
+        spare = self._spare_input()
+        if spare and self.main.set_stim_monitor(spare):      # syncs this tab too
+            self._show_message(f"The stimulus is now recorded on {spare}, as a channel named Stim.")
+
+    def _stimulus_edited(self, i: int) -> None:
+        """A tick or strength changed: write it into the cells table, which drives the network."""
+        if self._loading:
+            return
+        tick, strength = self.stim_boxes[i]
+        strength.setEnabled(tick.isChecked())
+        if not tick.isChecked():
+            self._strength[i] = strength.value()
+        value = strength.value() if tick.isChecked() else 0.0
+        col = next(k for k, c in enumerate(_CELL_COLUMNS) if c[1] == "stimulus")
+        self.cells.item(i, col).setText(_fmt(value, "mV"))       # → _changed
+        self._show_wire()
+
+    def sync_stimulus(self) -> None:
+        """The cells table's Stimulus column changed: show it in the ⚡ box."""
+        for i, c in enumerate(self.net.cells[:len(self.stim_boxes)]):
+            tick, strength = self.stim_boxes[i]
+            for w in (tick, strength):
+                w.blockSignals(True)
+            tick.setChecked(c.stimulus != 0)
+            if c.stimulus:
+                strength.setValue(c.stimulus)
+            strength.setEnabled(c.stimulus != 0)
+            for w in (tick, strength):
+                w.blockSignals(False)
+        self._show_wire()
 
     # -- widgets -> config ------------------------------------------------------------
     def _read(self) -> sim.Network:
@@ -279,6 +384,7 @@ class SimPage(QtWidgets.QWidget):
         self.main.cfg.sim_network = net
         self._tint_synapses()
         self._show_message("")
+        self.sync_stimulus()
         self._redraw()
 
     def _resized(self, n: int) -> None:
@@ -361,6 +467,24 @@ class SimPage(QtWidgets.QWidget):
                 rec = sim.recording_for(net, ch.physical)
                 recorded.setdefault(min(rec.cell, n - 1), []).append(
                     ch.physical + (" (in)" if rec.kind == "intracellular" else " (ex)"))
+        stim_at = np.array([-1.45, 1.35])
+        driven = [i for i in range(n) if net.cells[i].stimulus]
+        for i in driven:
+            u = (pos[i] - stim_at) / max(np.linalg.norm(pos[i] - stim_at), 1e-9)
+            start, end = stim_at + u * 0.16, pos[i] - u * (r_cell + 0.02)
+            color = "#E69F00"
+            d.addItem(pg.PlotCurveItem([start[0], end[0]], [start[1], end[1]],
+                                       pen=pg.mkPen(color, width=2, style=QtCore.Qt.PenStyle.DashLine)))
+            d.addItem(pg.ArrowItem(pos=tuple(end), angle=180 - np.degrees(np.arctan2(u[1], u[0])), headLen=12,
+                                   tipAngle=35, pen=pg.mkPen(color), brush=color))
+        d.addItem(pg.ScatterPlotItem([stim_at[0]], [stim_at[1]], size=30, symbol="s",
+                                     pen=pg.mkPen("#E69F00", width=2), brush=pg.mkBrush(th.background)))
+        bolt = pg.TextItem("⚡", color="#E69F00", anchor=(0.5, 0.5))
+        bolt.setPos(*stim_at)
+        d.addItem(bolt)
+        cap = pg.TextItem("Stimulator", color=th.foreground, anchor=(0.5, 0))
+        cap.setPos(stim_at[0], stim_at[1] - 0.14)
+        d.addItem(cap)
         d.addItem(pg.ScatterPlotItem(pos[:, 0], pos[:, 1], size=46, pen=pg.mkPen(th.foreground, width=2),
                                      brush=pg.mkBrush(cfgmod.PALETTE[1])))
         for i in range(n):
@@ -368,7 +492,7 @@ class SimPage(QtWidgets.QWidget):
             label.setPos(*pos[i])
             d.addItem(label)
             out = pos[i] * 1.38 if n > 1 else np.array([0, -0.35])
-            extra = (["⚡"] if net.cells[i].stimulus else []) + recorded.get(i, [])
+            extra = recorded.get(i, [])
             if extra:
                 t = pg.TextItem("  ".join(extra), color=th.foreground, anchor=(0.5, 0.5))
                 t.setPos(*out)

@@ -40,7 +40,10 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
 - **Stimulator and Trials**:
   - stimuli and pulse trains, with units;
   - protocols that step a setting and measure each response.
-- **Calculations…**: channels worked out from the recorded ones.
+- **Analysis channels** (**+ Analysis channel**, like LabChart's channel calculations): pick a source
+  channel and a calculation. Analysis channels can build on each other, and **Calculations…** shows
+  them all as formulas.
+  - Cyclic measurements: rate meter (per second or per minute), period, cyclic height and event count.
   - Filters: low-pass, high-pass, band-pass, band-stop and notch.
   - Moving windows: smoothing, RMS and envelope.
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.

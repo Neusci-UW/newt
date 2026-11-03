@@ -65,7 +65,9 @@ class UnitSpinBox(QtWidgets.QDoubleSpinBox):
         if fam is None or v == 0:
             return self.shown
         base = fam[1:] if len(fam) > 1 and fam[0] in _PREFIX else fam
-        options = [p + base for p in _SHOW_PREFIXES.get(base, ("µ", "m", ""))]
+        options = [u for u in (p + base for p in _SHOW_PREFIXES.get(base, ("µ", "m", ""))) if self._convert(u)]
+        if not options:                       # a unit without prefixes (mmHg, /min, none)
+            return self.shown
         best = options[0]
         for u in options:
             if abs(v) >= self._convert(u) * (1 - 1e-9):
@@ -232,6 +234,12 @@ class StimPage(QtWidgets.QWidget):
         bottom.addRow("Repeat every", self.repeat)
         bottom.addRow("When Start is pressed", self.on_start)
         left.addLayout(bottom)
+        self.sim_note = QtWidgets.QLabel()            # simulated backend: where the stimulus goes
+        self.sim_note.setWordWrap(True)
+        self.sim_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.sim_note.linkActivated.connect(lambda *_: self.main.tabs.show_tab("sim"))
+        self.sim_note.setVisible(False)
+        left.addWidget(self.sim_note)
         btns = QtWidgets.QHBoxLayout()
         self.btn_fire = QtWidgets.QPushButton("Fire")
         self.btn_fire.setObjectName("start")
@@ -421,7 +429,23 @@ class StimPage(QtWidgets.QWidget):
         self.btn_repeat.blockSignals(True)
         self.btn_repeat.setChecked(self.main.repeating)
         self.btn_repeat.blockSignals(False)
+        self._show_sim_note()
         self._update_preview()
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self._show_sim_note()
+
+    def _show_sim_note(self) -> None:
+        """With the simulated backend, say which cells the stimulus drives, and link to the tab."""
+        cfg = self.main.cfg
+        self.sim_note.setVisible(cfg.backend == "simulated")
+        if cfg.backend != "simulated":
+            return
+        driven = [f"cell {i + 1} ({c.stimulus:g} mV)" for i, c in enumerate(cfg.sim_network.cells) if c.stimulus]
+        what = ("⚡ Simulated: the stimulus is injected into " + ", ".join(driven) + "."
+                if driven else "⚡ Simulated: <b>no cell</b> receives the stimulus yet.")
+        self.sim_note.setText(f"{what} <a href='sim'>Choose cells on the Simulation tab</a>")
 
     def _monitor_picked(self):
         phys = self.monitor.currentData() or ""

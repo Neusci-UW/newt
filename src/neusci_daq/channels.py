@@ -87,7 +87,8 @@ class ChannelStrip(QtWidgets.QFrame):
     hover_changed = QtCore.Signal(bool)
 
     def __init__(self, row: ChannelRow, inputs: list[str], diff: bool,
-                 on_change, on_remove, on_color, can_remove: bool, on_width=None):
+                 on_change, on_remove, on_color, can_remove: bool, on_width=None,
+                 is_stim: bool = False, on_stim=None):
         super().__init__()
         self.row = row
         self.setObjectName("channelStrip")
@@ -145,11 +146,18 @@ class ChannelStrip(QtWidgets.QFrame):
         lay.addWidget(self.remove, 1, 2)
         lay.addWidget(QtWidgets.QLabel("Line"), 2, 0, 1, 1)
         lay.addWidget(self.line_width, 2, 1)
+        self.stim = QtWidgets.QCheckBox("⚡ Stimulus")
+        self.stim.setChecked(is_stim)
+        self.stim.setToolTip("This channel records the stimulus: tick if this input records the stimulator's output (wired to it, or in the "
+                             "simulation). Its pulses give exact stimulus times for Trials, and group the "
+                             "blocks by stimulus. Only one channel can")
+        self.stim.setVisible(on_stim is not None)
+        lay.addWidget(self.stim, 3, 0, 1, 3)
         info = QtWidgets.QLabel(f"{row.ch.units} · scale ×{row.ch.scale:g}")
         info.setToolTip("Units and scale come from the config file")
         info.setStyleSheet("color: gray")
-        lay.addWidget(info, 3, 1, 1, 2)
-        lay.setRowStretch(4, 1)
+        lay.addWidget(info, 4, 1, 1, 2)
+        lay.setRowStretch(5, 1)
 
         # Defer: the strip is rebuilt after a change, and must not be deleted
         # while its own signal is still running.
@@ -161,6 +169,8 @@ class ChannelStrip(QtWidgets.QFrame):
         self.remove.clicked.connect(later(lambda: on_remove(self)))
         if on_width is not None:
             self.line_width.valueChanged.connect(lambda v: on_width(self, float(v)))
+        if on_stim is not None:
+            self.stim.toggled.connect(later(lambda: on_stim(self, self.stim.isChecked())))
 
         self.compact = False
         self.expanded = True
@@ -168,7 +178,7 @@ class ChannelStrip(QtWidgets.QFrame):
 
     def set_locked(self, locked: bool) -> None:
         """While recording, lock everything except the colour and line thickness."""
-        for w in (self.on, self.name, self.input):
+        for w in (self.on, self.name, self.input, self.stim):
             w.setEnabled(not locked)
         self.remove.setEnabled(self._can_remove and not locked)
 
@@ -267,7 +277,7 @@ class CalcStrip(QtWidgets.QFrame):
         self.formula.setWordWrap(True)
         self.formula.setStyleSheet("color: #e0524f" if problem else "color: gray")
         self.btn_edit = QtWidgets.QPushButton("Edit…")
-        self.btn_edit.setToolTip("Change the calculated channels")
+        self.btn_edit.setToolTip("Change or delete this analysis channel")
         self.btn_edit.clicked.connect(on_edit)
         lay.addWidget(self.title)
         lay.addWidget(self.formula)

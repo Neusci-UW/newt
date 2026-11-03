@@ -379,7 +379,14 @@ def test_channels_can_be_overlaid_in_one_plot(app, settings, tmp_path):
     win.btn_overlay_ch.setChecked(True)                              # live
     pump(app, 0.3)
     first = win.plots[0]
-    assert len(win._mirrors) == 2 and all(m.getViewBox() is first.vb for _, m in win._mirrors)
+    assert len(win._mirrors) == 2                                    # each on its own y axis
+    assert [m.getViewBox() for _, m in win._mirrors] == win._multi._extras() and len(win._multi.axes) == 2
+    assert all(vb.state["autoRange"][1] for vb in win._multi._extras())   # fitted to the height
+    win.set_overlay_axes(False)                                      # View: one shared axis
+    pump(app, 0.2)
+    assert all(m.getViewBox() is win.plots[0].vb for _, m in win._mirrors) and not win._multi.axes
+    win.set_overlay_axes(True)
+    pump(app, 0.2)
     assert not win.plot_widgets[1].isVisible() and win.strips[1].isVisible()   # controls stay
     x, y = win._mirrors[0][1].getOriginalDataset()
     assert len(x) > 0 and np.array_equal(y, win.curves[1].getOriginalDataset()[1])   # follows the data
@@ -395,3 +402,67 @@ def test_channels_can_be_overlaid_in_one_plot(app, settings, tmp_path):
     pump(app, 0.1)
     assert win._mirrors == [] and win.plot_widgets[2].isVisible()
     win.close()
+
+
+def _recorded_session(app, win, n=2):
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(n):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.3)
+        win.btn_rec.setChecked(False)
+        pump(app, 0.05)
+    win.btn_run.setChecked(False)
+    folder = win.session_dir
+    win.save_as(folder.parent.parent / "saved_session")
+    return win.session_dir
+
+
+def test_back_to_live_from_an_opened_session_asks_and_can_add_to_it(app, settings, tmp_path):
+    from neusci_daq.gui import MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    folder = _recorded_session(app, win)
+    win.new_session()
+    win.open_session(folder)                                         # a dataset loaded from disk
+    asked = []
+    win._ask_leave_review = lambda path: asked.append(path) or None  # Cancel: stay in review
+    win._activate("live")
+    assert asked == [folder] and win.mode == "review"
+    win._ask_leave_review = lambda path: "append"                    # add to it
+    win._activate("live")
+    assert win.mode == "live" and win.session_dir == folder and len(win.blocks) == 2
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    assert [b.name for b in session.list_blocks(folder)] == ["block_001.h5", "block_002.h5", "block_003.h5"]
+    win.open_session(folder)
+    win._ask_leave_review = lambda path: "new"                       # or a new session: nothing lost
+    win._activate("live")
+    assert win.mode == "live" and win.session_dir is None and len(session.list_blocks(folder)) == 3
+    win.close()
+
+
+def test_adding_to_a_recording_made_with_another_setup_can_take_its_setup(app, settings, tmp_path):
+    from neusci_daq.gui import MainWindow
+    from neusci_daq.channels import ChannelRow
+    from neusci_daq.config import Channel
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    folder = _recorded_session(app, win)
+    mat = win.export()                                               # as a LabChart .mat ...
+    win.new_session()
+    win.apply_setup(rows=[ChannelRow(Channel("ai0", "Other"))], sample_rate=1000)   # ... then a new setup
+    imported = win.open_mat(mat)
+    win._ask_leave_review = lambda path: "append"
+    win._ask_adopt_setup = lambda path, problems: False             # No: stay
+    assert not win.leave_review() and win.mode == "review"
+    win._ask_adopt_setup = lambda path, problems: True
+    assert win.leave_review()
+    assert [c.name for c in win.cfg.channels] == ["Ch0", "Ch1"] and win.cfg.sample_rate == 2000
+    assert win.mode == "live" and win.session_dir == imported and len(win.blocks) == 2
+    win.close()
+

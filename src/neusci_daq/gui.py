@@ -49,7 +49,7 @@ from .channels import CalcStrip, ChannelRow, ChannelRowWidget, ChannelStrip, Col
 from .comments import CommentPopup, CommentsPanel
 from .config import Channel, Config, valid_inputs
 from .export import to_labchart_mat
-from .plotzoom import OverlayCurve, TraceCurve, WheelViewBox, light_grid
+from .plotzoom import MultiAxis, OverlayCurve, TraceCurve, WheelViewBox, light_grid
 from .recorder import Recorder
 from .stim import Stimulus
 from .stimout import make_output
@@ -88,9 +88,16 @@ class _TraceViewBox(WheelViewBox):
     Window and the main window, so every acquisition plot follows and live mode keeps
     the newest data at the right edge."""
 
-    def __init__(self, zoom_time, pan_time, **kw):
+    def __init__(self, zoom_time, pan_time, zoom_to=None, **kw):
         super().__init__(**kw)
         self.zoom_time, self.pan_time = zoom_time, pan_time
+        self._zoom_to = zoom_to
+
+    def set_time_range(self, x0: float, x1: float) -> None:
+        if self._zoom_to is not None:
+            self._zoom_to(x0, x1)
+        else:
+            super().set_time_range(x0, x1)
 
 
 class _CommentEdit(QtWidgets.QLineEdit):
@@ -331,10 +338,16 @@ class MainWindow(QtWidgets.QMainWindow):
         bb.setSpacing(0)
         bb.addWidget(self.channel_bar, 1)
         bb.addStretch(0)
-        self.btn_calc = QtWidgets.QPushButton("Calculations…")
-        self.btn_calc.setToolTip("Calculated channels: digital filters (low-, high-, band-pass, notch), "
-                                 "smoothing, RMS, derivative, integral and arithmetic between channels")
-        self.btn_calc.clicked.connect(self.calculations_dialog)
+        self.btn_calc = QtWidgets.QPushButton("ƒ Analysis channels")
+        self.btn_calc.setToolTip("Channels calculated from the others, like LabChart's channel calculations: "
+                                 "digital filters, smoothing, RMS, derivative, integral, arithmetic, and "
+                                 "cyclic measurements (rate meter, period, cyclic height, event count)")
+        menu = QtWidgets.QMenu(self.btn_calc)
+        self.act_add_calc = menu.addAction("Add analysis channel…", lambda: self.analysis_channel_dialog())
+        self.act_add_calc.setToolTip("Pick a source channel and a calculation; it can use other analysis "
+                                     "channels too")
+        menu.addAction("Edit all as formulas…", self.calculations_dialog)
+        self.btn_calc.setMenu(menu)
         bb.addWidget(self.btn_calc)
         bb.addSpacing(6)
         self.btn_overlay_ch = QtWidgets.QPushButton("Overlay channels", checkable=True)
@@ -439,7 +452,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_auto_y.setChecked(self.auto_scale_y)
         self.act_auto_y.toggled.connect(self.set_auto_scale_y)
         self.act_auto_y.setToolTip("On: each plot's voltage axis keeps resizing to fit its trace. "
-                                   "Off: it stays where it is (Cmd+scroll to zoom it).")
+                                   "Off: it stays where it is (Cmd+scroll to zoom it, or Ctrl+drag a box; Ctrl+click goes back).")
+        self.act_separate_y = v.addAction("Overlaid channels on &separate axes")
+        self.act_separate_y.setCheckable(True)
+        self.act_separate_y.setChecked(self.settings.value("overlay_separate_axes", True, type=bool))
+        self.act_separate_y.toggled.connect(self.set_overlay_axes)
+        self.act_separate_y.setToolTip("With Overlay channels: each channel gets its own y axis (in its "
+                                       "colour) and is scaled to fill the plot. Off: one shared axis.")
         tm = v.addMenu("&Zoomed-out traces")
         group = QtGui.QActionGroup(self)
         self.act_trace_mode = {}
@@ -473,9 +492,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unfitted.clear()
         self._overlay_items = []                 # they went with the plots
         self._mirrors = []
+        self._multi = None
 
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
-        pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time))
+        pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time, self._zoom_to))
         p = pw.getPlotItem()
         self.plot_widgets.append(pw)
         if unit in _SI_BASE:
@@ -515,6 +535,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unfitted.clear()
         for p in self.plots:
             p.enableAutoRange(axis="y", enable=self.auto_scale_y)
+        if self._multi is not None:
+            self._multi.set_auto(self.auto_scale_y)
+
+    def set_overlay_axes(self, separate: bool) -> None:
+        """View › Overlaid channels on separate axes."""
+        self.settings.setValue("overlay_separate_axes", bool(separate))
+        if self.act_separate_y.isChecked() != bool(separate):
+            self.act_separate_y.blockSignals(True)
+            self.act_separate_y.setChecked(bool(separate))
+            self.act_separate_y.blockSignals(False)
+        if self.btn_overlay_ch.isChecked():
+            self.set_channel_overlay(True)              # rebuild with the new axes
 
     def set_trace_mode(self, mode: str) -> None:
         """View › Zoomed-out traces: "mean" (moving average) or "peak" (min and max)."""
@@ -530,6 +562,10 @@ class MainWindow(QtWidgets.QMainWindow):
         for k, mirror in self._mirrors:
             if k < len(self.curves):
                 mirror.setData(*self.curves[k].getOriginalDataset())
+        if self._multi is not None and self._multi_unfitted and self._mirrors \
+                and all(m.yData is not None and len(m.yData) for _, m in self._mirrors):
+            self._multi.fit()                            # auto-scale off: fit once, then hold
+            self._multi_unfitted = False
 
     def set_channel_overlay(self, on: bool) -> None:
         """Overlay channels: every channel in the first plot."""
@@ -550,20 +586,28 @@ class MainWindow(QtWidgets.QMainWindow):
         plot (in its colour) and hide the other plots: live, their rows shrink to just the
         channel's controls; in review, their rows go."""
         self._mirrors = []
+        self._multi = None
         if not self.btn_overlay_ch.isChecked() or len(self.plots) < 2:
             return
         first = self.plots[0]
-        legend = first.addLegend(offset=(-10, 10))
+        legend = first.addLegend(offset=(10, 10))
         legend.clear()
         names = self._plot_names
+        separate = self.act_separate_y.isChecked()
+        multi = MultiAxis(first, separate=separate)
+        multi.set_auto(self.auto_scale_y)
         for k, (pw, curve) in enumerate(zip(self.plot_widgets, self.curves)):
             name = names[k] if k < len(names) else f"Channel {k + 1}"
+            ax = pw.getPlotItem().getAxis("left")
+            unit = getattr(ax, "labelUnits", "") or ""
+            color = curve.opts["pen"].color() if hasattr(curve.opts["pen"], "color") else None
             if k == 0:
+                multi.add(curve, name, unit, color)       # already in the first plot
                 legend.addItem(curve, name)
                 continue
             mirror = TraceCurve()
             mirror.setPen(curve.opts["pen"])
-            first.addItem(mirror)
+            multi.add(mirror, name, unit, color)
             legend.addItem(mirror, name)
             self._mirrors.append((k, mirror))
             row = pw.parentWidget()
@@ -572,8 +616,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 row.setFixedHeight(row.strip.sizeHint().height())
             elif row is not None:
                 row.hide()
-        first.setLabel("left", "all channels")
-        first.getAxis("left").enableAutoSIPrefix(False)
+        if not separate:
+            first.setLabel("left", "all channels")
+            first.getAxis("left").enableAutoSIPrefix(False)
+        self._multi = multi
+        self._multi_unfitted = not self.auto_scale_y
         first.getAxis("bottom").setStyle(showValues=True)      # the one plot showing: its time axis
         first.setLabel("bottom", "time", units="s")
 
@@ -593,19 +640,15 @@ class MainWindow(QtWidgets.QMainWindow):
     # -- calculated channels (dsp.py) ---------------------------------------------------------
     def _add_calc_rows(self, names: list[str], fs: float, live: bool) -> None:
         """A row for each calculated channel, below the channels' rows."""
-        self._calcs = []
-        for c in self.cfg.calculations:
-            try:
-                f = dsp.Formula(c.formula, names)
-                f.check(fs)
-                self._calcs.append((c, f, ""))
-            except ValueError as e:
-                self._calcs.append((c, None, f"Can't calculate: {e}"))
+        self._chain = dsp.Chain(self.cfg.calculations, names, fs)   # each may use the ones above it
+        self._calcs = [(c, f, f"Can't calculate: {why}" if why else "")
+                       for c, f, why in zip(self._chain.calcs, self._chain.formulas, self._chain.problems)]
         for k, (c, f, problem) in enumerate(self._calcs):
             color = cfgmod.PALETTE[(len(names) + k) % len(cfgmod.PALETTE)]
             pw = self._new_plot(c.name, c.unit, color, 1.0)
             if live:
-                row = ChannelRowWidget(CalcStrip(c.name, c.formula, problem, self.calculations_dialog), pw)
+                row = ChannelRowWidget(CalcStrip(c.name, c.formula, problem,
+                                                 lambda *_, k=k: self.analysis_channel_dialog(k)), pw)
                 row.set_compact(self._compact_strips)
                 self.row_widgets.append(row)
             else:
@@ -627,17 +670,15 @@ class MainWindow(QtWidgets.QMainWindow):
         """The calculated channels for a chunk of live data (raw volts, one row a channel)."""
         env = {ch.name: ch.to_units(row) for ch, row in zip(self.cfg.channels, y_raw)}
         m = y_raw.shape[1]
-        fs = self.cfg.sample_rate
-        return np.array([f.stream(env, fs) if f is not None else np.full(m, np.nan)
-                         for _, f, _ in self._calcs]).reshape(len(self._calcs), m)
+        out = self._chain.stream(env, self.cfg.sample_rate) if self._calcs else []
+        return np.array([y if y is not None else np.full(m, np.nan) for y in out]).reshape(len(self._calcs), m)
 
     def _recompute_calc_ring(self) -> None:
         """Calculated values for the live data held, e.g. after the calculations change."""
         ring = getattr(self, "ring", None)
         self.calc_ring = RingBuffer(len(self._calcs), ring.cap if ring is not None else 2)
-        for _, f, _ in self._calcs:
-            if f is not None:
-                f.reset()
+        if self._calcs:
+            self._chain.reset()
         if self._calcs and ring is not None and len(ring):
             self.calc_ring.append(self.ring.t, self._calc_chunk(self.ring.y))
 
@@ -659,6 +700,50 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg = CalcDialog(self, self.cfg.calculations, names, units, fs)
         if dlg.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.set_calculations(dlg.calculations())
+
+    def _calc_sources(self) -> tuple[list[str], dict[str, str], float]:
+        """(recorded channel names, their units, sample rate) of what's shown."""
+        if self.mode == REVIEW and self.review_block:
+            blk = self.review_block
+            return list(blk["channel_names"]), dict(zip(blk["channel_names"], blk["units"])), blk["sample_rate"]
+        return ([c.name for c in self.cfg.channels], {c.name: c.units for c in self.cfg.channels},
+                self.cfg.sample_rate)
+
+    def analysis_channel_dialog(self, k: int | None = None) -> bool:
+        """Add an analysis channel (k None) or change analysis channel k, LabChart-style."""
+        from .analysischannel import AnalysisChannelDialog
+        names, units, fs = self._calc_sources()
+        calcs = list(self.cfg.calculations)
+        above = calcs if k is None else calcs[:k]
+        units = {**units, **{c.name: c.unit for c in above}}
+        sources = names + [c.name for c in above]
+
+        def preview(formula):
+            if self.mode == REVIEW and self.review_block:
+                blk = self.review_block
+                env, t = dict(zip(blk["channel_names"], blk["data"])), blk["t"]
+            elif getattr(self, "ring", None) is not None and len(self.ring):
+                env = {ch.name: ch.to_units(row) for ch, row in zip(self.cfg.channels, self.ring.y)}
+                t = self.ring.t - self.ring.t[0]
+            else:
+                raise ValueError("press Start to see it on live data")
+            y = dsp.Chain(above + [dsp.Calculation("\0preview", formula)], names, fs).offline(env, fs)[-1]
+            if y is None:
+                raise ValueError("it uses a channel that can't be calculated")
+            return t, y
+
+        dlg = AnalysisChannelDialog(self, sources, units, fs, calc=None if k is None else calcs[k],
+                                    taken={c.name for j, c in enumerate(calcs) if j != k}, preview=preview)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return False
+        if k is None:
+            calcs.append(dlg.calculation())
+        elif dlg.deleted:
+            del calcs[k]
+        else:
+            calcs[k] = dlg.calculation()
+        self.set_calculations(calcs)
+        return True
 
     def set_calculations(self, calcs: list) -> None:
         self.cfg.calculations = list(calcs)
@@ -695,7 +780,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for r in self.rows:
             strip = ChannelStrip(r, inputs, self.cfg.terminal_config == "DIFF",
                                  self._channel_edited, self._channel_removed, self._channel_recolored,
-                                 can_remove=len(self.rows) > 1, on_width=self._channel_width)
+                                 can_remove=len(self.rows) > 1, on_width=self._channel_width,
+                                 is_stim=bool(self.cfg.stim_monitor) and r.ch.physical == self.cfg.stim_monitor,
+                                 on_stim=self._channel_stim_ticked)
             strip.set_locked(locked)
             self.strips.append(strip)
             if r.ch.enabled:
@@ -808,6 +895,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._style_plot(pw)
         for k, color in enumerate(self.curve_colors):
             self._set_curve_color(k, color)
+        if self._multi is not None:
+            self._multi.recolor()
         mc = theme.THEMES[mode].marker
         for _, lines in self.markers:
             for ln in lines:
@@ -878,12 +967,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _channel_edited(self, strip: ChannelStrip, what: str, value):
         rows = self._copy_rows()
+        was_stim = bool(self.cfg.stim_monitor) and strip.row.ch.physical == self.cfg.stim_monitor
         setattr(rows[self.rows.index(strip.row)].ch, what, value)
-        self.apply_channels(rows)
+        if self.apply_channels(rows) and was_stim and what == "physical":
+            self._stim_monitor_moved(value)             # the stimulus channel moved input
 
     def _channel_removed(self, strip: ChannelStrip):
         i = self.rows.index(strip.row)
-        self.apply_channels([r for j, r in enumerate(self._copy_rows()) if j != i])
+        was_stim = bool(self.cfg.stim_monitor) and strip.row.ch.physical == self.cfg.stim_monitor
+        if self.apply_channels([r for j, r in enumerate(self._copy_rows()) if j != i]) and was_stim:
+            self._stim_monitor_moved("")
+
+    def _channel_stim_ticked(self, strip: ChannelStrip, on: bool) -> None:
+        """Acquisition: a channel's "Records the stimulus" box."""
+        phys = strip.row.ch.physical
+        if on:
+            self.set_stim_monitor(phys)
+        elif phys == self.cfg.stim_monitor:
+            self._stim_monitor_moved("")
+
+    def _stim_monitor_moved(self, phys: str) -> None:
+        """The stimulus is now recorded on `phys` ("" = nowhere), no channels added or removed."""
+        self.cfg.stim_monitor = phys
+        self._stim_monitor_changed(phys)
 
     def add_channel(self) -> bool:
         used = {r.ch.physical for r in self.rows}
@@ -1252,6 +1358,84 @@ class MainWindow(QtWidgets.QMainWindow):
             self._autoexport_live()
         return True
 
+    def leave_review(self) -> bool:
+        """Back to live from review. From this live session's own blocks, carry on with
+        it. From a dataset that was opened, ask first: add new blocks to it, or start a
+        new session (the dataset is kept either way)."""
+        state = self._live_state
+        if self.review_dir is None or (state is not None and self.review_dir == state[0]):
+            self.back_to_live()
+            return True
+        path = self.review_dir
+        choice = self._ask_leave_review(path)
+        if choice == "new":
+            self.back_to_live()
+            self.statusBar().showMessage(f"New session: {path.name} is kept as it was. Press Record to start.", 10000)
+            return True
+        if choice == "append":
+            return self.append_to_reviewed()
+        return False
+
+    def _ask_leave_review(self, path: Path) -> str | None:
+        """"append", "new" or None (cancel)."""
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setWindowTitle("Back to live")
+        box.setText(f"You're looking at {path.name}. What should new recordings do?")
+        box.setInformativeText(f"Add to {path.name}: new blocks go after its {len(self.review_blocks)} block(s), "
+                               "in the same session.\nNew session: start an empty one; "
+                               f"{path.name} is kept as it is.")
+        add = box.addButton(f"Add to {path.name}", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        new = box.addButton("New session", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(add)
+        box.exec()
+        return "append" if box.clickedButton() is add else "new" if box.clickedButton() is new else None
+
+    def append_to_reviewed(self) -> bool:
+        """Go live adding to the dataset being reviewed. If it was recorded with other
+        channels or another sampling rate, offer to switch to its setup first."""
+        path = self.review_dir
+        problems, _ = session.append_check(path, self.cfg)
+        if problems:
+            if not self._ask_adopt_setup(path, problems):
+                return False
+            if not self.adopt_session_setup(path):
+                return False
+        try:
+            self.append_session(path, force=True)
+        except session.SessionError as e:
+            QtWidgets.QMessageBox.critical(self, "Can't add to this session", str(e))
+            return False
+        if path.resolve().parent == (Path(self.cfg.data_dir) / "imported").resolve():
+            self.statusBar().showMessage(
+                f"Adding to {path.name}. It came from a .mat file, which isn't changed: use Save as… or "
+                "Export to write the new blocks to a .mat.", 15000)
+        return True
+
+    def _ask_adopt_setup(self, path: Path, problems: list[str]) -> bool:
+        info = session.block_info(session.list_blocks(path)[-1])
+        chans = ", ".join(info["channel_names"])
+        ok = QtWidgets.QMessageBox.question(
+            self, "Use this dataset's setup?",
+            f"{path.name} was recorded with a different setup:\n\n• " + "\n• ".join(problems)
+            + f"\n\nSwitch to its setup ({chans} at {info['sample_rate']:,.0f} Hz) and add to it?")
+        return ok == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def adopt_session_setup(self, path: str | Path) -> bool:
+        """Take the channels (names, inputs, units, scale, colours), sampling rate and
+        wiring the session was recorded with, so new blocks match it."""
+        info = session.block_info(session.list_blocks(path)[-1])
+        self.back_to_live()
+        inputs = valid_inputs(self.cfg)
+        rows = []
+        for k, name in enumerate(info["channel_names"]):
+            phys = info["physical"][k] or (inputs[k] if k < len(inputs) else f"ai{k}")
+            rows.append(ChannelRow(Channel(phys, name, units=info["units"][k], scale=info["scale"][k],
+                                           offset=info["offset"][k], color=info["colors"][k])))
+        return self.apply_setup(rows=rows, sample_rate=info["sample_rate"],
+                                terminal_config=info["terminal_config"] or None)
+
     def back_to_live(self):
         """Leave review. The next Record starts a new untitled session, unless the
         review was of this live session's own blocks (Recorded blocks): then it
@@ -1524,7 +1708,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """What clicking a Blocks panel entry does: Live, Back to Live, or show a block."""
         if data in (LIVE_ITEM, BACK_ITEM):
             if self.mode == REVIEW:
-                self.back_to_live()
+                self.leave_review()
         elif isinstance(data, tuple) and data[0] == "block":
             if self.mode == LIVE:
                 self.browse_recorded(int(data[1]))
@@ -1828,11 +2012,12 @@ class MainWindow(QtWidgets.QMainWindow):
             curve.setData(blk["t"], y)
         # calculated channels: the whole block at once (zero-phase), once per file
         n, env = len(blk["channel_names"]), dict(zip(blk["channel_names"], blk["data"]))
-        for k, (c, f, _) in enumerate(self._calcs):
-            if f is not None and n + k < len(self.curves):
-                y = self.store.memo(self.review_blocks[index], ("calc", c.formula),
-                                    lambda f=f: f.offline(env, blk["sample_rate"]))
-                self.curves[n + k].setData(blk["t"], y)
+        if self._calcs:
+            ys = self.store.memo(self.review_blocks[index], ("calcs", self._chain.key()),
+                                 lambda: self._chain.offline(env, blk["sample_rate"]))
+            for k, y in enumerate(ys):
+                if y is not None and n + k < len(self.curves):
+                    self.curves[n + k].setData(blk["t"], y)
         self._curves_updated()
         self._draw_overlay()
         self.refresh_comments()
@@ -1916,6 +2101,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scroll.setValue(int(max(0.0, start) * 1000))
         else:
             self._show_stopped(start)
+
+    def _zoom_to(self, x0: float, x1: float) -> None:
+        """Ctrl+drag box zoom: Window becomes the box's width and the plots start at its
+        left edge (while acquiring, only Window changes: the newest data stays at the right)."""
+        wb = self.window_box
+        wb.setValue(min(max(float(f"{x1 - x0:.3g}"), wb.minimum()), wb.maximum()))
+        if not self.plots or (self.mode == LIVE and self.btn_run.isChecked()):
+            return
+        if self.mode == REVIEW:
+            self.scroll.setValue(int(max(0.0, x0) * 1000))
+        else:
+            self._show_stopped(x0)
 
     def _pan_time(self, delta: float):
         """Shift+wheel over a plot: move a tenth of Window per wheel notch, earlier for
@@ -2257,7 +2454,8 @@ class MainWindow(QtWidgets.QMainWindow):
         out = [("None (don't record it)", "", True, "")]
         for phys in valid_inputs(self.cfg):
             if phys in used:
-                out.append((f"{phys} (used by {used[phys]})", phys, False, f"Used by {used[phys]}"))
+                out.append((f"{phys} ({used[phys]})", phys, True,
+                            f"{used[phys]} becomes the channel that records the stimulus"))
             else:
                 pair = f" (minus input ai{int(phys[2:]) + 4})" if self.cfg.terminal_config == "DIFF" else ""
                 out.append((phys, phys, True, f"Wire {self.cfg.stim_output} to {phys}{pair}, and AO GND to AI GND"))
@@ -2269,26 +2467,37 @@ class MainWindow(QtWidgets.QMainWindow):
         if phys == old:
             return True
         rows = [r for r in self._copy_rows() if not (old and r.ch.physical == old and r.ch.name == "Stim")]
-        if phys:
-            taken = [r.ch.name for r in rows if r.ch.physical == phys]
-            if taken:
-                self._channel_message(f"{phys} is already used by {taken[0]}.")
-                return False
+        existing = next((r for r in rows if r.ch.physical == phys), None) if phys else None
+        if phys and existing is None:                    # a new channel, named Stim
             if any(r.ch.name == "Stim" for r in rows):
                 self._channel_message("Another channel is already named Stim; rename it first.")
                 return False
             color = cfgmod.next_color(r.ch.color for r in rows)
             rows.append(ChannelRow(Channel(phys, "Stim", units="V", color=color)))
-        if not self.apply_channels(rows):
+        # an existing channel just becomes the stimulus channel: no restart unless one goes away
+        same = [(r.ch.physical, r.ch.name) for r in rows] == [(r.ch.physical, r.ch.name) for r in self.rows]
+        if not same and not self.apply_channels(rows):
             return False
         self.cfg.stim_monitor = phys
+        self._stim_monitor_changed(phys)
+        return True
+
+    def _stim_monitor_changed(self, phys: str) -> None:
+        """Show where the stimulus is recorded everywhere that cares."""
+        for strip in self.strips:
+            if isinstance(strip, ChannelStrip):
+                strip.stim.blockSignals(True)
+                strip.stim.setChecked(bool(phys) and strip.row.ch.physical == phys)
+                strip.stim.blockSignals(False)
         self.stim_page.sync()
         if self.sim_page:
             self.sim_page.sync()
         self.trials_page.sync()
-        self.statusBar().showMessage(f"Recording the stimulus on {phys}" if phys
+        name = next((r.ch.name for r in self.rows if r.ch.physical == phys), "") if phys else ""
+        if name and self._stim_key() is not None:
+            self.set_stim_channel(name)                  # the Blocks panel and Analysis group by it
+        self.statusBar().showMessage(f"Recording the stimulus on {phys} ({name})" if phys
                                      else "Not recording the stimulus", 8000)
-        return True
 
     def _set_comment_box(self, recording: bool):
         self.comment_edit.setEnabled(recording)

@@ -47,9 +47,11 @@ from .channels import ChannelRow, ChannelRowWidget, ChannelStrip, ColorButton
 from .comments import CommentPopup, CommentsPanel
 from .config import Channel, Config, valid_inputs
 from .export import to_labchart_mat
+from .plotzoom import WheelViewBox, light_curve
 from .recorder import Recorder
 from .stim import Stimulus
 from .stimout import make_output
+from .simpage import SimPage
 from .stimwindow import StimPage
 from .trialspage import TrialsPage
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
@@ -74,30 +76,14 @@ class WindowBox(QtWidgets.QDoubleSpinBox):
         return self.sizeHint()
 
 
-class _TraceViewBox(pg.ViewBox):
-    """The mouse wheel zooms time (by changing Window, so every plot follows and live
-    mode keeps it); Shift+wheel, or scrolling sideways, moves back and forward in time;
-    Cmd+wheel (Ctrl+wheel off a Mac), or the wheel over the left axis, zooms this
-    plot's voltage axis."""
+class _TraceViewBox(WheelViewBox):
+    """The app's wheel rules (see plotzoom), except that time zoom and pan go through
+    Window and the main window, so every acquisition plot follows and live mode keeps
+    the newest data at the right edge."""
 
     def __init__(self, zoom_time, pan_time, **kw):
         super().__init__(**kw)
-        self._zoom_time, self._pan_time = zoom_time, pan_time
-
-    def wheelEvent(self, ev, axis=None):
-        mods = ev.modifiers()
-        # Qt reports Cmd as Control on macOS.
-        if axis == 1 or (axis is None and mods & QtCore.Qt.KeyboardModifier.ControlModifier):
-            super().wheelEvent(ev, axis=1)
-            return
-        # macOS turns Shift+wheel into a sideways scroll, so check for both.
-        if mods & QtCore.Qt.KeyboardModifier.ShiftModifier or ev.orientation() == QtCore.Qt.Orientation.Horizontal:
-            self._pan_time(ev.delta())
-            ev.accept()
-            return
-        s = 1.02 ** (ev.delta() * self.state["wheelScaleFactor"])     # same feel as pyqtgraph's zoom
-        self._zoom_time(s, self.mapToView(ev.pos()).x() if axis is None else None)
-        ev.accept()
+        self.zoom_time, self.pan_time = zoom_time, pan_time
 
 
 class _CommentEdit(QtWidgets.QLineEdit):
@@ -150,6 +136,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stim_out = make_output(cfg, self.backend)
         self.stimulus = self._saved_stimulus()
         self.stim_repeat_s = float(self.settings.value("stim_repeat_s", 1.0))
+        # What pressing Start does to the stimulator: "" nothing, "once", or "repeat".
+        on_start = self.settings.value("stim_on_start", "")
+        self.stim_on_start = on_start if on_start in ("", "once", "repeat") else ""
         self.repeating = False
         self.stim_timer = QtCore.QTimer(self, timeout=self._repeat_fire)
         self._compact_strips = False     # True while Acquisition shares the screen (split view)
@@ -336,13 +325,15 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addWidget(self.scroll)
         self.stim_page = StimPage(self)
         self.trials_page = TrialsPage(self)
+        # What the fake recording contains: only with the simulated backend.
+        self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
         placeholder = lambda title, text: self._placeholder(title, text)
         self.tabs = TabArea([
             ("acq", "Acquisition", central),
             ("stim", "Stimulator", self.stim_page),
             ("trials", "Trials", self.trials_page),
             ("analysis", "Analysis", placeholder("Analysis", "Coming soon.")),
-        ])
+        ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else []))
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
 
@@ -439,7 +430,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.plots:
             p.setXLink(self.plots[0])
         self.plots.append(p)
-        self.curves.append(p.plot())
+        self.curves.append(light_curve(p.plot()))
         self.curve_colors.append(color)
         self.curve_widths.append(float(width))
         self._set_curve_color(len(self.curves) - 1, color)
@@ -580,6 +571,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stim_page.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
+        if getattr(self, "sim_page", None):
+            self.sim_page.apply_theme(mode)
         self._update_theme_button()
         self.refresh_comments(redraw_markers=False)
 
@@ -843,6 +836,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_live_plots()
         self._redraw_live()
         self._sync_setup_controls()
+        if self.sim_page:
+            self.sim_page.sync()          # inputs and their channel names
         if running and hardware_changed and not self.btn_run.isChecked():
             self.btn_run.setChecked(True)
         if what == "channels":
@@ -1526,6 +1521,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_run.setText("Stop")
             self.btn_rec.setEnabled(True)
             self.timer.start()
+            if self.stim_on_start == "once":
+                self.fire_stimulus()
+            elif self.stim_on_start == "repeat":
+                self.set_repeat(True)
         else:
             if self.btn_rec.isChecked():
                 self.btn_rec.setChecked(False)
@@ -1770,6 +1769,11 @@ class MainWindow(QtWidgets.QMainWindow):
         elif self.stim_timer.interval() != int(self.stim_repeat_s * 1000):
             self.stim_timer.setInterval(int(self.stim_repeat_s * 1000))
 
+    def set_stim_on_start(self, what: str) -> None:
+        """Stimulator tab > When Start is pressed: "" nothing, "once", or "repeat"."""
+        self.stim_on_start = what if what in ("", "once", "repeat") else ""
+        self.settings.setValue("stim_on_start", self.stim_on_start)
+
     def set_stim_output(self, ch: str) -> None:
         if self.stim_out is not None and self.stim_out.busy:
             self.stop_stimulus()
@@ -1810,6 +1814,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         self.cfg.stim_monitor = phys
         self.stim_page.sync()
+        if self.sim_page:
+            self.sim_page.sync()
         self.trials_page.sync()
         self.statusBar().showMessage(f"Recording the stimulus on {phys}" if phys
                                      else "Not recording the stimulus", 8000)
@@ -2050,6 +2056,6 @@ def run(cfg: Config, config_path: str | Path | None = None):
     saved = QtCore.QSettings("neusci", "neusci-daq-visualizer").value("plot_theme", theme.DARK)
     style.apply(app, style.DARK if saved == theme.DARK else style.LIGHT)
     w = MainWindow(cfg, config_path=config_path)
-    w.resize(1300, 200 + 180 * len(cfg.channels))
-    w.show()
+    w.resize(1300, 200 + 180 * len(cfg.channels))    # the size it goes back to if un-maximized
+    w.showMaximized()                                  # open filling the screen
     return app.exec()

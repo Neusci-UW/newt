@@ -7,23 +7,178 @@ be written to the output.
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
+from .plotzoom import plot_widget
 
 from . import stim as stimmod
 from .stim import Stimulus
 
 
-def _spin(lo, hi, decimals=2, suffix="", step=1.0):
-    s = QtWidgets.QDoubleSpinBox(minimum=lo, maximum=hi, decimals=decimals, singleStep=step)
-    s.setSuffix(suffix)
-    s.setKeyboardTracking(False)       # update when you finish typing, not on every digit
-    return s
+# SI prefixes a typed unit may carry ("u" for people without a µ key).
+_PREFIX = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6, "m": 1e-3, "k": 1e3}
+_QUANTITY = re.compile(r"^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*(\S*)\s*$", re.IGNORECASE)
+
+
+def _split_unit(u: str) -> tuple[float, str]:
+    """'mV' -> (0.001, 'v'); 'V' -> (1, 'v'). Bases compare without case."""
+    if len(u) > 1 and u[0] in _PREFIX:
+        return _PREFIX[u[0]], u[1:].lower()
+    return 1.0, u.lower()
+
+
+def unit_factor(typed: str, target: str) -> float | None:
+    """How many `target` one `typed` is, if they're the same kind of unit with
+    different SI prefixes: unit_factor('s', 'ms') == 1000. None if they differ."""
+    if typed == target:
+        return 1.0
+    (pt, bt), (pg, bg) = _split_unit(typed), _split_unit(target)
+    return pt / pg if bt == bg else None
+
+
+def _tidy_unit(typed: str, family: str) -> str:
+    """How to show a typed unit: its prefix (u -> µ) and the family's spelling of the
+    base, so 'S' shows as 's', 'us' as 'µs' and 'mv' as 'mV'."""
+    base = family[1:] if len(family) > 1 and family[0] in _PREFIX else family
+    prefix = typed[0] if len(typed) > 1 and typed[0] in _PREFIX else ""
+    return {"u": "µ", "μ": "µ"}.get(prefix, prefix) + base
+
+
+def _converter(families):
+    """convert(unit) -> factor to the base unit, for `families`: [(unit, how many base
+    units one of it is)]. Any SI prefix of a family's unit is accepted."""
+    def convert(typed):
+        for fam, k in families:
+            f = unit_factor(typed, fam)
+            if f is not None:
+                return f * k
+        return None
+    return convert
+
+
+def _same_kind(unit: str):
+    """For a field in `unit`: accept that unit with any SI prefix (ms, s, µs; Hz, kHz)."""
+    return _converter([(unit, 1.0)])
+
+
+def parse_quantity(text: str, convert, default_unit: str = "") -> tuple[float, str]:
+    """'500 mV' -> (the number in base units, 'mV'), using convert(unit) -> factor or None.
+    A bare number is in `default_unit` ('' = base units). Raises ValueError."""
+    m = _QUANTITY.match(text.replace(",", ""))
+    if not m:
+        raise ValueError(f"{text.strip()!r} isn't a number")
+    unit = m.group(2) or default_unit
+    factor = 1.0 if not unit else convert(unit)
+    if factor is None:
+        raise ValueError(f"{unit!r} isn't a unit this field understands")
+    return float(m.group(1)) * factor, unit
+
+
+# Prefixes a field may show, by base unit, smallest first. Others get µ, m and none.
+_SHOW_PREFIXES = {"Hz": ("", "k"), "A": ("n", "µ", "m", "")}
+
+
+class UnitSpinBox(QtWidgets.QDoubleSpinBox):
+    """A number box whose value is in a base unit (`unit`) but which shows it with
+    whichever prefix keeps the number between 1 and 999: 10000 ms shows as "10 s",
+    0.5 V as "500 mV". Typed units are converted ("1 s" in a ms box: value() is 1000)
+    and the kind of unit typed is kept (mV vs µA when both are accepted). A bare
+    number is in the unit shown, and the arrows step in it.
+    `families` lists other units it takes: [(unit, how many base units one is)]."""
+
+    def __init__(self, lo, hi, unit, families=None, decimals=4, step=1.0):
+        super().__init__(minimum=lo, maximum=hi, decimals=decimals, singleStep=step)
+        self.setKeyboardTracking(False)       # update when you finish typing, not on every digit
+        self.unit = ""
+        self.set_unit(unit, families)
+
+    def set_unit(self, unit: str, families=None) -> None:
+        """Base unit and accepted units. Shows the base unit again."""
+        self.unit = unit
+        self._families = families or [(unit, 1.0)]
+        self._convert = _converter(self._families)
+        self.shown = unit
+        self.lineEdit().setText(self.textFromValue(self.value()))
+
+    def _shown_factor(self) -> float:
+        convert = getattr(self, "_convert", None)    # Qt asks for text before __init__ finishes
+        return (convert(self.shown) if convert else None) or 1.0
+
+    def _tidy(self, typed: str) -> str:
+        for fam, _ in self._families:
+            if unit_factor(typed, fam) is not None:
+                return _tidy_unit(typed, fam)
+        return typed
+
+    def _best_unit(self, v: float) -> str:
+        """The unit to show v in: same kind as the unit shown now, with the largest
+        prefix that keeps the number at least 1 (so under 1000)."""
+        fam = next((f for f, _ in self._families if unit_factor(self.shown, f) is not None), None)
+        if fam is None or v == 0:
+            return self.shown
+        base = fam[1:] if len(fam) > 1 and fam[0] in _PREFIX else fam
+        options = [p + base for p in _SHOW_PREFIXES.get(base, ("µ", "m", ""))]
+        best = options[0]
+        for u in options:
+            if abs(v) >= self._convert(u) * (1 - 1e-9):
+                best = u
+        return best
+
+    def textFromValue(self, v: float) -> str:
+        if not hasattr(self, "shown"):
+            return f"{v:g}"
+        self.shown = self._best_unit(v)
+        shown = v / self._shown_factor()
+        # as many decimals as the box keeps in base units, in the unit shown
+        dec = max(0, self.decimals() + round(np.log10(self._shown_factor())))
+        return f"{round(shown, dec):.10g} {self.shown}"
+
+    def valueFromText(self, text: str) -> float:
+        if not hasattr(self, "_convert"):            # still in __init__
+            return super().valueFromText(text)
+        if self.specialValueText() and text == self.specialValueText():
+            return self.minimum()
+        try:
+            v, unit = parse_quantity(text, self._convert, self.shown)
+        except ValueError:
+            return self.value()
+        self.shown = self._tidy(unit)          # show what was typed from now on
+        return v
+
+    def validate(self, text: str, pos: int):
+        S = QtGui.QValidator.State
+        if not hasattr(self, "_convert"):            # still in __init__
+            return S.Intermediate, text, pos
+        if self.specialValueText() and text == self.specialValueText():
+            return S.Acceptable, text, pos
+        try:
+            v, _ = parse_quantity(text, self._convert, self.shown)
+        except ValueError:
+            return S.Intermediate, text, pos   # still typing; Qt puts the old value back if left like this
+        ok = self.minimum() - 1e-9 <= v <= self.maximum() + 1e-9
+        return (S.Acceptable if ok else S.Intermediate), text, pos
+
+    def fixup(self, text: str) -> str:
+        return self.textFromValue(self.value())
+
+    def stepBy(self, steps: int) -> None:
+        # The step is set for the base unit (0.2 ms); in seconds that's 0.2 s.
+        base = self.singleStep()
+        self.setSingleStep(base * self._shown_factor() / (self._convert(self.unit) or 1.0))
+        try:
+            super().stepBy(steps)
+        finally:
+            self.setSingleStep(base)
+
+
+def _spin(lo, hi, decimals=4, unit="", step=1.0):
+    return UnitSpinBox(lo, hi, unit, decimals=decimals, step=step)
 
 
 class StimPage(QtWidgets.QWidget):
@@ -44,7 +199,7 @@ class StimPage(QtWidgets.QWidget):
         self.shape = QtWidgets.QComboBox()
         for key, label in stimmod.SHAPES.items():
             self.shape.addItem(label, key)
-        self.delay = _spin(0, 60000, suffix=" ms")
+        self.delay = _spin(0, 60000, unit="ms")
         self.delay.setToolTip("0 V for this long before the stimulus starts")
         top.addRow("Shape", self.shape)
         top.addRow("Delay", self.delay)
@@ -53,10 +208,10 @@ class StimPage(QtWidgets.QWidget):
         self.pages = QtWidgets.QStackedWidget()
         # pulse
         pw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(pw); f.setContentsMargins(0, 0, 0, 0)
-        self.p_amp = _spin(-10, 10, suffix=" V", step=0.1)
-        self.p_width = _spin(0, 60000, suffix=" ms", step=0.2)
+        self.p_amp = _spin(-10, 10, unit="V", step=0.1)
+        self.p_width = _spin(0, 60000, unit="ms", step=0.2)
         self.p_count = QtWidgets.QSpinBox(minimum=1, maximum=10000)
-        self.p_interval = _spin(0, 60000, suffix=" ms", step=10)
+        self.p_interval = _spin(0, 60000, unit="ms", step=10)
         self.p_interval.setToolTip("From the start of one pulse to the start of the next")
         self.p_bi = QtWidgets.QCheckBox("Biphasic (+ then −)")
         f.addRow("Amplitude", self.p_amp); f.addRow("Width", self.p_width)
@@ -64,23 +219,23 @@ class StimPage(QtWidgets.QWidget):
         self.pages.addWidget(pw)
         # step
         sw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(sw); f.setContentsMargins(0, 0, 0, 0)
-        self.s_amp = _spin(-10, 10, suffix=" V", step=0.1)
-        self.s_dur = _spin(0, 60000, suffix=" ms", step=10)
+        self.s_amp = _spin(-10, 10, unit="V", step=0.1)
+        self.s_dur = _spin(0, 60000, unit="ms", step=10)
         f.addRow("Level", self.s_amp); f.addRow("Duration", self.s_dur)
         self.pages.addWidget(sw)
         # ramp
         rw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(rw); f.setContentsMargins(0, 0, 0, 0)
-        self.r_start = _spin(-10, 10, suffix=" V", step=0.1)
-        self.r_end = _spin(-10, 10, suffix=" V", step=0.1)
-        self.r_dur = _spin(0, 60000, suffix=" ms", step=10)
+        self.r_start = _spin(-10, 10, unit="V", step=0.1)
+        self.r_end = _spin(-10, 10, unit="V", step=0.1)
+        self.r_dur = _spin(0, 60000, unit="ms", step=10)
         f.addRow("From", self.r_start); f.addRow("To", self.r_end); f.addRow("Duration", self.r_dur)
         self.pages.addWidget(rw)
         # sine
         nw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(nw); f.setContentsMargins(0, 0, 0, 0)
-        self.n_amp = _spin(0, 10, suffix=" V", step=0.1)
-        self.n_off = _spin(-10, 10, suffix=" V", step=0.1)
-        self.n_freq = _spin(0.01, 2500, suffix=" Hz", step=1)
-        self.n_dur = _spin(0, 60000, suffix=" ms", step=10)
+        self.n_amp = _spin(0, 10, unit="V", step=0.1)
+        self.n_off = _spin(-10, 10, unit="V", step=0.1)
+        self.n_freq = _spin(0.01, 2500, unit="Hz", step=1)
+        self.n_dur = _spin(0, 60000, unit="ms", step=10)
         f.addRow("Amplitude", self.n_amp); f.addRow("Offset", self.n_off)
         f.addRow("Frequency", self.n_freq); f.addRow("Duration", self.n_dur)
         self.pages.addWidget(nw)
@@ -90,7 +245,8 @@ class StimPage(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(["Duration (ms)", "Start (V)", "End (V)"])
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
-        self.table.setToolTip("Each row is a straight line from Start to End. Same Start and End = a flat level.")
+        self.table.setToolTip("Each row is a straight line from Start to End. Same Start and End = a flat level. "
+                              "Cells take units too, e.g. 0.5 s or 200 mV.")
         rowbtns = QtWidgets.QHBoxLayout()
         self.btn_add_seg = QtWidgets.QPushButton("Add segment")
         self.btn_del_seg = QtWidgets.QPushButton("Remove segment")
@@ -103,7 +259,7 @@ class StimPage(QtWidgets.QWidget):
         self.f_path = QtWidgets.QLineEdit(placeholderText="CSV or text file")
         self.btn_browse = QtWidgets.QPushButton("Browse…")
         frow.addWidget(self.f_path, 1); frow.addWidget(self.btn_browse)
-        self.f_rate = _spin(0, 1e6, decimals=0, suffix=" Hz", step=100)
+        self.f_rate = _spin(0, 1e6, decimals=2, unit="Hz", step=100)
         self.f_rate.setSpecialValueText("same as output")
         self.f_rate.setToolTip("Sample rate of a one-column file. Two-column files (time in s, volts) don't need it.")
         f.addRow("File", frow); f.addRow("File's rate", self.f_rate)
@@ -123,11 +279,16 @@ class StimPage(QtWidgets.QWidget):
         self.monitor = QtWidgets.QComboBox()
         self.monitor.setToolTip("Record the stimulus on a spare input (wire the output to it). "
                                 "This adds a channel named Stim with exact timing.")
-        self.repeat = _spin(0.05, 3600, suffix=" s", step=0.5)
+        self.repeat = _spin(0.05, 3600, unit="s", step=0.5)
         self.repeat.setToolTip("Repeat fires the stimulus this often")
+        self.on_start = QtWidgets.QComboBox()
+        for label, key in (("Do nothing", ""), ("Fire once", "once"), ("Start repeating", "repeat")):
+            self.on_start.addItem(label, key)
+        self.on_start.setToolTip("What the stimulator does when you press Start on the toolbar")
         bottom.addRow("Output", self.output)
         bottom.addRow("Record on", self.monitor)
         bottom.addRow("Repeat every", self.repeat)
+        bottom.addRow("When Start is pressed", self.on_start)
         left.addLayout(bottom)
         btns = QtWidgets.QHBoxLayout()
         self.btn_fire = QtWidgets.QPushButton("Fire")
@@ -149,7 +310,7 @@ class StimPage(QtWidgets.QWidget):
 
         # ---- right: preview ----------------------------------------------
         right = QtWidgets.QVBoxLayout()
-        self.preview = pg.PlotWidget()
+        self.preview = plot_widget()
         p = self.preview.getPlotItem()
         p.setLabel("left", "Output", units="V")
         p.setLabel("bottom", "time", units="s")
@@ -168,6 +329,9 @@ class StimPage(QtWidgets.QWidget):
         self._apply_units()
         self.set_stimulus(main.stimulus)
         self.repeat.setValue(main.stim_repeat_s)
+        self.on_start.setCurrentIndex(max(0, self.on_start.findData(main.stim_on_start)))
+        self.on_start.currentIndexChanged.connect(
+            lambda *_: self.main.set_stim_on_start(self.on_start.currentData()))
         self.shape.currentIndexChanged.connect(self._shape_changed)
         for w in (self.delay, self.p_amp, self.p_width, self.p_interval, self.s_amp, self.s_dur,
                   self.r_start, self.r_end, self.r_dur, self.n_amp, self.n_off, self.n_freq, self.n_dur,
@@ -238,10 +402,13 @@ class StimPage(QtWidgets.QWidget):
             vals = []
             for c, name in enumerate(("duration", "start", "end")):
                 item = self.table.item(r, c)
+                # Cells take units like the boxes do: "0.5 s", "200 mV".
+                convert = _same_kind("ms") if c == 0 else self._level_factor
                 try:
-                    vals.append(float((item.text() if item else "").strip()))
+                    vals.append(parse_quantity(item.text() if item else "", convert)[0])
                 except ValueError:
-                    raise ValueError(f"Segment {r + 1}: {name} must be a number.") from None
+                    raise ValueError(f"Segment {r + 1}: {name} must be a number, optionally with "
+                                     f"a unit (e.g. {'0.5 s' if c == 0 else '200 mV'}).") from None
             out.append({"duration_ms": vals[0], "start_v": vals[1] / self._scale,
                         "end_v": vals[2] / self._scale})
         return out
@@ -343,20 +510,29 @@ class StimPage(QtWidgets.QWidget):
     def _converted(self) -> bool:
         return self._units not in (None, ("V", 1.0))
 
+    def _level_families(self) -> list:
+        """Units a level can be typed in: the configured one with any prefix (mA in a
+        µA field), or volts at the output (mV, V), converted with the scale."""
+        units, k = self._units or ("V", 1.0)
+        return [(units, 1.0), ("V", k)]
+
+    def _level_factor(self, typed: str) -> float | None:
+        return _converter(self._level_families())(typed)
+
     def _apply_units(self) -> None:
         """Label and size the level fields for the [stimulator] units setting. The DAQ
         output is ±10 V, so the fields go to ±10 V × scale in those units."""
         cfg = self.main.cfg
         self._units = (cfg.stim_units, cfg.stim_scale)
         units, k = self._units
-        # enough decimals to step 1% of a volt, e.g. 0.01 V or 0.001 mA at 0.1 mA/V
-        decimals = max(2, min(6, 2 - math.floor(math.log10(k))))
+        # enough decimals to step 0.1 mV of output, e.g. 0.0001 V or 0.00001 mA at 0.1 mA/V
+        decimals = max(4, min(8, 4 - math.floor(math.log10(k))))
         for box in (self.p_amp, self.s_amp, self.r_start, self.r_end, self.n_amp, self.n_off):
             box.blockSignals(True)
             box.setDecimals(decimals)
             box.setRange(0 if box is self.n_amp else -10 * k, 10 * k)
             box.setSingleStep(0.1 * k)
-            box.setSuffix(f" {units}")
+            box.set_unit(units, self._level_families())
             box.blockSignals(False)
         self.table.setHorizontalHeaderLabels(["Duration (ms)", f"Start ({units})", f"End ({units})"])
         self.f_hint.setText("One column: volts per sample. Two columns: time (s), volts."
@@ -379,6 +555,10 @@ class StimPage(QtWidgets.QWidget):
     def _add_segment(self):
         last = self.table.rowCount() - 1
         end = self.table.item(last, 2).text() if last >= 0 and self.table.item(last, 2) else "0"
+        try:
+            end = parse_quantity(end, self._level_factor)[0]   # e.g. "200 mV" typed in that cell
+        except ValueError:
+            end = 0.0
         self.table.blockSignals(True)
         self._append_row(10, end, end)
         self.table.blockSignals(False)

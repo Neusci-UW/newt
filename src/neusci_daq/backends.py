@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from . import simulation as sim
 from .config import Config
 
 
@@ -82,115 +83,112 @@ class Backend:
     def _teardown(self): ...
 
 
-# Simulated units, after a ×1000 amplifier: (trough depth in V, spikes/s, trough-to-peak
-# in ms, repolarization peak as a fraction of the trough, chance a spike starts a burst).
-# A narrow, fast-spiking-like unit; a medium one; and a broad, pyramidal-like unit
-# that sometimes fires bursts. About 2 spikes/s in all.
-SIM_UNITS = ((0.4, 1.0, 0.30, 0.55, 0.0),
-             (0.9, 0.6, 0.55, 0.35, 0.0),
-             (1.6, 0.3, 0.75, 0.25, 0.3))
-
-
-def extracellular_spike(depth: float, fs: float, trough_to_peak_ms: float = 0.55,
-                        peak_ratio: float = 0.35) -> tuple[np.ndarray, int]:
-    """One extracellular action potential sampled at `fs`, as recorded near a cell
-    body: a small positive bump, a sharp negative trough (`depth` V) that falls
-    faster than it recovers, then a slower positive repolarization peak
-    `trough_to_peak_ms` later that decays over about a millisecond. Broader units
-    are slower in every phase. Returns the samples and the index of the trough,
-    which always lands on a sample so the height doesn't depend on the sample rate
-    (at 1 kHz the shape is only a blip; use 20 kHz or more to see it)."""
-    k = np.arange(-int(np.ceil(1.0e-3 * fs)), int(np.ceil(3.0e-3 * fs)) + 1)
-    t = k / fs * 1e3                                                    # ms from the trough
-    b = trough_to_peak_ms / 0.55                                        # 1 = a medium unit
-    pre = 0.08 * np.exp(-((t + 0.3 * b) / (0.12 * b)) ** 2)
-    bt = 0.6 + 0.4 * b                          # trough width varies less than the peak's timing
-    trough = -np.exp(-(t / np.where(t < 0, 0.11 * bt, 0.19 * bt)) ** 2)
-    tp = t - trough_to_peak_ms
-    peak = peak_ratio * np.exp(-(tp / np.where(tp < 0, 0.25 * b, 0.6 * b)) ** 2)
-    w = pre + trough + peak
-    i = int(-k[0])
-    return w * depth / -w[i], i                  # the other phases overlap the trough; keep it at -depth
-
-
 class SimulatedBackend(Backend):
-    """Fake signals for developing without hardware: sine + noise + spikes from three
-    simulated units, each with its own extracellular spike height."""
+    """Fake signals for developing and teaching without hardware. What each input
+    records (noise, sine, EPSPs after each stimulus pulse, and spiking cells whose
+    rate follows the EPSPs) is set per input on the Simulation tab; see simulation.py.
+    Settings changed while running apply from the next chunk."""
 
     _pending = None    # (monitor input, waveform at the input rate) from SimulatedOutput
 
     def _setup(self):
         self._rng = np.random.default_rng(0)
-        self._stim = None             # (monitor, wave, response, position)
-        self._spike_tail = None       # spike samples that run past the end of the last chunk
+        self._stim = None             # (monitor input, waveform, position) being played
+        self._epsp: dict[str, np.ndarray] = {}    # per input: depolarization still to come
+        self._tail: dict[str, np.ndarray] = {}    # per input: spike samples past the last chunk
+        self._last_spike: dict = {}               # (input, cell #) -> sample index of last spike
+        self._shapes: dict = {}                   # (cell, fs) -> spike_shape
 
     def inject(self, monitor: str, wave: np.ndarray, rate: float) -> None:
-        """Play a stimulus: `wave` appears on the `monitor` input, and the other
-        channels get a small evoked response 5 ms later (simulation only)."""
+        """Play a stimulus: `wave` appears on the `monitor` input, and every other
+        input gets an EPSP per pulse (simulation only)."""
         fs = self.cfg.sample_rate
         t_in = np.arange(len(wave)) / rate
         t_ai = np.arange(0, len(wave) / rate, 1.0 / fs)
         w = np.interp(t_ai, t_in, wave) if len(wave) > 1 else np.asarray(wave, float)
-        peak = float(np.max(np.abs(w))) if w.size else 0.0
-        k = np.arange(int(0.05 * fs)) / fs                      # 50 ms response
-        resp = 0.3 * peak * (k / 0.004) * np.exp(1 - k / 0.004)   # alpha function, peak at 4 ms
-        resp = np.concatenate([np.zeros(int(0.005 * fs)), resp])
-        self._pending = (monitor, w, resp)
+        self._pending = (monitor, w)
 
-    def _spikes(self, shapes, n, cs, fs, pad) -> np.ndarray:
-        """This chunk's spikes for every channel. Each spike's size varies by about 5%;
-        a burst is 2-4 spikes 3-6 ms apart, each 80% the size of the one before. A
+    def _start_stimulus(self, monitor, w, inputs, fs):
+        self._stim = (monitor, w, 0)
+        onsets = sim.pulse_onsets(w)
+        for ch in self.cfg.channels:
+            inp = sim.input_for(inputs, ch.physical)
+            if ch.physical == monitor or not onsets or not inp.epsp_v_per_v:
+                continue
+            k = sim.epsp_shape(inp, fs)
+            resp = np.zeros(onsets[-1][0] + len(k))
+            for i, amp in onsets:
+                resp[i:i + len(k)] += inp.epsp_v_per_v * amp * k
+            old = self._epsp.get(ch.physical, np.zeros(0))
+            if len(old) < len(resp):
+                old = np.concatenate([old, np.zeros(len(resp) - len(old))])
+            old[:len(resp)] += resp                   # EPSPs sum with any still going
+            self._epsp[ch.physical] = old
+
+    def _take_epsp(self, phys: str, cs: int) -> np.ndarray:
+        e = self._epsp.get(phys, np.zeros(0))
+        d = np.zeros(cs)
+        d[:min(cs, len(e))] = e[:cs]
+        self._epsp[phys] = e[cs:]
+        return d
+
+    def _spikes(self, phys: str, cells, d: np.ndarray, idx: int, fs: float) -> np.ndarray:
+        """Spikes for this chunk on one input, each cell firing at cell.rate(d). A
         spike that runs past the chunk's end is added to the start of the next one."""
-        rng = self._rng
-        out = np.zeros((n, cs + pad))
-        out[:, :pad] += self._spike_tail
-        for (w, trough), (_, rate, _, _, burst) in zip(shapes, SIM_UNITS):
-            for i in range(n):
-                for j in np.flatnonzero(rng.random(cs) < rate / fs):
-                    gain = 1 + 0.05 * rng.standard_normal()
-                    for _ in range(1 + (rng.integers(1, 4) if rng.random() < burst else 0)):
-                        a = j - trough                   # where the spike starts in this chunk
-                        out[i, max(a, 0):a + len(w)] += gain * w[max(-a, 0):]
-                        j += max(1, int(round(rng.uniform(3, 6) * 1e-3 * fs)))
-                        gain *= 0.8
-        self._spike_tail = out[:, cs:].copy()
-        return out[:, :cs]
+        rng, cs = self._rng, len(d)
+        shapes = []
+        for c in cells:
+            key = (tuple(vars(c).values()), fs)
+            if key not in self._shapes:
+                self._shapes[key] = sim.spike_shape(c, fs)
+            shapes.append(self._shapes[key])
+        tail = self._tail.get(phys, np.zeros(0))
+        pad = max([len(w) for w, _ in shapes] + [0]) + int(np.ceil(0.018 * fs)) + 1
+        out = np.zeros(cs + max(pad, len(tail)))
+        out[:len(tail)] += tail
+        refractory = max(1, int(round(sim.REFRACTORY_MS / 1000 * fs)))
+        for n, (c, (w, trough)) in enumerate(zip(cells, shapes)):
+            last = self._last_spike.get((phys, n), -10 ** 12)
+            for j in np.flatnonzero(rng.random(cs) < c.rate(d) / fs):
+                if idx + j - last < refractory:
+                    continue
+                gain = 1 + 0.05 * rng.standard_normal()           # each spike's size varies ~5%
+                for _ in range(1 + (rng.integers(1, 4) if rng.random() < c.burst else 0)):
+                    a = j - trough                                # where the spike starts in this chunk
+                    out[max(a, 0):a + len(w)] += gain * w[max(-a, 0):]
+                    last = idx + j
+                    j += max(refractory, int(round(rng.uniform(3, 6) * 1e-3 * fs)))
+                    gain *= 0.8                                   # bursts shrink
+            self._last_spike[(phys, n)] = last
+        self._tail[phys] = out[cs:].copy()
+        return out[:cs]
 
     def _loop(self):
-        fs, n, cs = self.cfg.sample_rate, len(self.cfg.channels), self.cfg.chunk_size
+        fs, cs = self.cfg.sample_rate, self.cfg.chunk_size
         idx, t0 = 0, time.perf_counter()
-        shapes = [extracellular_spike(depth, fs, tp, ratio) for depth, _, tp, ratio, _ in SIM_UNITS]
-        pad = max(len(w) for w, _ in shapes) + int(np.ceil(0.018 * fs)) + 1   # room for a burst
-        self._spike_tail = np.zeros((n, pad))
         while not self._stop.is_set():
+            inputs = self.cfg.sim_inputs                  # may be edited while running
             t = (idx + np.arange(cs)) / fs
-            data = np.empty((n, cs))
-            for i, ch in enumerate(self.cfg.channels):
-                # Each input has its own signal (aiN: a sine at N+1 Hz), so
-                # switching a channel's input visibly changes its trace.
-                k = int(ch.physical[2:]) if ch.physical[2:].isdigit() else i
-                # Inputs listed in [simulated] no_sine are just noise and spikes.
-                sine = 0.0 if ch.physical in self.cfg.sim_no_sine else 0.5 * np.sin(2 * np.pi * (1 + k) * t)
-                data[i] = sine + 0.02 * self._rng.standard_normal(cs)
-            data += self._spikes(shapes, n, cs, fs, pad)
             if self._pending is not None:
-                monitor, w, resp = self._pending
+                monitor, w = self._pending
                 self._pending = None
-                self._stim = (monitor, w, resp, 0)
+                self._start_stimulus(monitor, w, inputs, fs)
+            stim = np.zeros(cs)
             if self._stim is not None:
-                monitor, w, resp, pos = self._stim
-                for i, ch in enumerate(self.cfg.channels):
-                    src = w if ch.physical == monitor else resp
-                    if ch.physical == monitor:
-                        data[i] = 0.002 * self._rng.standard_normal(cs)   # a clean wire
-                    seg = src[pos:pos + cs]
-                    data[i, :len(seg)] += seg
-                pos += cs
-                self._stim = None if pos >= max(len(w), len(resp)) else (monitor, w, resp, pos)
-            else:
-                for i, ch in enumerate(self.cfg.channels):
-                    if ch.physical == self.cfg.stim_monitor:
-                        data[i] = 0.002 * self._rng.standard_normal(cs)
+                monitor, w, pos = self._stim
+                seg = w[pos:pos + cs]
+                stim[:len(seg)] = seg
+                self._stim = None if pos + cs >= len(w) else (monitor, w, pos + cs)
+            data = np.empty((len(self.cfg.channels), cs))
+            for i, ch in enumerate(self.cfg.channels):
+                if ch.physical == self.cfg.stim_monitor:
+                    data[i] = 0.002 * self._rng.standard_normal(cs) + stim    # a clean wire
+                    continue
+                inp = sim.input_for(inputs, ch.physical)
+                d = self._take_epsp(ch.physical, cs)
+                data[i] = (inp.sine_v * np.sin(2 * np.pi * inp.sine_hz * t)
+                           + inp.noise_v * self._rng.standard_normal(cs)
+                           + d + self._spikes(ch.physical, inp.cells, d, idx, fs))
             self._publish(Chunk(data, t, idx))
             idx += cs
             # pace to real time

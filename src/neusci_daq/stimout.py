@@ -114,8 +114,8 @@ class NidaqmxOutput(StimOutput):
 
 class SimulatedOutput(StimOutput):
     """For trying the stimulator without hardware: the waveform appears on the
-    monitor input of the simulated recording, plus a small fake response on the
-    other channels."""
+    monitor input of the simulated recording, and the other inputs get the EPSPs
+    (and extra spikes) set on the Simulation tab."""
 
     def __init__(self, cfg: Config, backend):
         super().__init__(cfg)

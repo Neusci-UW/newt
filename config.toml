@@ -19,9 +19,14 @@ directory = "data"
 # units = "µA"
 # scale = 100        # µA per V, e.g. an isolator set to 100 µA/V
 
-# Only used with --backend simulated: these inputs get noise and spikes but no sine wave.
+# Only used with --backend simulated: what each input records (noise, sine, EPSPs after
+# each stimulus pulse, and cells whose firing rate rises with depolarization). Easiest
+# to set on the Simulation tab. Inputs not listed here use the defaults.
 [simulated]
-no_sine = ["ai1"]
+
+[[simulated.inputs]]
+physical = "ai1"
+sine_amplitude = 0         # just noise, EPSPs and spikes
 
 # scale/offset convert volts at the DAQ input to your units: value = volts*scale + offset.
 # Example: an amplifier with gain 1000, displaying mV at the electrode:

@@ -22,6 +22,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import stim as stimmod
 from . import style, theme
 from . import trials as T
+from .plotzoom import light_curve, plot_widget
 
 ROW_GAP = 8          # px between the parts of a settings row (box, button, label)
 B_COLORS = ("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#D55E00", "#0072B2", "#F0E442", "#999999")
@@ -474,7 +475,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.grid.setToolTip("The trials each combination runs in. Click a row to preview its stimuli.")
         self.plan_note = QtWidgets.QLabel()
         self.plan_note.setWordWrap(True)
-        self.preview = pg.PlotWidget()
+        self.preview = plot_widget()
         self.preview.getPlotItem().setLabel("left", "Output", units="V")
         self.preview.getPlotItem().setLabel("bottom", "time", units="s")
         self.preview.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
@@ -497,7 +498,7 @@ class TrialsPage(QtWidgets.QWidget):
         self._resp_widgets: list[pg.PlotWidget] = []
         self.stack.addWidget(self.resp)
         # curve
-        self.curve_plot = pg.PlotWidget()
+        self.curve_plot = plot_widget()
         self.curve_plot.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
         self.stack.addWidget(self.curve_plot)
         v.addWidget(self.stack, 1)
@@ -1107,12 +1108,14 @@ class TrialsPage(QtWidgets.QWidget):
         unit = self._run["units"][row] if row is not None else ""
         ub = T.setting_info(self._run["shape"], self._run["protocol"].b.key)[1] if self._run["protocol"].b else ""
         for ib, b in enumerate(b_vals):
-            pw = pg.PlotWidget()
+            pw = plot_widget()
             pw.setBackground(th.background)
             self.resp_lay.addWidget(pw, 1)
             self._resp_widgets.append(pw)
             pi = pw.getPlotItem()
             pi.showGrid(x=True, y=True, alpha=0.25)
+            pi.setDownsampling(auto=True, mode="peak")     # with light_curve: ~1 point per pixel
+            pi.setClipToView(True)
             pi.setLabel("left", f"{name} ({unit})")
             if b is not None:
                 pi.setTitle(f"b = {T.fmt(b, ub)}", color=th.foreground, size="10pt")
@@ -1152,7 +1155,7 @@ class TrialsPage(QtWidgets.QWidget):
         pi = self._plots[min(r.trial.ib, len(self._plots) - 1)]
         item = self._items.get(r.trial.n)
         if item is None:
-            item = pi.plot()
+            item = light_curve(pi.plot())
             self._items[r.trial.n] = item
         item.setData(r.t_ms, r.data[row])
         self._style_item(r)
@@ -1189,7 +1192,7 @@ class TrialsPage(QtWidgets.QWidget):
                 item.setData([], [])
             return
         if item is None:
-            item = self._plots[min(ib, len(self._plots) - 1)].plot()
+            item = light_curve(self._plots[min(ib, len(self._plots) - 1)].plot())
             item.setZValue(5)
             self._avg_items[key] = item
         n = min(len(r.data[row]) for r in mine)

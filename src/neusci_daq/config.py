@@ -7,6 +7,8 @@ import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from . import simulation
+
 # USB-6003 limits (NI spec): one multiplexed ADC, 100 kS/s aggregate,
 # 8 single-ended / 4 differential inputs, fixed +/-10 V range.
 USB6003_MAX_AGGREGATE_RATE = 100_000
@@ -107,8 +109,9 @@ class Config:
     stim_monitor: str = ""        # input that records the stimulus (wired from the output), or ""
     stim_units: str = "V"         # units the Stimulator shows levels in, e.g. "µA" behind an isolator
     stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
-    # Simulated backend only: inputs that get no sine wave (just noise and spikes)
-    sim_no_sine: tuple[str, ...] = ()
+    # Simulated backend only: what each input records (see simulation.py); inputs
+    # not listed use the defaults
+    sim_inputs: list = field(default_factory=list)
 
     @property
     def aggregate_rate(self) -> float:
@@ -151,7 +154,7 @@ def load(path: str | Path) -> Config:
         stim_monitor=str(st.get("monitor", "")).lower(),
         stim_units=str(st.get("units", "V")).strip() or "V",
         stim_scale=float(st.get("scale", 1.0)),
-        sim_no_sine=tuple(str(p).lower() for p in sim.get("no_sine", [])),
+        sim_inputs=simulation.from_toml(sim),
     ).with_channels(chans)
     validate(cfg)
     return cfg
@@ -199,6 +202,7 @@ def validate(cfg: Config) -> None:
             raise ValueError(f"Two channels are named {ch.name!r}; give each its own name.")
         seen[ch.physical] = ch.name
         names.add(ch.name)
+    simulation.validate(cfg.sim_inputs)
     if cfg.backend == "simulated":
         return
     for ch in cfg.channels:
@@ -239,8 +243,8 @@ def dumps(cfg: Config) -> str:
     ]
     if cfg.stim_units != "V" or cfg.stim_scale != 1.0:
         lines += [f"units = {_s(cfg.stim_units)}", f"scale = {cfg.stim_scale:g}"]
-    if cfg.sim_no_sine:
-        lines += ["", "[simulated]", f"no_sine = [{', '.join(_s(p) for p in cfg.sim_no_sine)}]"]
+    if cfg.sim_inputs:
+        lines += ["", "[simulated]"] + simulation.to_toml_lines(cfg.sim_inputs)
     for c in cfg.channels + cfg.spare_channels:
         lines += ["", "[[channels]]",
                   f"physical = {_s(c.physical)}",

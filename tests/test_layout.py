@@ -540,3 +540,27 @@ def test_wheel_zoom_never_gets_stuck(app, win):
         vb.wheelEvent(_Wheel(vb, delta=2))
         assert win.window_box.value() < w or w == 0.01
     assert win.window_box.text().strip() in ("13.4 s",)      # stays readable
+
+
+def test_trials_and_stimulator_plots_use_the_same_wheel_rules(app, win):
+    from neusci_daq.plotzoom import WheelViewBox
+    win.resize(1024, 640)
+    win.show()
+    tp = win.trials_page
+    for pw in (tp.preview, tp.curve_plot, win.stim_page.preview):
+        vb = pw.getPlotItem().vb
+        assert isinstance(vb, WheelViewBox)
+        vb.setRange(xRange=(0, 10), yRange=(-1, 1), padding=0)
+        vb.wheelEvent(_Wheel(vb, delta=120))                 # wheel: time zooms in, voltage stays
+        (lo, hi), yr = vb.viewRange()
+        assert hi - lo < 10 and yr == pytest.approx([-1, 1])
+        vb.wheelEvent(_Wheel(vb, delta=-120))
+        vb.wheelEvent(_Wheel(vb, delta=-120))                # and back out past where it started
+        lo, hi = vb.viewRange()[0]
+        assert hi - lo > 10
+        span = hi - lo
+        vb.wheelEvent(_Wheel(vb, delta=-120, shift=True))    # Shift: later by a tenth, no zoom
+        assert vb.viewRange()[0] == pytest.approx([lo + span / 10, hi + span / 10])
+        vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))       # Cmd: voltage zooms, time stays
+        assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < 2
+        assert vb.viewRange()[0] == pytest.approx([lo + span / 10, hi + span / 10])

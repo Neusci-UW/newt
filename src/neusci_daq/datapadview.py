@@ -87,6 +87,7 @@ class DataPadView(View):
         box = QtWidgets.QGroupBox("Window: when, in each block")
         f = QtWidgets.QFormLayout(box)
         self.whole = QtWidgets.QCheckBox("The whole block")
+        self.whole.setChecked(True)
         self.t0 = UnitSpinBox(0, 1e5, "s", step=0.01)
         self.t1 = UnitSpinBox(0, 1e5, "s", step=0.01)
         self.t0.setToolTip("From this time after the block's start (or drag the shaded region)")
@@ -105,7 +106,7 @@ class DataPadView(View):
         self.source = QtWidgets.QComboBox()
         for label, key in SOURCES:
             self.source.addItem(label, key)
-        self.source.setToolTip("Blocks follow Blocks and Show (Raw Data tab and the top bar); the mean ± "
+        self.source.setToolTip("Blocks follow Blocks and Show (Spike Sorting tab and the top bar); the mean ± "
                                "spread rows use Spread at the top (SD or SEM; SD if None)")
         f.addRow("From", self.source)
         btns = QtWidgets.QHBoxLayout()
@@ -161,8 +162,12 @@ class DataPadView(View):
         self.multi = MultiAxis(p)
         self.region = pg.LinearRegionItem((0.0, 0.1))
         self.region.setZValue(10)
-        self.region.setToolTip("The window measured: drag it, or its edges")
+        self.region.setToolTip("The window measured. Drag across the plot to pick one, or drag this or its "
+                               "edges; double-click for the whole block")
         p.addItem(self.region)
+        self._dur = 0.0
+        p.vb.on_drag_select = self._drag_select       # a plain drag picks the window
+        p.scene().sigMouseClicked.connect(self._preview_clicked)
         tv.addWidget(self.preview, 1)
         right.addWidget(top)
         self.out_tabs = QtWidgets.QTabWidget()
@@ -187,6 +192,7 @@ class DataPadView(View):
         self.scatter = plot_widget()
         self.scatter.getPlotItem().showGrid(x=True, y=True, alpha=0.2)
         self.scatter_legend = self.scatter.getPlotItem().addLegend(offset=(10, 5))
+        self.scatter.getPlotItem().vb.limit_pad = (0.05, 0.05)    # room for the points at the edges
         sv.addWidget(self.scatter, 1)
         self.out_tabs.addTab(sc, "Scatter")
         self.out_tabs.addTab(self._fit_panel(), "Fit")
@@ -199,6 +205,7 @@ class DataPadView(View):
         self.btn_del_col.clicked.connect(self._remove_column)
         self.channel.currentIndexChanged.connect(lambda *_: self.redraw())
         self.whole.toggled.connect(self._whole_toggled)
+        self._whole_toggled(True)                     # the whole block to start with
         for w in (self.t0, self.t1):
             w.valueChanged.connect(lambda *_: self._window_typed())
         self.region.sigRegionChangeFinished.connect(self._region_dragged)
@@ -221,9 +228,6 @@ class DataPadView(View):
             self.channel.setCurrentText(keep)
         self.channel.blockSignals(False)
         self._fill_show(names)
-        if not self.columns and names:            # something to start with
-            for key in ("mean", "max", "min", "p2p"):
-                self.add_column(names[0], key, refresh=False)
         self._fill_columns()
         self.redraw()
 
@@ -307,7 +311,43 @@ class DataPadView(View):
     def _whole_toggled(self, on: bool) -> None:
         self.t0.setEnabled(not on)
         self.t1.setEnabled(not on)
-        self.region.setVisible(not on)
+        if on:                                        # the shading covers the whole block
+            self._set_region(0.0, self._dur)
+        else:
+            self._window_typed()
+
+    def _set_region(self, a: float, b: float) -> None:
+        self.region.blockSignals(True)
+        self.region.setRegion((a, b))
+        self.region.blockSignals(False)
+
+    def _drag_select(self, x0: float, x1: float, finished: bool) -> None:
+        """A drag across the preview: the window, from where it started to where it is."""
+        x0, x1 = max(0.0, x0), min(self._dur, x1) if self._dur else x1
+        if x1 - x0 <= 0:
+            return
+        self._set_region(x0, x1)
+        if finished:
+            self.set_window(x0, x1)
+
+    def set_window(self, a: float | None, b: float | None) -> None:
+        """Measure from a to b (s), or the whole block (None)."""
+        if a is None:
+            self.whole.setChecked(True)
+            self._set_region(0.0, self._dur)
+            return
+        for w, v in ((self.t0, a), (self.t1, b)):
+            w.blockSignals(True)
+            w.setValue(max(0.0, v))
+            w.blockSignals(False)
+        self.whole.blockSignals(True)
+        self.whole.setChecked(False)
+        self.whole.blockSignals(False)
+        self._whole_toggled(False)
+
+    def _preview_clicked(self, ev) -> None:
+        if ev.double() and self.preview.getPlotItem().vb.sceneBoundingRect().contains(ev.scenePos()):
+            self.set_window(None, None)
 
     def _window_typed(self) -> None:
         self.region.blockSignals(True)
@@ -316,10 +356,9 @@ class DataPadView(View):
 
     def _region_dragged(self) -> None:
         a, b = self.region.getRegion()
-        for w, v in ((self.t0, a), (self.t1, b)):
-            w.blockSignals(True)
-            w.setValue(max(0.0, v))
-            w.blockSignals(False)
+        if self.whole.isChecked() and abs(a) < 1e-9 and abs(b - self._dur) < 1e-9:
+            return
+        self.set_window(a, b)
 
     # -- the preview ----------------------------------------------------------------------------
     def showEvent(self, ev):
@@ -357,10 +396,14 @@ class DataPadView(View):
             p.getAxis("left").setTextPen(pg.mkPen(self._fg()))
         p.enableAutoRange(axis="y")                       # every trace fits the height
         self.multi.fit()
-        p.setTitle(f"Block {i + 1}: drag the shaded window", color=self._fg())
-        if self.t1.value() <= 0 or self.t0.value() >= dur:     # a first window: the middle fifth
-            self.t0.setValue(0.4 * dur)
-            self.t1.setValue(0.6 * dur)
+        p.setTitle(f"Block {i + 1}: drag to pick a window (double-click: the whole block)", color=self._fg())
+        self._dur = dur
+        self.region.setBounds((0.0, dur))
+        if self.t1.value() <= 0 or self.t0.value() >= dur:
+            self.t0.setValue(0.0)
+            self.t1.setValue(dur)
+        if self.whole.isChecked():
+            self._set_region(0.0, dur)
 
     # -- rows -------------------------------------------------------------------------------------
     def _measure_block(self, i: int, spikes: bool, start=None, end=None) -> dict[tuple, float]:
@@ -409,7 +452,7 @@ class DataPadView(View):
         self._show_table()
         note = self._spike_note()
         self._show_message(f"Added {len(new)} row(s).{note}" if new else
-                           f"No blocks to measure: choose some on the Raw Data tab.{note}", error=not new)
+                           f"No blocks to measure: choose some on the Spike Sorting tab.{note}", error=not new)
         return len(new)
 
     def recompute(self) -> int:
@@ -430,7 +473,7 @@ class DataPadView(View):
 
     def _spike_note(self) -> str:
         if any(k in D.SPIKE_KEYS for _, k in self.columns) and self.page.raw.events is None:
-            return " Spike columns need action potentials: find them on the Raw Data tab first."
+            return " Spike columns need action potentials: find them on the Spike Sorting tab first."
         return ""
 
     def _make_row(self, rc: dict) -> dict:

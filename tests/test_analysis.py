@@ -235,7 +235,7 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    assert [ap.tabs.tabText(i) for i in range(ap.tabs.count())] == ["Raw Data Visualization", "Comparison", "DataPad"]
+    assert [ap.tabs.tabText(i) for i in range(ap.tabs.count())] == ["Spike Sorting", "Comparison", "DataPad"]
     ap.raw.overlay.setFocus()
     key(ap.raw.overlay, QtCore.Qt.Key.Key_Right)
     pump(app, 0.05)
@@ -576,8 +576,8 @@ def test_datapad_measures_blocks_averages_and_groups(app, win, tmp_path):
     pad = ap.datapad
     ap.tabs.setCurrentWidget(pad)
     pump(app, 0.1)
-    assert pad.columns and pad.columns[0][0] == ap.names()[0]        # starts with a few columns
-    pad.columns = []
+    assert pad.columns == [] and pad.whole.isChecked()               # no columns yet; the whole block
+    assert pad.region.getRegion() == pytest.approx((0, ap.blocks[0]["duration_s"]), abs=1e-3)
     pad.add_column("Stim", "max")
     pad.add_column("Stim", "mean")
     pad.whole.setChecked(True)
@@ -715,3 +715,120 @@ def test_datapad_overlays_scatters_fits_and_recomputes(app, win):
     first = pad.rows[0]
     w = slice(0, int(0.05 * ap.blocks[0]["sample_rate"]) + 1)
     assert first["values"][("Stim", "mean")] == pytest.approx(ap.trace(ap.index(), "Stim")[w].mean())
+
+
+# ---------------------------------------------------------------- Spike Sorting
+def test_spike_sorting_shows_the_stimulus_and_leaves_it_out_of_the_channels(app, win):
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap, raw = win.analysis_page, win.analysis_page.raw
+    assert ap.tabs.tabText(0) == "Spike Sorting"
+    channels = [raw.channel.itemText(i) for i in range(raw.channel.count())]
+    assert ap.stim_channel.currentData() == "Stim" and "Stim" not in channels and "Ch2" in channels
+    assert raw.stim_plot.isVisible()
+    x, y = raw.stim_curve.getOriginalDataset()
+    assert len(y) and np.nanmax(y) == pytest.approx(1, abs=0.05)     # the 1 V pulses of block 1
+    assert len(raw.stim_onsets.data) >= 1
+    ap.stim_channel.setCurrentIndex(0)                               # None: the notes
+    assert "Stim" in [raw.channel.itemText(i) for i in range(raw.channel.count())]
+    assert "notes" in raw.stim_plot.getPlotItem().titleLabel.text
+
+
+def test_pointing_at_a_unit_highlights_its_events(app, win):
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    raw = win.analysis_page.raw
+    raw.channel.setCurrentText("Ch2")
+    ev = raw.find()
+    assert ev is not None and len(ev.t) >= 4
+    ev.unit = np.arange(len(ev.t)) % 2                               # two units, whatever the sorter made
+    raw._show_results()
+    assert raw.table.rowCount() == 2
+    assert raw.event_hl.getData()[0] is None or not len(raw.event_hl.getData()[0])   # nothing yet
+    both = [b for b in range(4) if {0, 1} <= set(ev.unit[ev.block == b])]
+    assert both, "the simulation gave no block with both units"
+    win.analysis_page.current.setValue(both[0] + 1)                  # a block with both units
+    raw.table.selectRow(1)                                           # click unit 2
+    i = win.analysis_page.index()
+    mine = (ev.block == i) & (ev.unit == 1)
+    xs = raw.event_hl.getData()[0]
+    assert np.isfinite(xs).sum() > 0 and mine.sum() == np.isnan(xs).sum()   # one segment per event
+    sizes = raw.marks.data["size"]
+    assert set(sizes[ev.unit[ev.block == i] == 1]) == {14} and set(sizes[ev.unit[ev.block == i] == 0]) == {9}
+    assert all(it.opacity() < 0.5 for it in raw._wave_items[0])     # the other unit's waveforms fade
+    raw._hover(0)                                                    # pointing at unit 1 wins
+    assert raw.highlighted_units() == {0}
+    raw._hover(None)
+    assert raw.highlighted_units() == {1}
+    raw.norm_waves.setChecked(True)                                  # redrawn: the selection stays
+    assert raw.highlighted_units() == {1}
+
+
+def test_normalize_options(app, win):
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    raw = win.analysis_page.raw
+    raw.channel.setCurrentText("Ch2")
+    ev = raw.find()
+    assert ev is not None and len(ev.t)
+    raw.norm_sizes.setChecked(True)
+    raw.norm_isi.setChecked(True)
+    raw.norm_waves.setChecked(True)
+    raw.norm_rate.setChecked(True)
+    for pw in (raw.hist, raw.isi):
+        y = pw.getPlotItem().listDataItems()[0].getData()[1]
+        assert y.sum() == pytest.approx(1)                           # a fraction of the unit's events
+    peak = int(np.argmin(np.abs(ev.wave_t_ms)))
+    mean = raw.wave_plot.getPlotItem().listDataItems()[1].getData()[1]
+    assert abs(mean[peak]) == pytest.approx(1, abs=1e-6)             # each spike ÷ its own peak
+    rate = raw.rate_plot.getPlotItem().listDataItems()[-1].getData()[1]
+    assert np.nanmax(rate) == pytest.approx(1)
+
+
+def test_datapad_overlaid_axes_share_the_time_axis(app, win):
+    two_stimulus_session(app, win)
+    win.resize(1200, 800)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    ap.tabs.setCurrentWidget(ap.datapad)
+    pad = ap.datapad
+    pad.set_shown(["Ch1", "Ch2"])
+    ap.step(1)                                                       # redrawn for another block
+    pump(app, 0.2)
+    main = pad.preview.getPlotItem().vb
+    for vb in pad.multi._extras():
+        assert vb.viewRange()[0] == pytest.approx(main.viewRange()[0])
+        assert vb.sceneBoundingRect().width() == pytest.approx(main.sceneBoundingRect().width(), abs=1)
+
+
+def test_datapad_drag_picks_a_window_and_traces_stay_sharp(app, win):
+    two_stimulus_session(app, win)
+    win.resize(1200, 800)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    ap.tabs.setCurrentWidget(ap.datapad)
+    pad = ap.datapad
+    pump(app, 0.1)
+    vb = pad.preview.getPlotItem().vb
+    vb.on_drag_select(0.1, 0.3, False)                              # dragging: the shading follows
+    assert pad.whole.isChecked() and pad.region.getRegion() == pytest.approx((0.1, 0.3))
+    vb.on_drag_select(0.1, 0.3, True)                               # let go: that's the window
+    assert not pad.whole.isChecked() and pad.bounds() == pytest.approx((0.1, 0.3))
+    pad.set_window(None, None)                                      # double-click: the whole block again
+    assert pad.whole.isChecked() and pad.bounds() == (None, None)
+    pad.set_shown(["Ch1", "Ch2"])
+    ap.step(1)                                                      # another block
+    pump(app, 0.3)
+    ch2 = pad.traces["Ch2"]
+    shown = len(ch2.xData) if ch2.xData is not None else 0
+    assert shown > 800                                              # drawn at the view's width, not ~50 px

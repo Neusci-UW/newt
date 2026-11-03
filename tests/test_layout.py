@@ -189,7 +189,7 @@ def test_both_stylesheets_reference_existing_images():
 
 # ---------------------------------------------------------------- stimulator tab and chip
 def test_no_stimulator_menu_any_more(win):
-    assert [a.text().replace("&", "") for a in win.menuBar().actions()] == ["File", "Setup", "View"]
+    assert [a.text().replace("&", "") for a in win.menuBar().actions()] == ["File", "Setup", "Audio/Video", "View"]
 
 
 def test_chip_shows_on_every_tab_while_repeating_and_stops_it(app, win):
@@ -452,7 +452,7 @@ def test_wheel_zoom_works_while_acquisition_is_stopped(app, win):
     assert len(win.buf_t) == n                               # the trace wasn't trimmed
     win._zoom_time(4.0, x=t_end - 1.0)                       # and back out: all of it again
     lo, hi = vb.viewRange()[0]
-    assert hi - lo == pytest.approx(2.0) and lo <= win.buf_t[0] - win._axis_zero + 0.01
+    assert hi - lo == pytest.approx(2.0, abs=1e-3) and lo <= win.buf_t[0] - win._axis_zero + 0.01   # stops at the last sample
     yr = vb.viewRange()[1]
     vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))           # Cmd: voltage zoom while stopped too
     assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < yr[1] - yr[0]
@@ -553,6 +553,7 @@ def test_trials_and_stimulator_plots_use_the_same_wheel_rules(app, win):
     for pw in (tp.preview, tp.curve_plot, win.stim_page.preview):
         vb = pw.getPlotItem().vb
         assert isinstance(vb, WheelViewBox)
+        vb.clamp_to_data = False                             # the wheel rules, whatever's plotted
         vb.setRange(xRange=(0, 10), yRange=(-1, 1), padding=0)
         vb.wheelEvent(_Wheel(vb, delta=120))                 # wheel: time zooms in, voltage stays
         (lo, hi), yr = vb.viewRange()
@@ -725,7 +726,54 @@ def test_box_zoom_in_review_sets_window_and_position(app, win, tmp_path):
     win.open_session(win.session_dir)
     pump(app, 0.1)
     vb = win.plots[0].vb
-    _box_drag(vb, (0.2, -0.5), (0.6, 0.5))
+    y0, y1 = vb.viewRange()[1]
+    lo, hi = y0 + 0.25 * (y1 - y0), y0 + 0.75 * (y1 - y0)            # a box inside the data
+    _box_drag(vb, (0.2, lo), (0.6, hi))
     assert win.window_box.value() == pytest.approx(0.4, abs=0.01)
     assert win.plots[1].vb.viewRange()[0] == pytest.approx([0.2, 0.6], abs=0.01)   # every plot follows
-    assert vb.viewRange()[1] == pytest.approx([-0.5, 0.5], abs=0.02)
+    assert vb.viewRange()[1] == pytest.approx([lo, hi], rel=0.02)
+
+
+def test_stacked_plots_line_up(app, win):
+    win.resize(1200, 800)
+    win.show()
+    win.curves[0].setData(np.arange(10.0), np.full(10, -123456.0))   # long tick labels on one plot
+    win.curves[1].setData(np.arange(10.0), np.full(10, 0.5))
+    win.plots[0].enableAutoRange()
+    pump(app, 0.3)
+    xs = [p.vb.sceneBoundingRect().left() for p in win.plots]
+    widths = [p.getAxis("left").width() for p in win.plots]
+    assert max(widths) - min(widths) < 0.5 and max(xs) - min(xs) < 0.5
+    raw = win.analysis_page.raw
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ws = [pw.getPlotItem().getAxis("left").width() for pw in (raw.overlay, raw.raster, raw.rate_plot)]
+    assert max(ws) - min(ws) < 0.5
+
+
+def test_charts_stop_at_the_edges_of_their_data(app):
+    from neusci_daq.plotzoom import TraceCurve, plot_widget
+    pw = plot_widget()
+    pw.resize(600, 400)
+    pw.show()
+    c = TraceCurve()
+    pw.getPlotItem().addItem(c)
+    c.setData(np.linspace(1, 3, 500), np.sin(np.linspace(0, 20, 500)))
+    vb = pw.getPlotItem().vb
+    pump(app, 0.05)
+    vb.setRange(xRange=(-5, 20), yRange=(-9, 9), padding=0)          # far past it
+    (x0, x1), (y0, y1) = vb.viewRange()
+    assert (x0, x1) == pytest.approx((1, 3)) and y0 >= -1.05 and y1 <= 1.05
+    vb.setXRange(1.5, 2, padding=0)                                  # zoomed in, then panned off the end
+    vb.translateBy(x=5)
+    assert vb.viewRange()[0] == pytest.approx([2.5, 3])
+    other = plot_widget()                                            # a linked plot follows, whatever it holds
+    other.resize(600, 200)
+    other.show()
+    other.plot([2.0, 2.2], [0, 1])
+    other.setXLink(pw)
+    vb.setXRange(1.2, 2.8, padding=0)
+    pump(app, 0.05)
+    assert other.getPlotItem().vb.viewRange()[0] == pytest.approx([1.2, 2.8], abs=0.05)
+    other.close()
+    pw.close()

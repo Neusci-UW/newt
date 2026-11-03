@@ -31,7 +31,7 @@ Programs referred to:
 | Calculated channels: digital filters (low-pass, high-pass, band-pass, band-stop, notch), smoothing, RMS, envelope, derivative, integral and arithmetic | LabChart Channel Calculations, Spike2 virtual channels | ✅ Calculations… |
 | DataPad: a table of measurements in a time window, exported or copied | LabChart DataPad, Clampfit Statistics | ✅ Analysis › DataPad |
 | Mean ± SD or SEM across trials, shaded on averages | Clampfit, AxoGraph | ✅ Spread, at the top of Analysis |
-| Action potential detection (threshold or bimodal) and sorting (PCA + k-means) | Spike2 WaveMark, Backyard Brains, SpikeInterface | ✅ Analysis › Raw Data |
+| Action potential detection (threshold or bimodal) and sorting (PCA + k-means) | Spike2 WaveMark, Backyard Brains, SpikeInterface | ✅ Analysis › Spike Sorting |
 | Raster, rate across the session, ISI histogram, PSTH, spike-triggered average | Spike2, LabChart Spike Histogram module | ✅ Analysis |
 | Blocks grouped by stimulus, as named pages | Spike2 and Clampfit only by hand | ✅ Blocks panel, Analysis › Show |
 | Simulated neurons, with tunable synapses between them | NEURON, Brian2 (much simpler here) | ✅ Simulation tab |

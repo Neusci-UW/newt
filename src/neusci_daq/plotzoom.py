@@ -23,11 +23,55 @@ class WheelViewBox(pg.ViewBox):
     """The app's mouse rules: the wheel zooms time (Cmd+wheel: the y axis, Shift+wheel:
     pans time); Ctrl+drag draws a box and zooms to it; Ctrl+click goes back a zoom."""
 
+    # The view never goes past the data: panning and zooming stop at its edges. A little
+    # room in y (and in x, for plots of points whose markers would be cut in half).
+    clamp_to_data = True
+    limit_pad = (0.0, 0.02)
+
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self._zoom_history: list = []
+        self.on_drag_select = None              # f(x0, x1, finished): plain left-drag selects time
+
+    def updateViewRange(self, forceX=False, forceY=False):
+        if self.clamp_to_data:
+            lim = self.state["limits"]
+            lim["xLimits"], lim["yLimits"] = [None, None], [None, None]
+            for axis, key in ((0, "xLimits"), (1, "yLimits")):
+                if self.linkedView(axis) is not None:   # it follows the plot it's linked to
+                    continue
+                b = self._data_limits(axis)
+                if b is None:
+                    continue
+                pad = (b[1] - b[0]) * self.limit_pad[axis]
+                lim[key] = [b[0] - pad, b[1] + pad]
+        super().updateViewRange(forceX, forceY)
+
+    def _data_limits(self, axis: int) -> tuple[float, float] | None:
+        """Where the data starts and ends on an axis. (childrenBounds pads by a pixel or
+        so for line widths, which would let the view past the data.)"""
+        lo, hi = np.inf, -np.inf
+        for item in self.addedItems:
+            if not item.isVisible() or not hasattr(item, "dataBounds"):
+                continue
+            try:
+                b = item.dataBounds(axis)
+            except Exception:
+                continue
+            if b is None or b[0] is None or b[1] is None:
+                continue
+            if np.isfinite(b[0]) and np.isfinite(b[1]):
+                lo, hi = min(lo, b[0]), max(hi, b[1])
+        return (float(lo), float(hi)) if hi > lo else None
 
     def mouseDragEvent(self, ev, axis=None):
+        if (axis is None and self.on_drag_select is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
+                and not ev.modifiers() & (ZOOM_MODS | QtCore.Qt.KeyboardModifier.ShiftModifier)):
+            ev.accept()                         # select a stretch of time (DataPad)
+            x0 = self.mapToView(ev.buttonDownPos(ev.button())).x()
+            x1 = self.mapToView(ev.pos()).x()
+            self.on_drag_select(min(x0, x1), max(x0, x1), ev.isFinish())
+            return
         if axis is None and ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
             ev.accept()
             if ev.isFinish():
@@ -155,7 +199,7 @@ class TraceCurve(pg.PlotDataItem):
         if orthoRange is not None:
             i0, i1 = np.searchsorted(x, orthoRange)
             y = y[i0:i1]
-        if not len(y):
+        if not len(y) or not np.isfinite(y).any():       # e.g. a rate meter before its second event
             return None, None
         if frac >= 1.0:
             return float(np.nanmin(y)), float(np.nanmax(y))
@@ -329,6 +373,7 @@ class MultiAxis:
         self.items: list = []
         self._added: list = []                # items this put in the plot (not ones already there)
         self._labels: list = []               # (axis, name, unit, colour) to restore after a restyle
+        self._timer: QtCore.QTimer | None = None
         self._auto = True
         self._prev = self._last = tuple(plot.vb.viewRange()[1])
         plot.vb.sigResized.connect(self._sync_geometry)
@@ -357,6 +402,11 @@ class MultiAxis:
             p.layout.addItem(ax, 2, 3 + len(self.axes))
             self.axes.append(ax)
             self._sync_geometry()
+            # the layout settles after this (the new axis may not change the plot's size, so no
+            # resize signal comes): place it again once it has
+            if self._timer is None:
+                self._timer = QtCore.QTimer(interval=0, singleShot=True, timeout=self._sync_geometry)
+            self._timer.start()
         self.views.append(vb)
         self.items.append(item)
         return vb
@@ -424,10 +474,16 @@ class MultiAxis:
             vb.enableAutoRange(axis="y", enable=self._auto)
 
     def _sync_geometry(self, *_) -> None:
-        r = self.plot.vb.sceneBoundingRect()
+        """Put every extra view exactly over the plot's, so the same time is in the same place."""
+        main = self.plot.vb
+        r = QtCore.QRectF(main.scenePos(), main.size())   # not sceneBoundingRect: that adds the pen
         for vb in self._extras():
             vb.setGeometry(r)
-            vb.linkedViewChanged(self.plot.vb, vb.XAxis)
+            vb.linkedViewChanged(main, vb.XAxis)
+        # a trace thins its samples to its view's width: redo it now the view has its real size
+        for item, vb in zip(self.items, self.views):
+            if vb is not main and hasattr(item, "refresh"):
+                item.refresh()
 
     def _main_y_changed(self, _vb, rng) -> None:
         self._prev, self._last = self._last, tuple(rng)
@@ -445,3 +501,60 @@ class MultiAxis:
             k = (hi - lo) / (b0 - a0)
             vb.enableAutoRange(axis="y", enable=False)
             vb.setYRange(lo + (a1 - a0) * k, lo + (b1 - a0) * k, padding=0)
+
+
+def _natural_width(ax: pg.AxisItem) -> float:
+    """The width a left/right axis would take by itself (pyqtgraph's own rule)."""
+    if not ax.isVisible():
+        return 0.0
+    s = ax.style
+    w = (ax.textWidth if s["autoExpandTextSpace"] else s["tickTextWidth"]) if s["showValues"] else 0
+    w += s["tickTextOffset"][0] if s["showValues"] else 0
+    w += max(0, s["tickLength"])
+    if ax.label.isVisible():
+        w += ax.label.boundingRect().height() * 0.8
+    return w
+
+
+class AxisGroup:
+    """Vertically stacked plots whose left axes stay the same width (the widest one needs),
+    so their plotting areas line up and the same time is at the same x in each."""
+
+    def __init__(self, side: str = "left"):
+        self.side = side
+        self.axes: list[pg.AxisItem] = []
+
+    def set_plots(self, plots) -> None:
+        """Group exactly these plots (PlotItems or PlotWidgets)."""
+        for ax in self.axes:
+            if pg.Qt.isQObjectAlive(ax) and getattr(ax, "_group", None) is self:
+                ax._group = None
+        self.axes = []
+        for p in plots:
+            item = p.getPlotItem() if hasattr(p, "getPlotItem") else p
+            ax = item.getAxis(self.side)
+            ax._group = self
+            if not getattr(ax, "_grouped", False):            # once per axis: route its resizing here
+                own = ax._updateWidth
+
+                def update(ax=ax, own=own):
+                    g = getattr(ax, "_group", None)
+                    if g is None:
+                        own()
+                    else:
+                        g.update()
+                ax._updateWidth = update
+                ax._grouped = True
+            self.axes.append(ax)
+        self.update()
+
+    def update(self) -> None:
+        self.axes = [ax for ax in self.axes if pg.Qt.isQObjectAlive(ax)]
+        if not self.axes:
+            return
+        w = max(_natural_width(ax) for ax in self.axes)
+        for ax in self.axes:
+            if ax.fixedWidth is None:
+                ax.setMinimumWidth(w)
+                ax.setMaximumWidth(w)
+                ax.picture = None

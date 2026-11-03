@@ -234,6 +234,7 @@ def test_add_edit_and_delete_an_analysis_channel_from_acquisition(app, win):
             d.kind.setCurrentIndex(d.kind.findData("rate"))
             d.values()                                                # settings for the new kind exist
             d._widgets["level"].setValue(0.2)
+            d._widgets["dir"].setCurrentIndex(d._widgets["dir"].findData("above"))   # Spike Sorting says below
             d._widgets["per"].setCurrentIndex(1)
         AnalysisChannelDialog.exec = drive(make_rate)
         assert win.analysis_channel_dialog()
@@ -302,3 +303,36 @@ def test_dialog_settings_take_typed_units(app, win):
     d.kind.setCurrentIndex(d.kind.findData("smooth"))
     type_in(d._widgets["ms"], "500 µs")
     assert d.current_formula() == "smooth(Ch2, 0.5)"
+
+
+def test_cyclic_measurements_start_from_the_spike_sorting_settings(app, win):
+    from neusci_daq.analysischannel import AnalysisChannelDialog
+    sorter = {"channel": "Ch2", "level": -0.12, "dir": "below", "dead": 2.0}
+    d = AnalysisChannelDialog(win, ["Ch1", "Ch2"], {"Ch1": "V", "Ch2": "V"}, 20000.0, sorter=sorter)
+    d.source.setCurrentText("Ch2")
+    d.kind.setCurrentIndex(d.kind.findData("rate"))
+    assert d.values()["level"] == pytest.approx(-0.12) and d.values()["dir"] == "below"
+    assert d.values()["dead"] == 2.0 and "from Spike Sorting" in d.settings_box.title()
+    assert d.current_formula() == "60 * rate(-Ch2, 0.12, 2)"
+    d.source.setCurrentText("Ch1")                                   # another channel: its own level
+    assert d.values()["dir"] == "below" and d.values()["level"] == pytest.approx(0.5)
+    d.source.setCurrentText("Ch2")
+    d._widgets["level"].setValue(-0.3)                               # typed: it stays
+    d.source.setCurrentText("Ch1")
+    d.source.setCurrentText("Ch2")
+    assert d.values()["level"] == pytest.approx(-0.3)
+
+
+def test_spike_sorting_gives_its_threshold_as_a_level(app, win):
+    from test_analysis import two_stimulus_session
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    raw = win.analysis_page.raw
+    raw.channel.setCurrentText("Ch2")
+    raw.threshold.setText("100 mV")
+    raw.threshold.editingFinished.emit()
+    d = raw.cyclic_defaults()
+    assert d["channel"] == "Ch2" and d["dir"] == "below" and d["dead"] == raw.dead.value()
+    assert d["level"] == pytest.approx(raw._baseline() - 0.1)

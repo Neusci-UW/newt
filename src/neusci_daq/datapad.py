@@ -27,7 +27,7 @@ MEASUREMENTS = {
     "freq": ("Main frequency", "Hz", "Frequency of the largest peak in the spectrum"),
     "start": ("Value at start", "{u}", "The first sample in the window"),
     "end": ("Value at end", "{u}", "The last sample in the window"),
-    "spikes": ("Spike count", "", "Action potentials found on the Raw Data tab, in the window"),
+    "spikes": ("Spike count", "", "Action potentials found on the Spike Sorting tab, in the window"),
     "rate": ("Spike rate", "/s", "Spike count ÷ window length"),
 }
 SPIKE_KEYS = ("spikes", "rate")

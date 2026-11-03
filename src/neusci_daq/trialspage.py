@@ -22,7 +22,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import stim as stimmod
 from . import style, theme
 from . import trials as T
-from .plotzoom import light_curve, plot_widget
+from .plotzoom import AxisGroup, light_curve, plot_widget
 
 ROW_GAP = 8          # px between the parts of a settings row (box, button, label)
 B_COLORS = ("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#D55E00", "#0072B2", "#F0E442", "#999999")
@@ -499,6 +499,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.stack.addWidget(self.resp)
         # curve
         self.curve_plot = plot_widget()
+        self.curve_plot.getPlotItem().vb.limit_pad = (0.05, 0.05)    # room for the points at the edges
         self.curve_plot.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
         self.stack.addWidget(self.curve_plot)
         v.addWidget(self.stack, 1)
@@ -1145,6 +1146,9 @@ class TrialsPage(QtWidgets.QWidget):
                 pi.setXLink(self._plots[0])
             self._plots.append(pi)
             self._regions.append(reg)
+        if not hasattr(self, "_resp_axes"):
+            self._resp_axes = AxisGroup()
+        self._resp_axes.set_plots(self._plots)           # the panels line up
         for r in self.results.values():
             self._draw_result(r)
         for ia in range(len(self._run["a_vals"])):

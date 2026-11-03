@@ -149,8 +149,13 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
     `preview(formula)` returns (t, y) of the result on the data shown, or raises ValueError."""
 
     def __init__(self, parent, sources: list[str], units: dict[str, str], fs: float,
-                 calc: dsp.Calculation | None = None, taken: set[str] | None = None, preview=None):
+                 calc: dsp.Calculation | None = None, taken: set[str] | None = None, preview=None,
+                 sorter: dict | None = None):
         super().__init__(parent)
+        # Spike Sorting's settings, the defaults for cyclic measurements: {"channel", "level"
+        # (absolute, in the channel's unit, or None), "dir" ("above"/"below"), "dead" (ms)}
+        self.sorter = sorter or {}
+        self._level_typed = False
         self.setWindowTitle("Edit analysis channel" if calc else "Add analysis channel")
         self.resize(720, 560)
         self.sources, self.units, self.fs = sources, units, fs
@@ -235,8 +240,9 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
             self.settings.removeRow(0)
         self._widgets = {}
         kind = self.kind.currentData()
+        self._level_typed = "level" in vals
         for key, (label, default, unit, tip) in KINDS[kind][2]:
-            v = vals.get(key, default)
+            v = vals.get(key, self._sorter_default(key, default))
             if key == "dir":
                 w = QtWidgets.QComboBox()
                 w.addItem("Going above the level", "above")
@@ -276,6 +282,8 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
                 lo = 0.0 if unit in ("Hz", "ms") else -1e9
                 w = UnitSpinBox(lo, 1e9, unit, decimals=6, step=0.05 if key == "level" else 1.0)
                 w.setValue(float(v))
+                if key == "level":                        # typed: it stops following Spike Sorting
+                    w.valueChanged.connect(lambda *_: setattr(self, "_level_typed", True))
                 w.valueChanged.connect(lambda *_: self._changed())
             if tip:
                 w.setToolTip(tip)
@@ -283,6 +291,18 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
             self._widgets[key] = w
         self.settings_box.setVisible(bool(self._widgets))
         self.source.setEnabled(kind != "custom")
+        uses = [k for k in ("level", "dir", "dead") if k in self._widgets and self._sorter_default(k, None) is not None]
+        self.settings_box.setTitle("Settings" + (" (from Spike Sorting: its threshold, direction and dead time)"
+                                                 if uses else ""))
+
+    def _sorter_default(self, key: str, default):
+        """Spike Sorting's setting for a cyclic measurement, if it has one for this source."""
+        if key in ("dir", "dead") and self.sorter.get(key) is not None:
+            return self.sorter[key]
+        if key == "level" and self.sorter.get("level") is not None \
+                and self.sorter.get("channel") == self.source.currentText():
+            return self.sorter["level"]
+        return default
 
     def values(self) -> dict:
         out = {}
@@ -310,6 +330,12 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
             self.name.setText(name)
         if self._auto_unit:
             self.unit.setText(unit_for(kind, self.units.get(src, "V"), v))
+        lw = self._widgets.get("level")
+        if lw is not None and not self._level_typed:      # follow Spike Sorting for its channel
+            lw.blockSignals(True)
+            lw.set_unit(self.units.get(src, ""))
+            lw.setValue(float(self._sorter_default("level", _LEVEL[1][1])))
+            lw.blockSignals(False)
         for key in ("level", "b"):                        # these are in the source's unit
             w = self._widgets.get(key)
             new = self.units.get(src, "")

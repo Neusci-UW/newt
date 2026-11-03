@@ -2,8 +2,8 @@
 and how the channels compare. A bar at the top picks the highlighted block (slider,
 ◀ ▶, or the ← → keys); three sub-tabs:
 
-- Raw Data Visualization: the chosen blocks overlaid with their average and the
-  highlighted block; Find action potentials (threshold or bimodal, sorted into
+- Spike Sorting: the chosen blocks overlaid with their average and the
+  highlighted block, with the stimulus below; Find action potentials (threshold or bimodal, sorted into
   units, see analysis.py); a raster of the events in every block; spikes per
   second across the session; and beside them a histogram of AP sizes and each
   unit's waveforms.
@@ -34,7 +34,7 @@ from . import dsp
 from . import pages
 from . import style, theme
 from .datapadview import DataPadView
-from .plotzoom import MultiAxis, OverlayCurve, TraceCurve, plot_widget
+from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
 from .viewkit import View, label_axis, style_plot, unit_color, with_unit
@@ -110,7 +110,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.tabs.setDocumentMode(True)
         self.raw = RawView(self)
         self.compare = CompareView(self)
-        self.tabs.addTab(self.raw, "Raw Data Visualization")
+        self.tabs.addTab(self.raw, "Spike Sorting")
         self.tabs.addTab(self.compare, "Comparison")
         self.datapad = DataPadView(self)
         self.tabs.addTab(self.datapad, "DataPad")
@@ -267,6 +267,7 @@ class AnalysisPage(QtWidgets.QWidget):
         if key:
             self.main.settings.setValue(key, self.stim_channel.currentData() or "")
         self.main._fill_recorded()                  # the Acquisition Blocks panel groups the same way
+        self.raw.set_channels(self.names())         # the stimulus isn't one to sort spikes on
         self.compare.stimulus_channel_changed()
         self._compute_groups()
         self.groups_changed()
@@ -508,6 +509,11 @@ class RawView(View):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setToolTip("Point at a unit, or click it (Cmd/Shift-click for several), to highlight "
+                              "its events in the blocks, raster and waveforms")
+        self.table.setMouseTracking(True)
+        self.table.viewport().installEventFilter(self)
         left.addWidget(self.table, 1)
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
@@ -528,6 +534,7 @@ class RawView(View):
         # ---- middle: the blocks, the raster, the rate ----------------------------------
         mid = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.overlay = plot_widget()
+        self.stim_plot = plot_widget()              # the highlighted block's stimulus
         self.raster = plot_widget()
         self.rate_plot = plot_widget()
         for pw, title, left_label in ((self.overlay, "Blocks overlaid", ""),
@@ -543,12 +550,45 @@ class RawView(View):
         self.rate_plot.getPlotItem().setLabel("bottom", "time in the session", units="s")
         self.raster.setXLink(self.overlay)
         self.raster.getPlotItem().invertY(True)                  # block 1 at the top
-        for w in (self.overlay, self.raster, self.rate_plot):
+        sp = self.stim_plot.getPlotItem()
+        sp.showGrid(x=True, y=True, alpha=0.2)
+        sp.setXLink(self.overlay)
+        sp.getAxis("bottom").setStyle(showValues=False)
+        self.stim_curve = TraceCurve()
+        self.stim_curve.mode = "peak"
+        sp.addItem(self.stim_curve)
+        self.stim_onsets = pg.ScatterPlotItem(size=10, symbol="t1", pen=None, brush=pg.mkBrush("#E69F00"))
+        sp.addItem(self.stim_onsets)
+        self.stim_plot.setMaximumHeight(170)
+        for w in (self.overlay, self.stim_plot, self.raster, self.rate_plot):
             mid.addWidget(w)
-        mid.setSizes([380, 240, 200])
+        mid.setSizes([360, 110, 220, 180])
+        self._mid_axes = AxisGroup()                 # stacked plots line up
+        self._mid_axes.set_plots([self.overlay, self.stim_plot, self.raster, self.rate_plot])
         outer.addWidget(mid, 3)
 
         # ---- right: sizes and shapes ---------------------------------------------------
+        right_box = QtWidgets.QWidget()
+        rv = QtWidgets.QVBoxLayout(right_box)
+        rv.setContentsMargins(0, 0, 0, 0)
+        rv.setSpacing(4)
+        norm = QtWidgets.QHBoxLayout()
+        norm.addWidget(QtWidgets.QLabel("Normalize"))
+        self.norm_sizes = QtWidgets.QCheckBox("AP sizes")
+        self.norm_sizes.setToolTip("Each unit's histogram as a fraction of its own events, so units with "
+                                   "different counts compare by shape")
+        self.norm_isi = QtWidgets.QCheckBox("Intervals")
+        self.norm_isi.setToolTip("Each unit's intervals as a fraction of its own intervals")
+        self.norm_waves = QtWidgets.QCheckBox("Waveforms")
+        self.norm_waves.setToolTip("Each spike divided by the size of its own peak (peak = ±1), so shapes "
+                                   "compare whatever their size")
+        self.norm_rate = QtWidgets.QCheckBox("Rate")
+        self.norm_rate.setToolTip("Spikes per second across the session as a fraction of each unit's highest")
+        for w in (self.norm_sizes, self.norm_isi, self.norm_waves, self.norm_rate):
+            norm.addWidget(w)
+            w.toggled.connect(lambda *_: self._show_results() if self.events is not None else None)
+        norm.addStretch(1)
+        rv.addLayout(norm)
         right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.hist = plot_widget()
         self.isi = plot_widget()
@@ -564,7 +604,10 @@ class RawView(View):
             pw.getPlotItem().showGrid(x=True, y=True, alpha=0.2)
             right.addWidget(pw)
         right.setMinimumWidth(260)
-        outer.addWidget(right, 2)
+        self._right_axes = AxisGroup()
+        self._right_axes.set_plots([self.hist, self.isi, self.wave_plot])
+        rv.addWidget(right, 1)
+        outer.addWidget(right_box, 2)
 
         op = self.overlay.getPlotItem()
         self.blocks_item = OverlayCurve()
@@ -579,6 +622,12 @@ class RawView(View):
         self.marks = pg.ScatterPlotItem(size=9, pen=None)
         self.marks.setZValue(20)
         op.addItem(self.marks)
+        # the highlighted unit's events, drawn over the trace in its colour
+        self.event_hl = pg.PlotCurveItem(connect="finite")
+        self.event_hl.setZValue(15)
+        op.addItem(self.event_hl)
+        self._hover_unit: int | None = None
+        self._wave_items: dict[int, list] = {}      # unit -> its items on the waveform plot
         self.thr_line = pg.InfiniteLine(angle=0, movable=True)
         self.thr_line.setZValue(30)
         self.thr_line.setToolTip("Threshold: drag to set a fixed level")
@@ -604,6 +653,8 @@ class RawView(View):
         self.btn_find.clicked.connect(self.find)
         self.btn_export.clicked.connect(self._export_dialog)
         self.thr_line.sigPositionChangeFinished.connect(self._threshold_dragged)
+        self.table.itemSelectionChanged.connect(self._apply_highlight)
+        self.table.cellEntered.connect(lambda r, _c: self._hover(r))
         # Changing how events are found makes the results out of date.
         self.threshold.editingFinished.connect(self._detection_changed)
         for w in (self.method, self.polarity):
@@ -618,6 +669,9 @@ class RawView(View):
         return self.page.blocks
 
     def set_channels(self, names: list[str]) -> None:
+        """The channels to sort spikes on: all but the stimulus channel (it's shown below)."""
+        stim = self.page.stim_channel.currentData()
+        names = [n for n in names if n != stim]
         keep = self.channel.currentText()
         self.channel.blockSignals(True)
         self.channel.clear()
@@ -748,14 +802,119 @@ class RawView(View):
             return
         fs = self.blocks[i]["sample_rate"]
         self.cur_item.setData(np.arange(len(y)) / fs, y)
-        ev = self.events
-        if ev is not None and len(ev.t):
-            m = ev.block == i
-            idx = np.clip(np.round(ev.t[m] * fs).astype(int), 0, len(y) - 1)
-            self.marks.setData(ev.t[m], y[idx], brush=[pg.mkBrush(unit_color(u)) for u in ev.unit[m]])
-        else:
-            self.marks.setData([], [])
+        self._draw_stimulus(i)
+        self._apply_highlight()
         self._draw_threshold()
+
+    def _draw_stimulus(self, i: int) -> None:
+        """The stimulus channel of block i below the overlay (or the notes' times)."""
+        how = self.page.how()
+        sp = self.stim_plot.getPlotItem()
+        self.stim_curve.setData(np.empty(0), np.empty(0))
+        self.stim_onsets.setData([], [])
+        b = self.blocks[i] if 0 <= i < len(self.blocks) else None
+        self.stim_plot.setVisible(bool(how) and b is not None)
+        if not how or b is None:
+            return
+        on = self.page.onsets(i)
+        if how == "notes":
+            sp.setTitle("Stimulus (from the notes)", size="9pt", color=self._fg())
+            sp.setLabel("left", "")
+            if on is not None and len(on):
+                self.stim_onsets.setData(on, np.zeros(len(on)))
+            return
+        y = self.page.trace(i, how)
+        if y is None:
+            return
+        fs = b["sample_rate"]
+        self.stim_curve.setData(np.arange(len(y)) / fs, y)
+        sp.setTitle(f"Stimulus: {how}", size="9pt", color=self._fg())
+        label_axis(sp, "left", "", self.page.unit_of(how))
+        if on is not None and len(on):
+            idx = np.clip(np.round(np.asarray(on) * fs).astype(int), 0, len(y) - 1)
+            self.stim_onsets.setData(on, y[idx])
+
+    # -- highlighting a unit --------------------------------------------------------------------
+    def highlighted_units(self) -> set[int]:
+        """0-based units to highlight: the one pointed at, else the ones selected."""
+        if self._hover_unit is not None:
+            return {self._hover_unit}
+        return {r.row() for r in self.table.selectionModel().selectedRows()}
+
+    def select_units(self, units) -> None:
+        self.table.clearSelection()
+        mode = self.table.selectionMode()
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
+        for u in units:
+            self.table.selectRow(u)
+        self.table.setSelectionMode(mode)
+
+    def _hover(self, row: int | None) -> None:
+        if row != self._hover_unit:
+            self._hover_unit = row
+            self._apply_highlight()
+
+    def eventFilter(self, obj, ev):
+        if obj is self.table.viewport() and ev.type() == QtCore.QEvent.Type.Leave:
+            self._hover(None)
+        return super().eventFilter(obj, ev)
+
+    def _apply_highlight(self) -> None:
+        """Mark the events on the highlighted block; with units highlighted, those stand out
+        (bigger marks, their spikes drawn over the trace in their colour) and the rest fade,
+        in the raster and the waveforms too."""
+        ev, i = self.events, self.page.index()
+        hl = self.highlighted_units() if ev is not None else set()
+        y = self._trace(i) if self.blocks and 0 <= i < len(self.blocks) else None
+        self.event_hl.setData(np.empty(0), np.empty(0))
+        self.cur_item.setOpacity(0.35 if hl else 1.0)    # the highlighted spikes stand out from it
+        if ev is None or not len(ev.t) or y is None:
+            self.marks.setData([], [])
+            if ev is not None:
+                self._fade_raster(hl)
+            return
+        fs = self.blocks[i]["sample_rate"]
+        m = ev.block == i
+        t, units = ev.t[m], ev.unit[m]
+        idx = np.clip(np.round(t * fs).astype(int), 0, len(y) - 1)
+        brushes, sizes, pens = [], [], []
+        for u in units:
+            c = QtGui.QColor(unit_color(u))
+            if hl and u not in hl:
+                c.setAlpha(60)
+            brushes.append(pg.mkBrush(c))
+            sizes.append(14 if u in hl else 9)
+            pens.append(pg.mkPen(self._fg(), width=1.5) if u in hl else pg.mkPen(None))
+        self.marks.setData(t, y[idx], brush=brushes, size=sizes, pen=pens)
+        if hl:
+            pre, post = int(round(self.pre.value() / 1000 * fs)), int(round(self.post.value() / 1000 * fs))
+            xs, ys = [], []
+            for k, u in zip(idx, units):
+                if u in hl:
+                    a, b = max(0, k - pre), min(len(y), k + post + 1)
+                    xs += [np.arange(a, b) / fs, [np.nan]]
+                    ys += [y[a:b], [np.nan]]
+            if xs:
+                color = unit_color(next(iter(hl))) if len(hl) == 1 else self._fg()
+                self.event_hl.setData(np.concatenate(xs), np.concatenate(ys),
+                                      pen=pg.mkPen(color, width=2.5))
+        self._fade_raster(hl)
+
+    def _fade_raster(self, hl: set[int]) -> None:
+        ev = self.events
+        if ev is None or not len(ev.t):
+            return
+        brushes, sizes = [], []
+        for u in ev.unit:
+            c = QtGui.QColor(unit_color(u))
+            if hl and u not in hl:
+                c.setAlpha(40)
+            brushes.append(pg.mkBrush(c))
+            sizes.append(7 if u in hl else 4)
+        self.raster_dots.setData(ev.t, ev.block + 1, brush=brushes, size=sizes)
+        for u, items in self._wave_items.items():
+            for item in items:
+                item.setOpacity(1.0 if not hl or u in hl else 0.12)
 
     def _baseline(self) -> float:
         y = self._trace(self.page.index()) if self.blocks else None
@@ -788,6 +947,18 @@ class RawView(View):
             return v
         y = self._trace(self.page.index()) if self.blocks else None
         return v * A.noise_sd(y) if y is not None else None
+
+    def cyclic_defaults(self) -> dict:
+        """Spike Sorting's settings as the defaults for a cyclic measurement (Add analysis
+        channel): the threshold as an absolute level on this channel, the direction and the
+        dead time."""
+        pol = self.polarity.currentData()
+        out = {"channel": self.channel.currentText(), "dir": "below" if pol == "negative" else "above",
+               "dead": self.dead.value(), "level": None}
+        level = self._level() if self.blocks else None
+        if level is not None:
+            out["level"] = self._baseline() + (-level if pol == "negative" else level)
+        return out
 
     def _detection_changed(self) -> None:
         try:
@@ -856,7 +1027,10 @@ class RawView(View):
 
     def _show_results(self) -> None:
         ev = self.events
+        keep = {r.row() for r in self.table.selectionModel().selectedRows()}
+        self.table.blockSignals(True)
         self.table.setRowCount(0)
+        self.table.blockSignals(False)
         wp, hp, ip = self.wave_plot.getPlotItem(), self.hist.getPlotItem(), self.isi.getPlotItem()
         for p in (wp, hp, ip):
             for item in list(p.listDataItems()):
@@ -874,8 +1048,19 @@ class RawView(View):
         top = float(np.percentile(all_isi, 98)) if len(all_isi) else 100.0
         isi_edges = np.linspace(0, max(top, 1.0), 61)
         label_axis(hp, "bottom", "size from the baseline", self._unit())
-        label_axis(wp, "left", self.channel.currentText(), self._unit())
+        hp.setLabel("left", "fraction of the unit's events" if self.norm_sizes.isChecked() else "events")
+        ip.setLabel("left", "fraction of the unit's intervals" if self.norm_isi.isChecked() else "intervals")
+        if self.norm_waves.isChecked():
+            wp.setLabel("left", "÷ each spike's peak")
+            wp.getAxis("left").enableAutoSIPrefix(False)
+        else:
+            label_axis(wp, "left", self.channel.currentText(), self._unit())
+        peak = int(np.argmin(np.abs(ev.wave_t_ms))) if len(ev.wave_t_ms) else 0
+
+        def frac(counts, on):
+            return counts / counts.sum() if on and counts.sum() else counts
         rng = np.random.default_rng(0)
+        self._wave_items = {}
         for s in ev.summary():
             u = s["unit"] - 1
             color = QtGui.QColor(unit_color(u))
@@ -890,19 +1075,29 @@ class RawView(View):
             m = ev.unit == u
             fill = QtGui.QColor(color)
             fill.setAlpha(90)
-            hp.plot(edges, np.histogram(sizes[m], edges)[0], stepMode="center", fillLevel=0,
-                    brush=fill, pen=pg.mkPen(color, width=1.5))
-            ip.plot(isi_edges, np.histogram(A.intervals_ms(ev, u), isi_edges)[0], stepMode="center",
-                    fillLevel=0, brush=fill, pen=pg.mkPen(color, width=1.5))
+            hp.plot(edges, frac(np.histogram(sizes[m], edges)[0], self.norm_sizes.isChecked()),
+                    stepMode="center", fillLevel=0, brush=fill, pen=pg.mkPen(color, width=1.5))
+            ip.plot(isi_edges, frac(np.histogram(A.intervals_ms(ev, u), isi_edges)[0], self.norm_isi.isChecked()),
+                    stepMode="center", fillLevel=0, brush=fill, pen=pg.mkPen(color, width=1.5))
             w = ev.waves[m]
+            if self.norm_waves.isChecked() and len(w):
+                size = np.abs(w[:, peak:peak + 1])
+                w = w / np.where(size > 0, size, 1.0)
             pick = rng.choice(len(w), min(MAX_WAVES, len(w)), replace=False)
             faint = QtGui.QColor(color)
             faint.setAlpha(40)
+            items = []
             if len(pick):
                 xs = np.tile(np.append(ev.wave_t_ms, ev.wave_t_ms[-1]), len(pick))
                 ys = np.column_stack([w[pick], np.full(len(pick), np.nan)]).ravel()
-                wp.plot(xs, ys, pen=pg.mkPen(faint, width=1), connect="finite")
-            wp.plot(ev.wave_t_ms, w.mean(0), pen=pg.mkPen(color, width=3))
+                items.append(wp.plot(xs, ys, pen=pg.mkPen(faint, width=1), connect="finite"))
+            items.append(wp.plot(ev.wave_t_ms, w.mean(0), pen=pg.mkPen(color, width=3)))
+            self._wave_items[u] = items
+        if keep and max(keep) < self.table.rowCount():
+            self.table.blockSignals(True)
+            self.select_units(keep)
+            self.table.blockSignals(False)
+        self._apply_highlight()
         n = len(ev.t)
         msg = (f"{n} event(s) in {len(np.unique(ev.block))} block(s), {ev.n_units} unit(s); threshold "
                f"{self._fmt(ev.level)} from the baseline." if n else
@@ -921,10 +1116,13 @@ class RawView(View):
             return
         b = self.rate_bin.value()
         edges = np.append(centres - b / 2, centres[-1] + b / 2)
+        norm = self.norm_rate.isChecked()
+        scale = (lambda r: r / r.max() if r.max() > 0 else r) if norm else (lambda r: r)
+        p.setLabel("left", "fraction of the highest" if norm else "spikes/s")
         if ev.n_units > 1:
             for u in range(ev.n_units):
-                p.plot(edges, rates[u], stepMode="center", pen=pg.mkPen(unit_color(u), width=1.5))
-        p.plot(edges, rates[None], stepMode="center", pen=pg.mkPen(self._fg(), width=2))
+                p.plot(edges, scale(rates[u]), stepMode="center", pen=pg.mkPen(unit_color(u), width=1.5))
+        p.plot(edges, scale(rates[None]), stepMode="center", pen=pg.mkPen(self._fg(), width=2))
 
     def export(self, path: str | Path) -> Path:
         ev = self.events
@@ -1033,7 +1231,7 @@ class CompareView(View):
         self.show_rate = QtWidgets.QCheckBox("Spike rate")
         self.show_rate.setChecked(True)
         self.show_rate.setToolTip("Spikes per second through the block, from the events found on the "
-                                  "Raw Data tab (each spike smoothed into a Gaussian)")
+                                  "Spike Sorting tab (each spike smoothed into a Gaussian)")
         self.rate_sigma = UnitSpinBox(1, 1000, "ms", step=5)
         self.rate_sigma.setValue(20)
         self.rate_sigma.setToolTip("Smoothing: the SD of each spike's Gaussian")
@@ -1096,6 +1294,7 @@ class CompareView(View):
         bottom = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.psth = plot_widget()
         self.sta = plot_widget()
+        self._trace_axes = AxisGroup()
         p = self.psth.getPlotItem()
         p.setTitle("Stimulus-triggered spike rate")
         self.psth_legend = p.addLegend(offset=(-10, 10))           # one entry per stimulus group
@@ -1236,7 +1435,7 @@ class CompareView(View):
         if self.show_rate.isChecked():
             times = self._events_of_unit()
             if times is None:
-                notes.append("No spike rate yet: find action potentials on the Raw Data tab first.")
+                notes.append("No spike rate yet: find action potentials on the Spike Sorting tab first.")
             else:
                 series.append(("Spike rate", "spikes/s",
                                A.rate_trace(times.get(i, np.empty(0)), n / fs, fs, self.rate_sigma.value())))
@@ -1268,7 +1467,6 @@ class CompareView(View):
                 p = pw.getPlotItem()
                 p.setTitle(label, size="9pt")                     # the name above, the unit beside
                 label_axis(p, "left", "", unit)
-                p.getAxis("left").setWidth(80)                    # line the time axes up
                 curve = TraceCurve()
                 curve.mode = "peak"
                 curve.setPen(pg.mkPen(color, width=1.2))
@@ -1290,6 +1488,7 @@ class CompareView(View):
         plots[-1].getPlotItem().setLabel("bottom", f"time in block {i + 1} (s)")
         plots[0].getPlotItem().setXRange(0, n / fs, padding=0)
         self._plots = plots
+        self._trace_axes.set_plots(plots)             # the stacked traces line up
 
     def redraw_averages(self) -> None:
         page = self.page

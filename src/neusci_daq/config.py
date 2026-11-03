@@ -94,7 +94,8 @@ class Channel:
 
 @dataclass
 class Config:
-    backend: str = "nidaqmx"      # "nidaqmx" | "multichannelio" | "simulated"
+    backend: str = "nidaqmx"      # "nidaqmx" | "multichannelio" | "simulated" | "audio"
+    audio_device: str = ""        # audio backend: the input device's name ("" = the default one)
     device: str = "Dev1"
     sample_rate: float = 20000.0  # per channel; fast enough to see action potential shapes
     chunk_size: int = 1000        # samples per channel per read (50 ms at 20 kHz)
@@ -126,8 +127,28 @@ class Config:
 
 
 def valid_inputs(cfg: Config) -> list[str]:
-    """Inputs available in the current wiring mode: in DIFF, ai4-ai7 are the minus inputs of ai0-ai3."""
+    """Inputs available in the current wiring mode: in DIFF, ai4-ai7 are the minus inputs of ai0-ai3.
+    An audio device's inputs are in1, in2, …"""
+    if cfg.backend == "audio":
+        from . import audio
+        return audio.input_names(audio.max_inputs(cfg.audio_device))
     return [f"ai{i}" for i in range(4 if cfg.terminal_config == "DIFF" else 8)]
+
+
+def use_audio_channels(cfg: Config) -> None:
+    """Switching to an audio device: its inputs (in1, in2) as the channels unless they
+    already are, at a rate it records at, and no stimulus input (it has no outputs here)."""
+    from . import audio
+    dev = audio.find(cfg.audio_device, "input")
+    n = min(2, dev["channels"]) if dev else 2
+    if not all(c.physical.startswith("in") for c in cfg.channels):
+        cfg.spare_channels = []
+        cfg.channels = [Channel(f"in{i + 1}", f"Audio {i + 1}") for i in range(n)]
+        fill_colors(cfg.channels)
+    if cfg.sample_rate not in audio.RATES:
+        cfg.sample_rate = dev["rate"] if dev else 48000.0
+    cfg.chunk_size = auto_chunk_size(cfg.sample_rate)
+    cfg.stim_monitor = ""
 
 
 def load(path: str | Path) -> Config:
@@ -144,6 +165,7 @@ def load(path: str | Path) -> Config:
     fill_colors(chans)
     cfg = Config(
         backend=dev.get("backend", "nidaqmx"),
+        audio_device=dev.get("audio_device", ""),
         device=dev.get("device", "Dev1"),
         sample_rate=float(dev.get("sample_rate", 20000)),
         chunk_size=int(dev.get("chunk_size", auto_chunk_size(float(dev.get("sample_rate", 20000))))),
@@ -168,7 +190,7 @@ def validate(cfg: Config) -> None:
     if not cfg.channels:
         raise ValueError("At least one channel must be on." if cfg.spare_channels
                          else "Config has no [[channels]].")
-    if cfg.backend not in ("nidaqmx", "multichannelio", "simulated"):
+    if cfg.backend not in ("nidaqmx", "multichannelio", "simulated", "audio"):
         raise ValueError(f"Unknown backend {cfg.backend!r}")
     if cfg.terminal_config not in ("RSE", "DIFF"):
         raise ValueError("terminal_config must be RSE or DIFF (USB-600x has no NRSE).")
@@ -182,7 +204,7 @@ def validate(cfg: Config) -> None:
         raise ValueError("[stimulator] scale must be positive (units per volt).")
     if cfg.sample_rate <= 0:
         raise ValueError("Sample rate must be positive.")
-    if cfg.aggregate_rate > USB6003_MAX_AGGREGATE_RATE:
+    if cfg.backend != "audio" and cfg.aggregate_rate > USB6003_MAX_AGGREGATE_RATE:
         n = len(cfg.channels)
         raise ValueError(
             f"{n} ch × {cfg.sample_rate:g} Hz = {cfg.aggregate_rate:g} S/s, over the USB-6003's "
@@ -193,8 +215,8 @@ def validate(cfg: Config) -> None:
     names: set[str] = set()
     for ch in cfg.channels:
         if ch.physical not in allowed:
-            raise ValueError(f"{ch.name}: {ch.physical} isn't available; use {allowed[0]}–{allowed[-1]} "
-                             f"in {cfg.terminal_config} mode.")
+            raise ValueError(f"{ch.name}: {ch.physical} isn't available; use {allowed[0]}–{allowed[-1]}"
+                             + ("." if cfg.backend == "audio" else f" in {cfg.terminal_config} mode."))
         if ch.physical in seen:
             raise ValueError(f"{seen[ch.physical]} and {ch.name} both use {ch.physical}. "
                              "Each input can only be one channel.")
@@ -215,7 +237,7 @@ def validate(cfg: Config) -> None:
         if c.name in names or c.name in seen_calc:
             raise ValueError(f"{c.name!r} is already a channel's name: give the calculation another.")
         seen_calc.add(c.name)
-    if cfg.backend == "simulated":
+    if cfg.backend in ("simulated", "audio"):
         return
     for ch in cfg.channels:
         if tuple(ch.range) != USB6003_RANGE:
@@ -236,6 +258,7 @@ def dumps(cfg: Config) -> str:
     lines = [
         "[device]",
         f"backend = {_s(cfg.backend)}",
+        *([f"audio_device = {_s(cfg.audio_device)}"] if cfg.audio_device else []),
         f"device = {_s(cfg.device)}",
         f"sample_rate = {cfg.sample_rate:g}",
         f"chunk_size = {cfg.chunk_size}",

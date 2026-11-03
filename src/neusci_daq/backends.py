@@ -326,4 +326,7 @@ BACKENDS = {"nidaqmx": NidaqmxBackend, "multichannelio": MultiChannelIOBackend,
 
 
 def make_backend(cfg: Config) -> Backend:
+    if cfg.backend == "audio":
+        from .audio import AudioBackend          # imported here: it needs Backend from this module
+        return AudioBackend(cfg)
     return BACKENDS[cfg.backend](cfg)

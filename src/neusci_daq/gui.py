@@ -15,6 +15,11 @@ File menu:
 
 Setup menu:
   Input wiring   RSE (8 inputs vs AI GND) or DIFF (4 inputs, aiN minus ai(N+4))
+  Input device   the NI DAQ, the simulation, or a USB audio input (audio.py)
+
+Audio/Video menu: listen to a channel, play the shown part of a recorded block (Space),
+the output device, and the Camera panel (video.py): a USB camera, recorded with each
+block and played back in step in review.
 
 The toolbar's Sampling rate box sets samples per second per channel. The
 status bar always shows the wiring mode.
@@ -26,9 +31,11 @@ program crashes or someone chooses Don't Save.
 from __future__ import annotations
 
 import dataclasses
+import json
 import queue
 import shutil
 import sys
+import time
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -49,7 +56,7 @@ from .channels import CalcStrip, ChannelRow, ChannelRowWidget, ChannelStrip, Col
 from .comments import CommentPopup, CommentsPanel
 from .config import Channel, Config, valid_inputs
 from .export import to_labchart_mat
-from .plotzoom import MultiAxis, OverlayCurve, TraceCurve, WheelViewBox, light_grid
+from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, WheelViewBox, light_grid
 from .recorder import Recorder
 from .stim import Stimulus
 from .stimout import make_output
@@ -117,6 +124,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.config_path = Path(config_path) if config_path else None
         self.settings = settings or QtCore.QSettings("neusci", "neusci-daq-visualizer")
         self.store = BlockStore()    # recorded blocks, read once for review, Blocks and Analysis
+        self._axis_group = AxisGroup()   # the plots' left axes, one width, so the plots line up
         self.backend: Backend = make_backend(cfg)
         self.display_q: queue.Queue = self.backend.subscribe()
         self.recorder = Recorder(self.backend)
@@ -381,6 +389,11 @@ class MainWindow(QtWidgets.QMainWindow):
         row.addWidget(self.blocks_panel)
         row.addWidget(self.plot_area, 1)
         row.addWidget(self.comments_panel)
+        from .video import CameraPanel
+        self.camera_panel = CameraPanel()
+        self.camera_panel.closed.connect(lambda: self.show_camera(False))
+        self.camera_panel.hide()
+        row.addWidget(self.camera_panel)
         lay.addLayout(row, 1)
         lay.addWidget(self.bottom_bar)
         lay.addWidget(self.scroll)
@@ -445,6 +458,31 @@ class MainWindow(QtWidgets.QMainWindow):
             group.addAction(a)
             self.act_wiring[mode] = a
         self.wiring_menu.setToolTipsVisible(True)
+        self.input_menu = s.addMenu("Input &device")
+        self.input_menu.setToolTipsVisible(True)
+        self.input_menu.aboutToShow.connect(self._fill_input_menu)
+
+        av = self.menuBar().addMenu("&Audio/Video")
+        self.listen_menu = av.addMenu("&Listen to")
+        self.listen_menu.setToolTipsVisible(True)
+        self.listen_menu.aboutToShow.connect(self._fill_listen_menu)
+        self.act_play = av.addAction("&Play the shown part", self.toggle_playback)
+        self.act_play.setShortcut(QtGui.QKeySequence("Space"))
+        self.act_play.setToolTip("Review: play the channel listened to (or the first) from the left of the "
+                                 "plots, with a cursor, and the block's video in step. Space stops it")
+        self.output_menu = av.addMenu("&Output device")
+        self.output_menu.aboutToShow.connect(self._fill_output_menu)
+        av.addSeparator()
+        self.act_camera = av.addAction("&Camera panel", lambda: self.show_camera(self.act_camera.isChecked()))
+        self.act_camera.setCheckable(True)
+        av.setToolTipsVisible(True)
+        self._listen = ""                      # the channel listened to ("" = none)
+        self._audio_out = self.settings.value("audio_output", "")
+        self._monitor = None
+        self._player = None
+        self._cursor_lines: list = []
+        self._play_start = 0.0
+        self._play_timer = QtCore.QTimer(self, interval=30, timeout=self._play_tick)
 
         v = self.menuBar().addMenu("&View")
         self.act_auto_y = v.addAction("&Auto-scale voltage")
@@ -496,6 +534,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
         pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time, self._zoom_to))
+        pw.getPlotItem().vb.clamp_to_data = not self.btn_run.isChecked()
         p = pw.getPlotItem()
         self.plot_widgets.append(pw)
         if unit in _SI_BASE:
@@ -733,7 +772,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return t, y
 
         dlg = AnalysisChannelDialog(self, sources, units, fs, calc=None if k is None else calcs[k],
-                                    taken={c.name for j, c in enumerate(calcs) if j != k}, preview=preview)
+                                    taken={c.name for j, c in enumerate(calcs) if j != k}, preview=preview,
+                                    sorter=self.analysis_page.raw.cyclic_defaults())
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return False
         if k is None:
@@ -764,6 +804,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 p.getAxis("bottom").setStyle(showValues=False)
             self.plots[-1].setLabel("bottom", "time", units="s")
             self.plots[0].sigXRangeChanged.connect(self._xrange_changed)
+            self._axis_group.set_plots(self.plots)     # every plot's area starts at the same x
             if getattr(self, "mode", LIVE) == LIVE and not self.btn_run.isChecked():
                 self._show_stopped()     # new plots (e.g. after a rate change) start at Window
         self._apply_channel_overlay()
@@ -1294,6 +1335,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_wiring_label()
         if hasattr(self, "comments_panel"):
             self.refresh_comments()
+        if hasattr(self, "camera_panel"):
+            self.stop_playback()
+            self.camera_panel.set_live(mode == LIVE)
+        if getattr(self, "_monitor", None) is not None and mode == REVIEW:
+            self._monitor.stop()                    # review: Play plays the channel instead
+            self._monitor = None
+        elif mode == LIVE and getattr(self, "_listen", "") and getattr(self, "_monitor", None) is None:
+            self.set_listen(self._listen)           # back to live: listening again
 
     def _update_title(self):
         if self.mode == REVIEW and self._review_source is not None:
@@ -2025,6 +2074,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_wiring_label()
         self.plots[0].setXRange(0, min(self.window_box.value(), max(blk["duration_s"], 1e-3)), padding=0)
         self._mark_block_list()
+        self._show_block_media(index)
         self.status.setText(
             f"Reviewing {self.review_blocks[index].stem} ({index + 1}/{len(self.review_blocks)}) · "
             f"{blk['duration_s']:.2f} s · {blk['sample_rate']:,.0f} Hz/ch · "
@@ -2160,6 +2210,8 @@ class MainWindow(QtWidgets.QMainWindow):
     # Live mode
     # ======================================================================
     def _toggle_run(self, on: bool):
+        for p in self.plots:
+            p.vb.clamp_to_data = not on
         if on:
             # Drop chunks left over from the previous run; their timestamps
             # restart from 0, so drawing them would join old and new data.
@@ -2205,6 +2257,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.session_saved = False
             path = session.next_block_path(self.session_dir)
             path = self.recorder.start(path)
+            if self.camera_panel.start_block(path, time.monotonic()):
+                self.statusBar().showMessage(f"Recording {path.name} with video", 5000)
             # Time 0 = this block's first sample. Until it arrives, use the latest
             # sample; _refresh corrects it (by at most one read) once it's known.
             self._set_axis_zero(self.recorder.last_t)
@@ -2219,6 +2273,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._fill_recorded()
         else:
             self.recorder.stop()
+            self.camera_panel.stop_block()
             self._lock_channels(False)
             self.statusBar().showMessage(f"Saved {self.recorder.path.name}", 10000)
             self.btn_rec.setText("Record")
@@ -2657,16 +2712,21 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         for t, y in zip(ts, ys):                 # only the new samples are written
             self.ring.append(t, y)
-            if self._calcs and self.calc_ring is not None:
-                self.calc_ring.append(t, self._calc_chunk(y))
+            calc = self._calc_chunk(y) if self._calcs and self.calc_ring is not None else None
+            if calc is not None:
+                self.calc_ring.append(t, calc)
+            if self._monitor is not None and self._monitor.running:
+                self._feed_monitor(y, calc)
         if self.recorder.recording and self.recorder.block_started:
             self._set_axis_zero(self.recorder.block_start)   # exact block start
         if not self.plots:
             return
         x = self.buf_t - self._axis_zero
         t_end = x[-1]
-        # the range first, so each TraceCurve groups its samples once for this frame
-        self.plots[0].setXRange(t_end - self.window_box.value(), t_end, padding=0)
+        # the range first, so each TraceCurve groups its samples once for this frame; it starts
+        # no earlier than the oldest sample (the views' own limits are off while acquiring: they
+        # would lag a frame behind the newest data, and fight a held voltage range)
+        self.plots[0].setXRange(max(t_end - self.window_box.value(), x[0]), t_end, padding=0)
         for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
             curve.setData(x, ch.to_units(y))
         self._draw_calc_live()
@@ -2688,6 +2748,241 @@ class MainWindow(QtWidgets.QMainWindow):
             msg += f" | display lagging ({lag} chunks queued)"
         self.status.setText(msg)
 
+    # -- audio and video (audio.py, video.py) --------------------------------------------------
+    def _media_names(self) -> list[str]:
+        if self.mode == REVIEW:
+            return list(self._plot_names)
+        return [c.name for c in self.cfg.channels] + [c.name for c, f, _ in self._calcs if f is not None]
+
+    def _fill_listen_menu(self) -> None:
+        from . import audio
+        m = self.listen_menu
+        m.clear()
+        group = QtGui.QActionGroup(m)
+        for name in ["", *self._media_names()]:
+            a = m.addAction(name or "Off", lambda name=name: self.set_listen(name))
+            a.setCheckable(True)
+            a.setChecked(name == self._listen)
+            group.addAction(a)
+        if audio.available():
+            m.addSeparator()
+            m.addAction(audio.available()).setEnabled(False)
+
+    def _fill_output_menu(self) -> None:
+        from . import audio
+        m = self.output_menu
+        m.clear()
+        group = QtGui.QActionGroup(m)
+        for d in [{"name": ""}] + audio.devices("output"):
+            a = m.addAction(d["name"] or "The default output", lambda n=d["name"]: self.set_audio_output(n))
+            a.setCheckable(True)
+            a.setChecked(d["name"] == self._audio_out)
+            group.addAction(a)
+
+    def set_audio_output(self, name: str) -> None:
+        self._audio_out = name
+        self.settings.setValue("audio_output", name)
+        if self._monitor is not None and self._monitor.running:
+            self.set_listen(self._listen)              # reopen on the new device
+
+    def set_listen(self, name: str) -> bool:
+        """Listen to channel `name` live ("" stops). In review it's the one Play plays."""
+        from . import audio
+        if self._monitor is not None:
+            self._monitor.stop()
+            self._monitor = None
+        self._listen = name
+        if not name or self.mode == REVIEW:
+            self.statusBar().showMessage(f"Play (Space) plays {name}" if name else "Not listening", 5000)
+            return True
+        try:
+            self._monitor = audio.Monitor(self._audio_out)
+            self._monitor.start()
+        except Exception as e:
+            self._monitor = None
+            self._listen = ""
+            QtWidgets.QMessageBox.warning(self, "Can't listen", str(e))
+            return False
+        self.statusBar().showMessage(f"Listening to {name}", 5000)
+        return True
+
+    def _feed_monitor(self, y_raw: np.ndarray, calc: np.ndarray | None) -> None:
+        names = [c.name for c in self.cfg.channels]
+        if self._listen in names:
+            k = names.index(self._listen)
+            self._monitor.feed(self.cfg.channels[k].to_units(y_raw[k]), self.cfg.sample_rate)
+        elif calc is not None:
+            k = next((i for i, (c, _, _) in enumerate(self._calcs) if c.name == self._listen), None)
+            if k is not None:
+                self._monitor.feed(calc[k], self.cfg.sample_rate)
+
+    def show_camera(self, on: bool, load: bool = True) -> None:
+        self.act_camera.setChecked(on)
+        self.camera_panel.setVisible(on)
+        if on and load and self.mode == REVIEW and 0 <= self.block_combo.currentIndex() < len(self.review_blocks):
+            self._show_block_media(self.block_combo.currentIndex())
+
+    def _show_block_media(self, index: int) -> None:
+        """Review: the block's video in the Camera panel, and a cursor to click on."""
+        self.stop_playback()
+        has = self.camera_panel.show_block(self.review_blocks[index])
+        if has and self.camera_panel.isHidden():
+            self.show_camera(True, load=False)         # a block with video: show it
+        self._make_cursor()
+
+    def _make_cursor(self) -> None:
+        """A time cursor on every plot (review): click a plot to move it (and the video)."""
+        self._cursor_lines = []
+        for p in self.plots:
+            ln = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#E69F00", width=1.5))
+            ln.setZValue(50)
+            ln.hide()
+            p.addItem(ln)
+            self._cursor_lines.append(ln)
+            if not getattr(p.scene(), "_media", False):     # each plot's scene, once
+                p.scene().sigMouseClicked.connect(self._media_clicked)
+                p.scene()._media = True
+
+    def _media_clicked(self, ev) -> None:
+        if self.mode != REVIEW or ev.button() != QtCore.Qt.MouseButton.LeftButton or \
+                ev.modifiers() & (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.MetaModifier):
+            return
+        for p in self.plots:
+            if p.vb.sceneBoundingRect().contains(ev.scenePos()):
+                self.set_cursor(p.vb.mapSceneToView(ev.scenePos()).x())
+                return
+
+    def set_cursor(self, t: float | None) -> None:
+        """Show time t (s in the block) on every plot and in the video."""
+        for ln in self._cursor_lines:
+            if pg.Qt.isQObjectAlive(ln):
+                ln.setVisible(t is not None)
+                if t is not None:
+                    ln.setValue(t)
+        if t is not None:
+            self.camera_panel.seek(t)
+
+    def toggle_playback(self) -> None:
+        if self._player is not None and self._play_timer.isActive():
+            self.stop_playback()
+        else:
+            self.play_shown()
+
+    def play_shown(self) -> bool:
+        """Review: play the shown part of the block's listened-to channel (or the first)."""
+        from . import audio
+        if self.mode != REVIEW or not self.review_block or not self.plots:
+            self.statusBar().showMessage("Play works on a recorded block: open one, or click one in Blocks.", 6000)
+            return False
+        names = self._plot_names
+        name = self._listen if self._listen in names else names[0]
+        k = names.index(name)
+        x, y = self.curves[k].getOriginalDataset()
+        if y is None or not len(y):
+            return False
+        x0, x1 = self.plots[0].vb.viewRange()[0]
+        m = (x >= max(x0, 0)) & (x <= x1)
+        if m.sum() < 2:
+            return False
+        fs = self.review_block["sample_rate"]
+        try:
+            self._player = audio.Player(self._audio_out)
+            self._player.play(y[m], fs)
+        except Exception as e:
+            self._player = None
+            QtWidgets.QMessageBox.warning(self, "Can't play", str(e))
+            return False
+        self._play_start = float(x[m][0])
+        self.camera_panel.play_from(self._play_start)
+        self._play_timer.start()
+        self.statusBar().showMessage(f"Playing {name} from {self._play_start:.2f} s (Space stops)", 5000)
+        return True
+
+    def _play_tick(self) -> None:
+        pos = self._player.position() if self._player is not None else None
+        if pos is None:
+            self.stop_playback(keep_cursor=True)
+            return
+        self.set_cursor_line(self._play_start + pos)
+
+    def set_cursor_line(self, t: float) -> None:
+        for ln in self._cursor_lines:
+            if pg.Qt.isQObjectAlive(ln):
+                ln.show()
+                ln.setValue(t)
+
+    def stop_playback(self, keep_cursor: bool = False) -> None:
+        self._play_timer.stop()
+        if self._player is not None:
+            self._player.stop()
+            self._player = None
+        if hasattr(self, "camera_panel"):
+            self.camera_panel.pause()
+
+    def _fill_input_menu(self) -> None:
+        from . import audio
+        m = self.input_menu
+        m.clear()
+        group = QtGui.QActionGroup(m)
+
+        def add(text, backend, device="", tip=""):
+            a = m.addAction(text, lambda: self.switch_input(backend, device))
+            a.setCheckable(True)
+            a.setChecked(self.cfg.backend == backend and (backend != "audio" or device == self.cfg.audio_device))
+            a.setToolTip(tip)
+            group.addAction(a)
+        add("NI DAQ (USB-6003)", "nidaqmx", tip="The National Instruments DAQ, through NI-DAQmx")
+        add("Simulated cells", "simulated", tip="The simulated network (Simulation tab): no hardware")
+        m.addSeparator()
+        if audio.available():
+            m.addAction(audio.available()).setEnabled(False)
+        for d in audio.devices("input"):
+            add(f"{d['name']} ({d['channels']} in)", "audio", d["name"],
+                tip="A USB audio input: an audio interface, a SpikerBox-style device or a microphone. "
+                    "Its inputs are channels in1, in2, …")
+
+    def switch_input(self, backend: str, device: str = "") -> bool:
+        """Use another input device: a fresh window on it (the channels change with it)."""
+        import copy
+        if self.recorder.recording or self.trials_page.running:
+            QtWidgets.QMessageBox.information(self, "Busy", "Stop recording (and any protocol) first.")
+            return False
+        if backend == self.cfg.backend and (backend != "audio" or device == self.cfg.audio_device):
+            return True
+        if not self._leave_live():
+            return False
+        cfg = copy.deepcopy(self.cfg)
+        if cfg.backend != "audio":                     # remembered, to come back to
+            self.settings.setValue("daq_setup", json.dumps({
+                "channels": [dataclasses.asdict(c) for c in cfg.channels], "sample_rate": cfg.sample_rate}))
+        cfg.backend, cfg.audio_device = backend, device
+        if backend == "audio":
+            cfgmod.use_audio_channels(cfg)
+        elif self.cfg.backend == "audio":
+            saved = json.loads(self.settings.value("daq_setup", "") or "{}")
+            chans = [Channel(**{k: (tuple(v) if k == "range" else v) for k, v in c.items()})
+                     for c in saved.get("channels", [])]
+            cfg.channels = chans or [Channel("ai0", "Ch1"), Channel("ai1", "Ch2")]
+            cfg.sample_rate = float(saved.get("sample_rate", 20000))
+            cfg.chunk_size = cfgmod.auto_chunk_size(cfg.sample_rate)
+            cfgmod.fill_colors(cfg.channels)
+        try:
+            cfgmod.validate(cfg)
+        except ValueError as e:
+            QtWidgets.QMessageBox.critical(self, "Can't use that input", str(e))
+            return False
+        win = MainWindow(cfg, settings=self.settings, config_path=self.config_path)
+        win.setGeometry(self.geometry())
+        _WINDOWS.append(win)                           # kept alive after this one closes
+        self.back_to_live()
+        self._switched_to = win
+        win.show()
+        self.close()
+        win.statusBar().showMessage(
+            f"Input: {device or backend}. Press Start." + (" macOS asks once to allow the microphone."
+                                                            if backend == "audio" else ""), 10000)
+        return True
+
     def closeEvent(self, ev):
         if self.btn_rec.isChecked():
             self.btn_rec.setChecked(False)
@@ -2695,6 +2990,10 @@ class MainWindow(QtWidgets.QMainWindow):
             ev.ignore()
             return
         self.trials_page.shutdown()          # stops a protocol; deletes its plots now
+        self.stop_playback()
+        if self._monitor is not None:
+            self._monitor.stop()
+        self.camera_panel.shutdown()
         self.recorder.stop()
         self.stim_timer.stop()
         if self.stim_out is not None:
@@ -2725,6 +3024,9 @@ def app_icon() -> QtGui.QIcon:
         if f.exists():
             icon.addFile(str(f), QtCore.QSize(size, size))
     return icon
+
+
+_WINDOWS: list = []        # windows opened by Setup › Input device, kept alive
 
 
 def run(cfg: Config, config_path: str | Path | None = None):

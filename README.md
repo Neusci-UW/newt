@@ -48,11 +48,19 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - Moving windows: smoothing, RMS and envelope.
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.
 - **Analysis**:
-  - Raw Data: overlays and averages, with ± SD or SEM across trials; finding and sorting action potentials; raster, rate and ISI histograms.
+  - Spike Sorting: overlays and averages, with the stimulus below, with ± SD or SEM across trials; finding and sorting action potentials (point at a unit to highlight its spikes); raster, rate and ISI histograms.
   - Comparison: derivatives, PSTH and spike-triggered averages.
   - DataPad: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per block, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
 - **Simulation**: a network of up to 10 integrate-and-fire cells with tunable synapses, to practise without an animal.
 - **Files**: opens and saves LabChart `.mat` exports.
+- **USB audio and video** (`pip install -e ".[audio]"` for audio):
+  - **Setup › Input device** switches to a USB audio interface, a SpikerBox-style device or a
+    microphone as the input. Its inputs become channels in1, in2, and so on.
+  - **Audio/Video › Listen to** plays a channel through the speakers live, to hear spikes.
+  - **Audio/Video › Play** (Space) plays the shown part of a recorded block, with a moving cursor.
+  - **Audio/Video › Camera panel** shows a USB camera and records a video with each block. In review,
+    the video plays back in step with the traces, and clicking a plot shows that moment.
+  - macOS asks once for permission to use the microphone and camera.
 
 [docs/feature-ideas.md](docs/feature-ideas.md) lists features from LabChart, Spike2, pClamp and
 other programs that could come next.

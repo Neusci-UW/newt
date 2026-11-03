@@ -145,6 +145,71 @@ class TraceCurve(pg.PlotDataItem):
             super().setData(x[a:a + n * ds].reshape(n, ds).mean(1), y[a:a + n * ds].reshape(n, ds).mean(1))
 
 
+class OverlayCurve(TraceCurve):
+    """Many traces sampled at the same rate, all starting at time 0 (the rows of
+    Y; shorter ones padded with NaN), drawn on top of each other as one item and
+    grouped together like TraceCurve, so hundreds of blocks stay quick to zoom."""
+
+    def set_traces(self, Y: np.ndarray, fs: float) -> None:
+        self._Y, self._fs = np.asarray(Y, float), float(fs)
+        self._key = None
+        self._redisplay()
+
+    def getOriginalDataset(self):
+        Y = getattr(self, "_Y", np.empty((0, 0)))
+        return np.arange(Y.shape[1]) / getattr(self, "_fs", 1.0), Y
+
+    def dataBounds(self, ax, frac=1.0, orthoRange=None):
+        Y = getattr(self, "_Y", None)
+        if Y is None or not Y.size:
+            return None, None
+        if ax == 0:
+            return 0.0, (Y.shape[1] - 1) / self._fs
+        if orthoRange is not None:
+            i0, i1 = (int(np.clip(v * self._fs, 0, Y.shape[1])) for v in orthoRange)
+            Y = Y[:, i0:max(i1, i0 + 1)]
+        with np.errstate(all="ignore"):
+            return float(np.nanmin(Y)), float(np.nanmax(Y))
+
+    def _redisplay(self) -> None:
+        Y = getattr(self, "_Y", None)
+        vb = self.getViewBox()
+        if Y is None or not Y.size or vb is None:
+            pg.PlotDataItem.setData(self, np.empty(0), np.empty(0))
+            return
+        rows, N = Y.shape
+        fs = self._fs
+        lo, hi = vb.viewRange()[0]
+        i0, i1 = (int(np.clip(v * fs, 0, N)) for v in (lo, hi))
+        visible = max(1, i1 - i0)
+        width = max(1.0, vb.width())
+        ds = 1 if visible <= width else 2 ** int(np.ceil(np.log2(visible / width)))
+        a = max(0, i0 - ds)
+        a -= a % ds                                     # groups start on multiples of ds
+        n = (min(N, i1 + ds) - a) // ds
+        key = (ds, a, n, self.mode, rows)
+        if key == getattr(self, "_key", None):
+            return
+        self._key = key
+        if n <= 0:
+            pg.PlotDataItem.setData(self, np.empty(0), np.empty(0))
+            return
+        block = Y[:, a:a + n * ds].reshape(rows, n, ds)
+        start = (a + np.arange(n) * ds) / fs
+        with np.errstate(all="ignore"):
+            if ds == 1:
+                xs, ys = start, block[:, :, 0]
+            elif self.mode == "peak":
+                xs = np.repeat(start, 2)
+                ys = np.stack([np.nanmin(block, 2), np.nanmax(block, 2)], 2).reshape(rows, 2 * n)
+            else:
+                xs, ys = start + (ds - 1) / 2 / fs, np.nanmean(block, 2)
+        # one row after another, each ended by a NaN so they aren't joined up
+        xs = np.tile(np.append(xs, xs[-1]), rows)
+        ys = np.column_stack([ys, np.full(rows, np.nan)]).ravel()
+        pg.PlotDataItem.setData(self, xs, ys, connect="finite")
+
+
 def plot_widget(**kw) -> pg.PlotWidget:
     """A pg.PlotWidget with the app's wheel rules."""
     return pg.PlotWidget(viewBox=WheelViewBox(), **kw)

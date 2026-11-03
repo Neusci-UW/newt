@@ -51,6 +51,7 @@ from .plotzoom import TraceCurve, WheelViewBox
 from .recorder import Recorder
 from .stim import Stimulus
 from .stimout import make_output
+from .analysispage import AnalysisPage
 from .simpage import SimPage
 from .stimwindow import StimPage
 from .trialspage import TrialsPage
@@ -199,6 +200,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.block_combo = QtWidgets.QComboBox()
         self.block_combo.setMinimumContentsLength(18)
         self.block_combo.currentIndexChanged.connect(self._show_review_block)
+        # Pages: step through the blocks (also ← and →).
+        self.btn_prev_block = QtWidgets.QToolButton(text="◀", autoRaise=True)
+        self.btn_prev_block.setToolTip("Previous block (←)")
+        self.btn_prev_block.clicked.connect(lambda: self.step_block(-1))
+        self.btn_next_block = QtWidgets.QToolButton(text="▶", autoRaise=True)
+        self.btn_next_block.setToolTip("Next block (→)")
+        self.btn_next_block.clicked.connect(lambda: self.step_block(1))
         self.btn_live = QtWidgets.QPushButton("Back to Live")
         self.btn_live.clicked.connect(self.back_to_live)
         self.btn_comments = QtWidgets.QPushButton("Comments (0)", checkable=True)
@@ -214,7 +222,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tb_live = [A(self.btn_run), A(self.btn_rec), tb.addSeparator(),
                          A(self.lbl_rate), A(self.rate_box)]
         self._act_lbl_rate = self._tb_live[3]
-        self._tb_review = [A(QtWidgets.QLabel("Block")), A(self.block_combo)]
+        self._tb_review = [A(QtWidgets.QLabel("Block")), A(self.btn_prev_block), A(self.block_combo),
+                           A(self.btn_next_block)]
         self._tb_acq = [A(self.lbl_window), A(self.window_box)]
         self._act_lbl_window = self._tb_acq[0]
         self._tb_acq_live = [tb.addSeparator(), A(self.comment_edit)]
@@ -275,6 +284,9 @@ class MainWindow(QtWidgets.QMainWindow):
         sc.activated.connect(self._focus_comment)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, activated=lambda: self.fire_stimulus())
         QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, activated=self._escape)
+        # Text boxes keep their own arrow keys (Qt lets them claim the key first).
+        QtGui.QShortcut(QtGui.QKeySequence("Left"), self, activated=lambda: self.step_block(-1))
+        QtGui.QShortcut(QtGui.QKeySequence("Right"), self, activated=lambda: self.step_block(1))
 
         central = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(central)
@@ -327,6 +339,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addWidget(self.scroll)
         self.stim_page = StimPage(self)
         self.trials_page = TrialsPage(self)
+        self.analysis_page = AnalysisPage(self)
         # What the fake recording contains: only with the simulated backend.
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
         placeholder = lambda title, text: self._placeholder(title, text)
@@ -334,7 +347,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("acq", "Acquisition", central),
             ("stim", "Stimulator", self.stim_page),
             ("trials", "Trials", self.trials_page),
-            ("analysis", "Analysis", placeholder("Analysis", "Coming soon.")),
+            ("analysis", "Analysis", self.analysis_page),
         ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else []))
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -599,6 +612,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.trials_page.apply_theme(mode)
         if getattr(self, "sim_page", None):
             self.sim_page.apply_theme(mode)
+        if hasattr(self, "analysis_page"):
+            self.analysis_page.apply_theme(mode)
         self._update_theme_button()
         self.refresh_comments(redraw_markers=False)
 
@@ -1056,6 +1071,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_live_plots()
         self._set_mode(LIVE)
         self.status.setText("")
+        self.analysis_page.source_changed()
 
     # ======================================================================
     # File menu: dialogs (thin wrappers around the methods below)
@@ -1267,6 +1283,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember(path)
         self.statusBar().showMessage(f"Opened {path.name} ({len(blocks)} block(s)) for review", 10000)
         self._show_review_block(0)
+        self.analysis_page.source_changed()
 
     def open_mat(self, path: str | Path) -> Path:
         """Review a LabChart-style .mat. It's turned into a session folder under
@@ -1428,6 +1445,18 @@ class MainWindow(QtWidgets.QMainWindow):
             f"{blk['duration_s']:.2f} s · {blk['sample_rate']:,.0f} Hz/ch · "
             f"{len(blk['comments'])} comment(s)")
 
+    def analysis_blocks(self) -> list[Path]:
+        """The blocks the Analysis tab works on: those being reviewed, or recorded so far."""
+        return list(self.review_blocks) if self.mode == REVIEW else list(self.blocks)
+
+    def step_block(self, d: int) -> None:
+        """Review: show the block `d` pages on (or back)."""
+        if self.mode != REVIEW:
+            return
+        i = self.block_combo.currentIndex() + d
+        if 0 <= i < self.block_combo.count():
+            self.block_combo.setCurrentIndex(i)
+
     def _update_scroll_range(self):
         if self.review_block is None:
             return
@@ -1588,6 +1617,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_rec.setToolTip("")
             self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
             self._set_comment_box(False)
+            self.analysis_page.source_changed()          # a new block to analyse
         # Starting a block keeps the previous block's comment lines: its data is
         # still on screen (now at negative times), and they scroll off with it.
         self.refresh_comments(redraw_markers=not on)

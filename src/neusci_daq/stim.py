@@ -70,21 +70,23 @@ class Stimulus:
     file_rate: float = 0.0         # file: rate of a one-column file (0 = output rate)
 
     # -- description -----------------------------------------------------
-    def describe(self) -> str:
-        """Short text for comments and the status bar, e.g. 'Pulse 2 V, 1 ms ×5 @ 100 ms'."""
+    def describe(self, units: str = "V", scale: float = 1.0) -> str:
+        """Short text for comments and the status bar, e.g. 'Pulse 2 V, 1 ms ×5 @ 100 ms'.
+        Levels are shown as volts × `scale` in `units` (the [stimulator] units setting)."""
+        lv = lambda v: f"{v * scale:g}"
         d = f"{self.delay_ms:g} ms delay, " if self.delay_ms else ""
         if self.shape == "pulse":
-            s = f"{'Biphasic pulse' if self.biphasic else 'Pulse'} {self.amplitude_v:g} V, {self.width_ms:g} ms"
+            s = f"{'Biphasic pulse' if self.biphasic else 'Pulse'} {lv(self.amplitude_v)} {units}, {self.width_ms:g} ms"
             if self.count > 1:
                 s += f" ×{self.count} every {self.interval_ms:g} ms"
         elif self.shape == "step":
-            s = f"Step {self.amplitude_v:g} V for {self.duration_ms:g} ms"
+            s = f"Step {lv(self.amplitude_v)} {units} for {self.duration_ms:g} ms"
         elif self.shape == "ramp":
-            s = f"Ramp {self.start_v:g}→{self.end_v:g} V over {self.duration_ms:g} ms"
+            s = f"Ramp {lv(self.start_v)}→{lv(self.end_v)} {units} over {self.duration_ms:g} ms"
         elif self.shape == "sine":
-            s = f"Sine {self.amplitude_v:g} V, {self.freq_hz:g} Hz for {self.duration_ms:g} ms"
+            s = f"Sine {lv(self.amplitude_v)} {units}, {self.freq_hz:g} Hz for {self.duration_ms:g} ms"
             if self.offset_v:
-                s += f", offset {self.offset_v:g} V"
+                s += f", offset {lv(self.offset_v)} {units}"
         elif self.shape == "custom":
             s = f"Custom ({len(self.segments)} segments)"
         else:

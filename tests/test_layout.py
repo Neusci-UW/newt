@@ -1,6 +1,8 @@
 """Tabs, split view, hover strips, line thickness, whole-app light/dark, stimulator chip."""
+import numpy as np
 import pytest
-from pyqtgraph.Qt import QtGui, QtWidgets
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from neusci_daq import config, style, theme
 from neusci_daq.stim import Stimulus
@@ -187,7 +189,7 @@ def test_both_stylesheets_reference_existing_images():
 
 # ---------------------------------------------------------------- stimulator tab and chip
 def test_no_stimulator_menu_any_more(win):
-    assert [a.text().replace("&", "") for a in win.menuBar().actions()] == ["File", "Setup"]
+    assert [a.text().replace("&", "") for a in win.menuBar().actions()] == ["File", "Setup", "Audio/Video", "View"]
 
 
 def test_chip_shows_on_every_tab_while_repeating_and_stops_it(app, win):
@@ -228,7 +230,7 @@ def test_stim_tab_output_and_record_on(app, win):
     page.output.activated.emit(page.output.currentIndex())
     assert win.cfg.stim_output == "ao1"
     labels = [page.monitor.itemText(i) for i in range(page.monitor.count())]
-    assert labels[0].startswith("None") and "ai0 (used by Ch1)" in labels
+    assert labels[0].startswith("None") and "ai0 (Ch1)" in labels                 # picking it makes Ch1 the stimulus channel
     page.monitor.setCurrentIndex(page.monitor.findData("ai3"))
     page._monitor_picked()
     assert win.cfg.stim_monitor == "ai3" and [c.name for c in win.cfg.channels][-1] == "Stim"
@@ -377,3 +379,401 @@ def test_long_comment_labels_are_shortened_on_the_plot(app, win):
     assert win._shown_comments[-1]["text"] == long             # full text is kept
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
+
+
+# ---------------------------------------------------------------- mouse wheel zoom
+class _Wheel:
+    """Just enough of a QGraphicsSceneWheelEvent for ViewBox.wheelEvent."""
+    def __init__(self, vb, delta=-120, cmd=False, shift=False, sideways=False):
+        M = QtCore.Qt.KeyboardModifier
+        self._vb, self._delta, self._sideways = vb, delta, sideways
+        self._mods = M.ControlModifier if cmd else M.ShiftModifier if shift else M.NoModifier
+    def delta(self): return self._delta
+    def modifiers(self): return self._mods
+    def orientation(self):
+        return QtCore.Qt.Orientation.Horizontal if self._sideways else QtCore.Qt.Orientation.Vertical
+    def pos(self): return self._vb.boundingRect().center()
+    def accept(self): pass
+    def ignore(self): pass
+
+
+def test_wheel_zooms_time_and_cmd_wheel_zooms_voltage(app, win):
+    win.resize(1024, 640)
+    win.show()
+    pump(app, 0.05)
+    vb = win.plots[0].vb
+    yr = vb.viewRange()[1]
+    before = win.window_box.value()
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # wheel down: zoom out in time
+    assert win.window_box.value() > before
+    assert vb.viewRange()[1] == yr                           # voltage untouched
+    vb.wheelEvent(_Wheel(vb, delta=120))
+    vb.wheelEvent(_Wheel(vb, delta=120))                     # zoom in
+    assert win.window_box.value() < before
+    vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))           # Cmd: zoom in on voltage only
+    span = lambda r: r[1] - r[0]
+    assert span(vb.viewRange()[1]) < span(yr)
+    assert not vb.autoRangeEnabled()[1]
+
+
+def test_wheel_in_review_keeps_the_time_under_the_mouse(app, win):
+    win.window_box.setValue(0.5)
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 2.0)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.open_session(win.session_dir)
+    win.window_box.setValue(0.5)
+    win.scroll.setValue(500)                                 # view 0.5-1.0 s
+    vb = win.plots[0].vb
+    x0, x1 = vb.viewRange()[0]
+    win._zoom_time(0.5, x=0.75)                              # zoom in around 0.75 s
+    assert win.window_box.value() == pytest.approx(0.25)
+    assert vb.viewRange()[0][0] == pytest.approx(0.625, abs=0.002)
+
+
+def test_wheel_zoom_works_while_acquisition_is_stopped(app, win):
+    win.resize(1024, 640)
+    win.show()
+    win.window_box.setValue(2)
+    win.btn_run.setChecked(True)
+    pump(app, 2.5)                                           # fill the 2 s window
+    win.btn_run.setChecked(False)
+    pump(app, 0.05)
+    vb = win.plots[0].vb
+    n = len(win.buf_t)
+    t_end = win.buf_t[-1] - win._axis_zero
+    win._zoom_time(0.25, x=t_end - 1.0)                      # zoom in around 1 s before the end
+    lo, hi = vb.viewRange()[0]
+    assert win.window_box.value() == pytest.approx(0.5)
+    assert hi - lo == pytest.approx(0.5) and lo < t_end - 1.0 < hi   # the view moved with it
+    assert len(win.buf_t) == n                               # the trace wasn't trimmed
+    win._zoom_time(4.0, x=t_end - 1.0)                       # and back out: all of it again
+    lo, hi = vb.viewRange()[0]
+    assert hi - lo == pytest.approx(2.0, abs=1e-3) and lo <= win.buf_t[0] - win._axis_zero + 0.01   # stops at the last sample
+    yr = vb.viewRange()[1]
+    vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))           # Cmd: voltage zoom while stopped too
+    assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < yr[1] - yr[0]
+    win.window_box.setValue(1)                               # typing a Window redraws too
+    lo, hi = vb.viewRange()[0]
+    assert hi - lo == pytest.approx(1.0)
+
+
+def test_shift_wheel_moves_through_time(app, win):
+    win.resize(1024, 640)
+    win.show()
+    win.window_box.setValue(2)
+    win.btn_run.setChecked(True)
+    pump(app, 2.5)
+    vb = win.plots[0].vb
+    running = vb.viewRange()[0]
+    vb.wheelEvent(_Wheel(vb, delta=120, shift=True))         # running: the newest data stays put
+    assert vb.viewRange()[0] == running
+    win.btn_run.setChecked(False)
+    pump(app, 0.05)
+    win.window_box.setValue(0.5)
+    lo = vb.viewRange()[0][0]
+    vb.wheelEvent(_Wheel(vb, delta=120, shift=True))         # wheel up: earlier, by a tenth of Window
+    assert vb.viewRange()[0][0] == pytest.approx(lo - 0.05)
+    vb.wheelEvent(_Wheel(vb, delta=-120, sideways=True))     # sideways scroll (macOS Shift+wheel): later
+    assert vb.viewRange()[0][0] == pytest.approx(lo)
+    assert win.window_box.value() == pytest.approx(0.5)      # no zoom
+    for _ in range(100):
+        vb.wheelEvent(_Wheel(vb, delta=120, shift=True))     # stops at the start of the trace
+    assert vb.viewRange()[0][0] == pytest.approx(win.buf_t[0] - win._axis_zero)
+
+
+def test_voltage_auto_scale_can_be_turned_off(app, win):
+    win.resize(1024, 640)
+    win.show()
+    assert win.act_auto_y.isChecked()                        # on by default
+    win.btn_run.setChecked(True)
+    pump(app, 0.5)
+    vb = win.plots[0].vb
+    assert vb.autoRangeEnabled()[1]
+    win.act_auto_y.trigger()                                 # View > Auto-scale voltage: off
+    held = vb.viewRange()[1]
+    pump(app, 0.5)
+    assert not win.auto_scale_y and vb.viewRange()[1] == held  # the range stays put
+    assert win.settings.value("auto_scale_y", type=bool) is False
+    win.apply_setup(sample_rate=1000)                        # rebuilt plots: fitted once, then held
+    pump(app, 0.5)
+    vb = win.plots[0].vb
+    lo, hi = vb.viewRange()[1]
+    y = win.curves[0].getOriginalDataset()[1]
+    assert not vb.autoRangeEnabled()[1] and lo <= np.median(y) <= hi and hi - lo < 5   # fits the trace
+    win.act_auto_y.trigger()                                 # back on
+    assert win.auto_scale_y and vb.autoRangeEnabled()[1]
+    win.btn_run.setChecked(False)
+
+
+def test_wheel_zoom_after_changing_the_rate_while_stopped(app, win):
+    """A rate change clears the trace and rebuilds the plots; zooming must still work."""
+    win.resize(1024, 640)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.5)
+    win.btn_run.setChecked(False)
+    win.apply_setup(sample_rate=1000)
+    pump(app, 0.05)
+    vb = win.plots[0].vb
+    assert vb.viewRange()[0] == pytest.approx([0, win.window_box.value()])
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # zoom out
+    lo, hi = vb.viewRange()[0]
+    assert win.window_box.value() > 10 and hi - lo == pytest.approx(win.window_box.value())
+
+
+def test_wheel_zoom_never_gets_stuck(app, win):
+    """Zoomed all the way in, or with a trackpad's small scrolls, zoom must still move."""
+    win.resize(1024, 640)
+    win.show()
+    vb = win.plots[0].vb
+    for _ in range(40):
+        vb.wheelEvent(_Wheel(vb, delta=120))                 # all the way in
+    assert win.window_box.value() == pytest.approx(0.01)
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # one notch back out
+    assert win.window_box.value() == pytest.approx(0.0135)
+    for w in (0.01, 0.1, 1.0, 13.5):                         # trackpad-sized scrolls, both ways
+        win.window_box.setValue(w)
+        vb.wheelEvent(_Wheel(vb, delta=-2))
+        assert win.window_box.value() > w
+        win.window_box.setValue(w)
+        vb.wheelEvent(_Wheel(vb, delta=2))
+        assert win.window_box.value() < w or w == 0.01
+    assert win.window_box.text().strip() in ("13.4 s",)      # stays readable
+
+
+def test_trials_and_stimulator_plots_use_the_same_wheel_rules(app, win):
+    from neusci_daq.plotzoom import WheelViewBox
+    win.resize(1024, 640)
+    win.show()
+    tp = win.trials_page
+    for pw in (tp.preview, tp.curve_plot, win.stim_page.preview):
+        vb = pw.getPlotItem().vb
+        assert isinstance(vb, WheelViewBox)
+        vb.clamp_to_data = False                             # the wheel rules, whatever's plotted
+        vb.setRange(xRange=(0, 10), yRange=(-1, 1), padding=0)
+        vb.wheelEvent(_Wheel(vb, delta=120))                 # wheel: time zooms in, voltage stays
+        (lo, hi), yr = vb.viewRange()
+        assert hi - lo < 10 and yr == pytest.approx([-1, 1])
+        vb.wheelEvent(_Wheel(vb, delta=-120))
+        vb.wheelEvent(_Wheel(vb, delta=-120))                # and back out past where it started
+        lo, hi = vb.viewRange()[0]
+        assert hi - lo > 10
+        span = hi - lo
+        vb.wheelEvent(_Wheel(vb, delta=-120, shift=True))    # Shift: later by a tenth, no zoom
+        assert vb.viewRange()[0] == pytest.approx([lo + span / 10, hi + span / 10])
+        vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))       # Cmd: voltage zooms, time stays
+        assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < 2
+        assert vb.viewRange()[0] == pytest.approx([lo + span / 10, hi + span / 10])
+
+
+# ---------------------------------------------------------------- zoomed-out traces
+def test_zoomed_out_traces_average_without_shimmer(app):
+    import numpy as np
+    import pyqtgraph as pg
+    from neusci_daq.plotzoom import TraceCurve
+    pw = pg.PlotWidget()
+    pw.resize(600, 300)
+    pw.show()
+    curve = TraceCurve()
+    pw.getPlotItem().addItem(curve)
+    fs = 20000
+    rng = np.random.default_rng(0)
+    y_all = rng.standard_normal(fs * 12)
+
+    def show(start):                                         # a 10 s view, scrolled by `start` samples
+        x = np.arange(start, start + fs * 10) / fs
+        pw.getPlotItem().setXRange(x[0], x[-1], padding=0)
+        curve.setData(x, y_all[start:start + fs * 10])
+        app.processEvents()
+        return curve.getData()
+
+    TraceCurve.mode = "mean"
+    x1, y1 = show(0)
+    assert len(x1) < 2000                                    # ~1 point per pixel, not 200,000
+    assert np.std(y1) < 0.2                                  # an average: the noise is smoothed out
+    x2, y2 = show(37)                                        # scroll by a few samples
+    common = np.intersect1d(np.round(x1, 9), np.round(x2, 9))
+    assert len(common) > 0.9 * len(x1)                       # the same groups, not regrouped
+    i1 = np.isin(np.round(x1, 9), common)
+    i2 = np.isin(np.round(x2, 9), common)
+    assert np.allclose(y1[i1], y2[i2])                       # with the same values: no shimmer
+    assert len(curve.getOriginalDataset()[0]) == fs * 10     # the full trace is kept
+
+    TraceCurve.mode = "peak"
+    curve.refresh()
+    _, yp = curve.getData()
+    assert yp.max() > 3                                      # min/max keeps the extremes
+    TraceCurve.mode = "mean"
+    pw.close()
+
+
+def test_zoomed_out_trace_mode_is_a_remembered_menu_choice(app, win, tmp_path):
+    from neusci_daq.gui import MainWindow
+    from neusci_daq.plotzoom import TraceCurve
+    assert win.act_trace_mode["mean"].isChecked()            # average by default
+    win.act_trace_mode["peak"].trigger()
+    assert TraceCurve.mode == "peak" and win.settings.value("trace_mode") == "peak"
+    w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)
+    assert w2.act_trace_mode["peak"].isChecked()
+    w2.close()
+    win.set_trace_mode("mean")
+
+
+def test_zooming_time_out_doesnt_shrink_the_auto_scaled_voltage_axis(app, win):
+    """Averaging shrinks noise when zoomed out; auto-scale must follow the samples,
+    or the voltage axis zooms along with time."""
+    from neusci_daq import simulation as sim
+    win.resize(1200, 700)
+    win.show()
+    win.cfg.sim_network = sim.default_network()
+    win.cfg.sim_network.recordings = [sim.Recording("ai0", 0, "extracellular", noise_v=0.05)]
+    win.window_box.setValue(0.2)
+    win.btn_run.setChecked(True)
+    pump(app, 2.5)
+    vb = win.plots[0].vb
+    spans = []
+    for w in (0.2, 2.0):
+        win.window_box.setValue(w)
+        pump(app, 0.4)
+        lo, hi = vb.viewRange()[1]
+        spans.append(hi - lo)
+    win.btn_run.setChecked(False)
+    assert spans[1] > 0.9 * spans[0]
+
+
+def test_real_wheel_events_zoom_only_time(app, win):
+    win.resize(1200, 700)
+    win.show()
+    pump(app, 0.1)
+    pw = win.plot_widgets[0]
+    vb = pw.getPlotItem().vb
+    win.set_auto_scale_y(False)
+    vb.setYRange(-1, 1, padding=0)
+    pos = QtCore.QPointF(pw.width() / 2, pw.height() / 2)
+    for pixel in (False, True):                              # a mouse wheel, then a trackpad
+        before = win.window_box.value()
+        d = 120 if not pixel else 12
+        ev = QtGui.QWheelEvent(pos, pw.mapToGlobal(pos), QtCore.QPoint(0, d if pixel else 0), QtCore.QPoint(0, d),
+                               QtCore.Qt.MouseButton.NoButton, QtCore.Qt.KeyboardModifier.NoModifier,
+                               QtCore.Qt.ScrollPhase.NoScrollPhase, False)
+        QtWidgets.QApplication.sendEvent(pw.viewport(), ev)
+        pump(app, 0.05)
+        assert win.window_box.value() < before
+        assert vb.viewRange()[1] == pytest.approx([-1, 1])
+    win.set_auto_scale_y(True)
+
+
+class _Drag:
+    """Enough of a pyqtgraph drag event for WheelViewBox.mouseDragEvent."""
+    def __init__(self, vb, a, b, finish, mods):
+        self._a, self._b, self._finish, self._mods = vb.mapViewToScene(pg.Point(*a)), vb.mapViewToScene(pg.Point(*b)), finish, mods
+        self._vb = vb
+    def button(self):
+        return QtCore.Qt.MouseButton.LeftButton
+    def modifiers(self):
+        return self._mods
+    def isFinish(self):
+        return self._finish
+    def buttonDownPos(self, *_):
+        return self._vb.mapFromScene(self._a)
+    def pos(self):
+        return self._vb.mapFromScene(self._b)
+    def accept(self):
+        pass
+    def ignore(self):
+        pass
+
+
+def _box_drag(vb, a, b, mods=QtCore.Qt.KeyboardModifier.ControlModifier):
+    vb.mouseDragEvent(_Drag(vb, a, b, False, mods))
+    vb.mouseDragEvent(_Drag(vb, a, b, True, mods))
+
+
+def test_ctrl_drag_zooms_to_a_box_and_ctrl_click_goes_back(app):
+    from neusci_daq.plotzoom import plot_widget
+    pw = plot_widget()
+    pw.resize(600, 400)
+    pw.show()
+    pw.plot(np.linspace(0, 10, 1000), np.sin(np.linspace(0, 10, 1000)))
+    vb = pw.getPlotItem().vb
+    pump(app, 0.05)
+    vb.setRange(xRange=(0, 10), yRange=(-1, 1), padding=0)
+    before = vb.viewRange()
+    _box_drag(vb, (2, -0.5), (4, 0.5))
+    (x0, x1), (y0, y1) = vb.viewRange()
+    assert (x0, x1) == pytest.approx((2, 4), abs=0.02) and (y0, y1) == pytest.approx((-0.5, 0.5), abs=0.02)
+    _box_drag(vb, (2.5, 0), (3, 0.25), mods=QtCore.Qt.KeyboardModifier.MetaModifier)   # Ctrl on a Mac
+    assert vb.viewRange()[0] == pytest.approx([2.5, 3], abs=0.02)
+    vb.zoom_back()
+    vb.zoom_back()                                                   # Ctrl+click twice: back to the start
+    assert vb.viewRange()[0] == pytest.approx(before[0], abs=0.02)
+    pw.close()
+
+
+def test_box_zoom_in_review_sets_window_and_position(app, win, tmp_path):
+    win.resize(1200, 800)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 1.2)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.open_session(win.session_dir)
+    pump(app, 0.1)
+    vb = win.plots[0].vb
+    y0, y1 = vb.viewRange()[1]
+    lo, hi = y0 + 0.25 * (y1 - y0), y0 + 0.75 * (y1 - y0)            # a box inside the data
+    _box_drag(vb, (0.2, lo), (0.6, hi))
+    assert win.window_box.value() == pytest.approx(0.4, abs=0.01)
+    assert win.plots[1].vb.viewRange()[0] == pytest.approx([0.2, 0.6], abs=0.01)   # every plot follows
+    assert vb.viewRange()[1] == pytest.approx([lo, hi], rel=0.02)
+
+
+def test_stacked_plots_line_up(app, win):
+    win.resize(1200, 800)
+    win.show()
+    win.curves[0].setData(np.arange(10.0), np.full(10, -123456.0))   # long tick labels on one plot
+    win.curves[1].setData(np.arange(10.0), np.full(10, 0.5))
+    win.plots[0].enableAutoRange()
+    pump(app, 0.3)
+    xs = [p.vb.sceneBoundingRect().left() for p in win.plots]
+    widths = [p.getAxis("left").width() for p in win.plots]
+    assert max(widths) - min(widths) < 0.5 and max(xs) - min(xs) < 0.5
+    raw = win.analysis_page.raw
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ws = [pw.getPlotItem().getAxis("left").width() for pw in (raw.overlay, raw.raster, raw.rate_plot)]
+    assert max(ws) - min(ws) < 0.5
+
+
+def test_charts_stop_at_the_edges_of_their_data(app):
+    from neusci_daq.plotzoom import TraceCurve, plot_widget
+    pw = plot_widget()
+    pw.resize(600, 400)
+    pw.show()
+    c = TraceCurve()
+    pw.getPlotItem().addItem(c)
+    c.setData(np.linspace(1, 3, 500), np.sin(np.linspace(0, 20, 500)))
+    vb = pw.getPlotItem().vb
+    pump(app, 0.05)
+    vb.setRange(xRange=(-5, 20), yRange=(-9, 9), padding=0)          # far past it
+    (x0, x1), (y0, y1) = vb.viewRange()
+    assert (x0, x1) == pytest.approx((1, 3)) and y0 >= -1.05 and y1 <= 1.05
+    vb.setXRange(1.5, 2, padding=0)                                  # zoomed in, then panned off the end
+    vb.translateBy(x=5)
+    assert vb.viewRange()[0] == pytest.approx([2.5, 3])
+    other = plot_widget()                                            # a linked plot follows, whatever it holds
+    other.resize(600, 200)
+    other.show()
+    other.plot([2.0, 2.2], [0, 1])
+    other.setXLink(pw)
+    vb.setXRange(1.2, 2.8, padding=0)
+    pump(app, 0.05)
+    assert other.getPlotItem().vb.viewRange()[0] == pytest.approx([1.2, 2.8], abs=0.05)
+    other.close()
+    pw.close()

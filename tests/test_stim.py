@@ -202,11 +202,39 @@ def test_record_stimulus_on_adds_and_removes_a_stim_channel(app, win):
     assert win.set_stim_monitor("ai3")
     assert [c.name for c in win.cfg.channels] == ["Ch1", "Ch2", "Stim"]
     assert win.cfg.channels[2].physical == "ai3" and win.cfg.stim_monitor == "ai3"
-    assert not win.set_stim_monitor("ai0")                  # used by Ch1
     assert win.set_stim_monitor("ai4")                      # move it
     assert [c.physical for c in win.cfg.channels] == ["ai0", "ai1", "ai4"]
     assert win.set_stim_monitor("")
     assert [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"] and win.cfg.stim_monitor == ""
+
+
+def test_an_existing_channel_can_record_the_stimulus_from_acquisition(app, win):
+    from neusci_daq.channels import ChannelStrip
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    assert [s.stim.isVisible() or not s.stim.isHidden() for s in strips] == [True, True]
+    assert not any(s.stim.isChecked() for s in strips)
+    strips[1].stim.setChecked(True)                         # Ch2 records the stimulus
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == "ai1" and [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"]
+    assert win.stim_page.monitor.currentData() == "ai1"     # the Stimulator tab agrees
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    strips[0].stim.setChecked(True)                         # only one at a time
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == "ai0"
+    assert [s.stim.isChecked() for s in win.strips if isinstance(s, ChannelStrip)] == [True, False]
+    assert win.set_stim_monitor("ai3")                      # a new Stim channel, then back to Ch1
+    assert win.set_stim_monitor("ai0")
+    assert [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"]   # the added Stim channel goes
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    strips[0].stim.setChecked(False)
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == "" and len(win.cfg.channels) == 2
+    strips = [s for s in win.strips if isinstance(s, ChannelStrip)]
+    strips[1].stim.setChecked(True)
+    pump(app, 0.05)
+    win._channel_removed([s for s in win.strips if isinstance(s, ChannelStrip)][1])   # remove it: unmarked
+    pump(app, 0.05)
+    assert win.cfg.stim_monitor == ""
 
 
 def test_fired_stimulus_is_recorded_on_the_stim_channel_and_logged(app, win):
@@ -225,7 +253,8 @@ def test_fired_stimulus_is_recorded_on_the_stim_channel_and_logged(app, win):
     assert stim.max() == pytest.approx(3, abs=0.02)
     assert (stim > 1.5).sum() == pytest.approx(0.1 * win.cfg.sample_rate, abs=3)   # 100 ms at the AI rate
     assert any(text.startswith("Stim:") and "Step 3 V" in text for _, text in blk["comments"])
-    assert blk["data"][0].max() > 0.5                       # the fake response on the other channels
+    ch1 = blk["data"][0]                                    # cell 1, intracellular at gain 10
+    assert ch1.max() - np.median(ch1) > 0.1                 # depolarized past threshold: > 10 mV
 
 
 def test_limit_and_busy_are_refused_with_a_message(app, win):
@@ -301,3 +330,159 @@ def test_loading_a_stimulus_updates_preview_and_what_fire_sends(app, win, tmp_pa
     assert win.stimulus.shape == "custom" and win.stimulus.segments == custom.segments
     x, y = sw.curve.getData()
     assert y.min() == pytest.approx(-1) and y.max() < 3
+
+
+# ---------------------------------------------------------------- units
+def test_describe_in_units():
+    s = Stimulus(shape="pulse", amplitude_v=2, width_ms=1)
+    assert s.describe() == "Pulse 2 V, 1 ms"
+    assert s.describe("µA", 100) == "Pulse 200 µA, 1 ms"
+    r = Stimulus(shape="ramp", start_v=0, end_v=0.5, duration_ms=10)
+    assert r.describe("mA", 2) == "Ramp 0→1 mA over 10 ms"
+
+
+def test_units_setting_is_saved_and_checked(tmp_path):
+    c = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")],
+                      stim_units="µA", stim_scale=100)
+    back = config.load(config.save(c, tmp_path / "u.toml"))
+    assert (back.stim_units, back.stim_scale) == ("µA", 100)
+    plain = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")])
+    stim_section = config.dumps(plain).split("[stimulator]")[1].split("[[channels]]")[0]
+    assert "units" not in stim_section                     # unchanged files for volts
+    with pytest.raises(ValueError, match="scale"):
+        config.validate(config.Config(backend="simulated", channels=[config.Channel("ai0", "A")],
+                                      stim_scale=0))
+
+
+def test_stimulator_fields_show_units_but_stimulus_stays_in_volts(win):
+    win.cfg.stim_units, win.cfg.stim_scale = "µA", 100
+    page = win.stim_page
+    page.sync()                                            # picks up the new units
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=2, width_ms=1))
+    assert page.p_amp.value() == pytest.approx(200) and page.p_amp.text() == "200 µA"
+    assert page.p_amp.maximum() == pytest.approx(1000)     # ±10 V at the output
+    page.p_amp.setValue(150)
+    assert win.stimulus.amplitude_v == pytest.approx(1.5)  # sent in volts
+    assert "150 µA" in page.message.text() and "(500 µA)" in page.info.text()
+    win.set_stimulus(Stimulus(shape="custom", segments=[{"duration_ms": 5, "start_v": 0, "end_v": 0.5}]))
+    assert page.table.item(0, 2).text() == "50"
+    assert page.table.horizontalHeaderItem(1).text() == "Start (µA)"
+    page.table.item(0, 2).setText("80")
+    assert win.stimulus.segments[0]["end_v"] == pytest.approx(0.8)
+
+
+# ---------------------------------------------------------------- typed units
+def test_parse_quantity_and_unit_factor():
+    from neusci_daq.stimwindow import _same_kind, parse_quantity, unit_factor
+    assert unit_factor("s", "ms") == 1000 and unit_factor("us", "ms") == pytest.approx(0.001)
+    assert unit_factor("mV", "V") == pytest.approx(0.001) and unit_factor("mA", "µA") == pytest.approx(1000)
+    assert unit_factor("V", "ms") is None
+    ms = _same_kind("ms")
+    assert parse_quantity("0.5 s", ms) == (500, "s") and parse_quantity("250", ms) == (250, "")
+    assert parse_quantity("300µs", ms)[0] == pytest.approx(0.3) and parse_quantity("1,500 ms", ms)[0] == 1500
+    assert parse_quantity("2", ms, default_unit="s") == (2000, "s")       # bare number: the unit shown
+    with pytest.raises(ValueError):
+        parse_quantity("5 V", ms)
+
+
+def type_into(box, text):
+    box.lineEdit().setText(text)
+    box.interpretText()
+
+
+def test_stimulator_fields_take_typed_units(win):
+    page = win.stim_page
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=1, width_ms=1))
+    type_into(page.p_amp, "500 mV")
+    type_into(page.p_width, "0.002 s")
+    type_into(page.p_interval, "50ms")
+    assert page.p_amp.text() == "500 mV" and page.p_width.text() == "2 ms"   # best prefix
+    s = win.stimulus
+    assert (s.amplitude_v, s.width_ms, s.interval_ms) == pytest.approx((0.5, 2, 50))   # kept in V, ms
+    type_into(page.p_amp, "3 kg")                            # not a unit here: unchanged
+    assert win.stimulus.amplitude_v == pytest.approx(0.5)
+    type_into(page.repeat, "500 ms")
+    assert win.stim_repeat_s == pytest.approx(0.5) and page.repeat.text() == "500 ms"
+    win.set_stimulus(Stimulus(shape="sine", freq_hz=10))
+    type_into(page.n_freq, "1.5 kHz")
+    assert win.stimulus.freq_hz == pytest.approx(1500) and page.n_freq.text() == "1.5 kHz"
+
+
+def test_fields_keep_the_typed_unit(win):
+    page = win.stim_page
+    win.set_stimulus(Stimulus(shape="step", amplitude_v=1, duration_ms=100))
+    type_into(page.s_dur, "1s")
+    assert page.s_dur.text() == "1 s" and win.stimulus.duration_ms == pytest.approx(1000)
+    type_into(page.s_dur, "2")                               # a bare number is in the unit shown
+    assert page.s_dur.text() == "2 s" and win.stimulus.duration_ms == pytest.approx(2000)
+    page.s_dur.stepBy(1)                                     # arrows step in that unit: 10 ms -> 10 s
+    assert win.stimulus.duration_ms == pytest.approx(12000)
+    win.set_stimulus(Stimulus(shape="step", amplitude_v=0.25, duration_ms=50))
+    assert page.s_dur.text() == "50 ms" and page.s_amp.text() == "250 mV"   # loaded values too
+    type_into(page.s_amp, "300 mv")                          # tidied: mv -> mV
+    assert page.s_amp.text() == "300 mV"
+    type_into(page.s_dur, "250 us")
+    assert page.s_dur.text() == "250 µs" and win.stimulus.duration_ms == pytest.approx(0.25)
+
+
+def test_typed_units_with_converted_stimulator_units(win):
+    win.cfg.stim_units, win.cfg.stim_scale = "µA", 100       # 100 µA per V
+    page = win.stim_page
+    page.sync()
+    win.set_stimulus(Stimulus(shape="step", amplitude_v=1, duration_ms=10))
+    type_into(page.s_amp, "0.05 mA")                         # 50 µA
+    assert page.s_amp.text() == "50 µA" and win.stimulus.amplitude_v == pytest.approx(0.5)
+    type_into(page.s_amp, "2 V")                             # volts at the output: 200 µA
+    assert win.stimulus.amplitude_v == pytest.approx(2)
+    win.set_stimulus(Stimulus(shape="custom", segments=[{"duration_ms": 5, "start_v": 0, "end_v": 0.5}]))
+    page.table.item(0, 0).setText("0.01 s")
+    page.table.item(0, 2).setText("300 mV")                  # 0.3 V
+    seg = win.stimulus.segments[0]
+    assert seg["duration_ms"] == pytest.approx(10) and seg["end_v"] == pytest.approx(0.3)
+    page._add_segment()                                      # copies "300 mV" as 30 µA
+    assert win.stimulus.segments[1]["start_v"] == pytest.approx(0.3)
+
+
+def test_stimulus_can_start_with_acquisition(app, win, tmp_path):
+    from neusci_daq.gui import MainWindow
+    win.stim_repeat_s = 0.15
+    win.set_stimulus(Stimulus(amplitude_v=1, width_ms=1))
+    page = win.stim_page
+    assert page.on_start.currentData() == ""                 # off by default
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    assert win.stim_out.fired == 0
+    win.btn_run.setChecked(False)
+
+    page.on_start.setCurrentIndex(page.on_start.findData("once"))
+    win.btn_run.setChecked(True)
+    pump(app, 0.4)
+    assert win.stim_out.fired == 1 and not win.repeating
+    win.btn_run.setChecked(False)
+
+    page.on_start.setCurrentIndex(page.on_start.findData("repeat"))
+    fired = win.stim_out.fired
+    win.btn_run.setChecked(True)
+    pump(app, 0.4)
+    assert win.repeating and page.btn_repeat.isChecked() and win.stim_out.fired >= fired + 2
+    win.btn_run.setChecked(False)                            # Stop stops it, as before
+    assert not win.repeating
+    w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)   # remembered
+    assert w2.stim_on_start == "repeat" and w2.stim_page.on_start.currentData() == "repeat"
+    w2.close()
+
+
+def test_fields_show_numbers_under_1000_with_a_prefix(win):
+    page = win.stim_page
+    win.set_stimulus(Stimulus(shape="step", amplitude_v=0.0004, duration_ms=10000))
+    assert page.s_dur.text() == "10 s" and page.s_amp.text() == "400 µV"
+    type_into(page.s_dur, "2500 ms")
+    assert page.s_dur.text() == "2.5 s"
+    type_into(page.s_dur, "0.0003 s")
+    assert page.s_dur.text() == "300 µs" and win.stimulus.duration_ms == pytest.approx(0.3)
+    type_into(page.s_amp, "0.75 V")
+    assert page.s_amp.text() == "750 mV"
+    win.set_stimulus(Stimulus(shape="sine", freq_hz=2000))
+    assert page.n_freq.text() == "2 kHz"
+    type_into(page.repeat, "3600 s")                         # no bigger prefix than s: stays in s
+    assert page.repeat.text() == "3600 s"

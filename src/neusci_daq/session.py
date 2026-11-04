@@ -98,7 +98,8 @@ def append_check(folder: str | Path, cfg: Config) -> tuple[list[str], list[str]]
     problems, warnings = [], []
 
     have_phys = [c.physical for c in cfg.channels]
-    if info["physical"] != have_phys:
+    known = any(info["physical"])                  # imported recordings don't say which input
+    if known and info["physical"] != have_phys:
         problems.append(f"Input channels differ: session uses {info['physical']}, "
                         f"config uses {have_phys}.")
     have_names = [c.name for c in cfg.channels]

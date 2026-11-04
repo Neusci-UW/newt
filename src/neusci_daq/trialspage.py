@@ -22,6 +22,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import stim as stimmod
 from . import style, theme
 from . import trials as T
+from .plotzoom import AxisGroup, light_curve, plot_widget
 
 ROW_GAP = 8          # px between the parts of a settings row (box, button, label)
 B_COLORS = ("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#D55E00", "#0072B2", "#F0E442", "#999999")
@@ -474,7 +475,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.grid.setToolTip("The trials each combination runs in. Click a row to preview its stimuli.")
         self.plan_note = QtWidgets.QLabel()
         self.plan_note.setWordWrap(True)
-        self.preview = pg.PlotWidget()
+        self.preview = plot_widget()
         self.preview.getPlotItem().setLabel("left", "Output", units="V")
         self.preview.getPlotItem().setLabel("bottom", "time", units="s")
         self.preview.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
@@ -497,7 +498,8 @@ class TrialsPage(QtWidgets.QWidget):
         self._resp_widgets: list[pg.PlotWidget] = []
         self.stack.addWidget(self.resp)
         # curve
-        self.curve_plot = pg.PlotWidget()
+        self.curve_plot = plot_widget()
+        self.curve_plot.getPlotItem().vb.limit_pad = (0.05, 0.05)    # room for the points at the edges
         self.curve_plot.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
         self.stack.addWidget(self.curve_plot)
         v.addWidget(self.stack, 1)
@@ -654,7 +656,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.main.settings.setValue("trials_protocol", self.protocol.dumps())
         cfg = self.main.cfg
         s = self.main.stimulus
-        self.stim_info.setText(s.describe() + f" · on {cfg.stim_output}")
+        self.stim_info.setText(s.describe(cfg.stim_units, cfg.stim_scale) + f" · on {cfg.stim_output}")
         self.chk = T.check(self.protocol, s, cfg.stim_rate, cfg.stim_max_v)
         self._show_counts()
         self._update_summary()
@@ -819,8 +821,8 @@ class TrialsPage(QtWidgets.QWidget):
         problem = None
         if main.stim_out is None:
             problem = "Trials needs the nidaqmx (or simulated) backend to send stimuli."
-        elif main.mode != "live" or not main.backend.running:
-            problem = "Press Start first: trials run while acquiring."
+        elif main.mode != "live":
+            problem = "Go back to live mode first (Blocks panel › Live): trials record new data."
         elif not cfg.stim_monitor or not any(ch.physical == cfg.stim_monitor for ch in cfg.channels):
             problem = "Record the stimulus on a spare input first (Line up on › Choose…)."
         elif not c or not c.ok:
@@ -830,6 +832,11 @@ class TrialsPage(QtWidgets.QWidget):
         if problem:
             self.show_message(problem, error=True)
             return False
+        if not main.backend.running:                     # start acquiring for the protocol
+            main.btn_run.setChecked(True)
+            if not main.backend.running:
+                self.show_message("Couldn't start acquiring.", error=True)
+                return False
         main.set_repeat(False)
         p = self.protocol
         self.trials = T.sequence(p, c.a_vals, c.b_vals)
@@ -1107,12 +1114,14 @@ class TrialsPage(QtWidgets.QWidget):
         unit = self._run["units"][row] if row is not None else ""
         ub = T.setting_info(self._run["shape"], self._run["protocol"].b.key)[1] if self._run["protocol"].b else ""
         for ib, b in enumerate(b_vals):
-            pw = pg.PlotWidget()
+            pw = plot_widget()
             pw.setBackground(th.background)
             self.resp_lay.addWidget(pw, 1)
             self._resp_widgets.append(pw)
             pi = pw.getPlotItem()
             pi.showGrid(x=True, y=True, alpha=0.25)
+            pi.setDownsampling(auto=True, mode="peak")     # with light_curve: ~1 point per pixel
+            pi.setClipToView(True)
             pi.setLabel("left", f"{name} ({unit})")
             if b is not None:
                 pi.setTitle(f"b = {T.fmt(b, ub)}", color=th.foreground, size="10pt")
@@ -1137,6 +1146,9 @@ class TrialsPage(QtWidgets.QWidget):
                 pi.setXLink(self._plots[0])
             self._plots.append(pi)
             self._regions.append(reg)
+        if not hasattr(self, "_resp_axes"):
+            self._resp_axes = AxisGroup()
+        self._resp_axes.set_plots(self._plots)           # the panels line up
         for r in self.results.values():
             self._draw_result(r)
         for ia in range(len(self._run["a_vals"])):
@@ -1152,7 +1164,7 @@ class TrialsPage(QtWidgets.QWidget):
         pi = self._plots[min(r.trial.ib, len(self._plots) - 1)]
         item = self._items.get(r.trial.n)
         if item is None:
-            item = pi.plot()
+            item = light_curve(pi.plot())
             self._items[r.trial.n] = item
         item.setData(r.t_ms, r.data[row])
         self._style_item(r)
@@ -1189,7 +1201,7 @@ class TrialsPage(QtWidgets.QWidget):
                 item.setData([], [])
             return
         if item is None:
-            item = self._plots[min(ib, len(self._plots) - 1)].plot()
+            item = light_curve(self._plots[min(ib, len(self._plots) - 1)].plot())
             item.setZValue(5)
             self._avg_items[key] = item
         n = min(len(r.data[row]) for r in mine)

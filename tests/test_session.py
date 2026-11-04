@@ -247,3 +247,222 @@ def test_restart_discards_leftover_chunks_from_previous_run(tmp_path, app, setti
     assert np.all(np.diff(w.buf_t) > 0), "time went backwards in the display buffer"
     assert w.buf_t.max() < 100, "data from the previous run was drawn"
     w.close()
+
+def _panel(win):
+    """The Blocks panel as data: [(top-level data, [child data])]."""
+    from pyqtgraph.Qt import QtCore
+    role = QtCore.Qt.ItemDataRole.UserRole
+    t = win.blocks_panel.tree
+    return [(t.topLevelItem(r).data(0, role),
+             [t.topLevelItem(r).child(c).data(0, role) for c in range(t.topLevelItem(r).childCount())])
+            for r in range(t.topLevelItemCount())]
+
+
+def _item(win, data):
+    from pyqtgraph.Qt import QtCore
+    return next(it for it in win.blocks_panel.items() if it.data(0, QtCore.Qt.ItemDataRole.UserRole) == data)
+
+
+def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp_path):
+    from neusci_daq.gui import LIVE, REVIEW, MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    assert _panel(win) == [("live", [])] and win.blocks_panel.tree.isEnabled()
+    assert not win.blocks_panel.stim_ch.isEnabled()                               # no session yet
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(2):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.3)
+        assert not win.blocks_panel.tree.isEnabled()                        # not while recording
+        win.btn_rec.setChecked(False)
+    assert _panel(win) == [("live", []), (("page", "Blocks"), [("block", 0), ("block", 1)])]
+    assert win.blocks_panel.stim_ch.isEnabled()
+    sess = win.session_dir
+    win._activate(("block", 1))                # the second block
+    assert win.mode == REVIEW and win.review_dir == sess and win.block_combo.currentIndex() == 1
+    assert _panel(win)[0][0] == "back"
+    assert str(sess) not in win.recent_sessions()                    # an untitled session isn't "recent"
+    win._activate(("block", 0))
+    assert win.block_combo.currentIndex() == 0
+    win._activate("back")                      # Back to Live
+    assert win.mode == LIVE and win.session_dir == sess and len(win.blocks) == 2
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)                                     # carries on in the same session
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    assert win.session_dir == sess and len(win.blocks) == 3 and len(_panel(win)[1][1]) == 3
+    win.open_session(sess)                                           # a plain Open isn't "browsing"
+    assert _panel(win)[0][0] == ("page", "Blocks")
+    win.back_to_live()
+    assert win.session_dir is None and not win.blocks                # so it starts afresh, as before
+    win.close()
+
+
+def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_path):
+    from neusci_daq import pages
+    from neusci_daq.gui import MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(3):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.25)
+        win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.rename_page("Blocks", "Baseline")
+    texts = [it.text(0) for it in win.blocks_panel.items()]
+    assert texts[1].startswith("Baseline  (3)") and texts[2].startswith("Baseline 1")
+    assert texts[4].startswith("Baseline 3")
+    win.move_block(2, "Drug")                                        # into a new page
+    texts = [it.text(0) for it in win.blocks_panel.items()]
+    assert any(t.startswith("Drug  (1)") for t in texts) and any(t.startswith("Drug 1") for t in texts)
+    assert pages.load(win.session_dir) == {"renamed": {"Blocks": "Baseline"}, "moved": {"block_003": "Drug"}}
+    win.rename_page("Drug", "Drug A")                                # its block follows
+    assert pages.load(win.session_dir)["moved"] == {"block_003": "Drug A"}
+    win.move_block(2, "Baseline")                                    # back home: no longer "moved"
+    assert pages.load(win.session_dir)["moved"] == {}
+    win.move_block(0, "Somewhere")
+    assert win.blocks_panel.btn_reset.isEnabled()
+    win.reset_pages()                                                # forget names and moves
+    assert pages.load(win.session_dir) == {"renamed": {}, "moved": {}}
+    assert [it.text(0) for it in win.blocks_panel.items()][1].startswith("Blocks  (3)")
+    assert not win.blocks_panel.btn_reset.isEnabled()
+    win.close()
+
+
+def test_selected_blocks_are_overlaid(app, settings, tmp_path):
+    from neusci_daq.gui import REVIEW, MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(3):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.25)
+        win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    _item(win, ("block", 0)).setSelected(True)                       # Cmd-click two blocks, from live
+    _item(win, ("block", 2)).setSelected(True)
+    pump(app, 0.05)
+    assert win.mode == REVIEW and win._overlay_sel == [0, 2]
+    assert len(win._overlay_items) == len(win.plots)                 # one overlay per channel plot
+    rows = win._overlay_items[0][1].getOriginalDataset()[1].shape[0]
+    assert rows == 2
+    assert _item(win, ("block", 0)).isSelected() and _item(win, ("block", 2)).isSelected()
+    win.step_block(1)                                                # stepping keeps the overlay
+    assert len(win._overlay_items) == len(win.plots)
+    win.blocks_panel.tree.clearSelection()
+    _item(win, ("page", "Blocks")).setSelected(True)                 # a whole page
+    pump(app, 0.05)
+    assert win._overlay_sel == [0, 1, 2]
+    win.blocks_panel.tree.clearSelection()
+    _item(win, ("block", 1)).setSelected(True)                       # one block: no overlay
+    pump(app, 0.05)
+    assert win._overlay_sel == [] and win._overlay_items == []
+    win.close()
+
+
+
+def test_channels_can_be_overlaid_in_one_plot(app, settings, tmp_path):
+    from neusci_daq.gui import MainWindow
+    win = MainWindow(make_cfg(tmp_path, n=3), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    win.resize(1200, 800)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.3)
+    win.btn_overlay_ch.setChecked(True)                              # live
+    pump(app, 0.3)
+    first = win.plots[0]
+    assert len(win._mirrors) == 2                                    # each on its own y axis
+    assert [m.getViewBox() for _, m in win._mirrors] == win._multi._extras() and len(win._multi.axes) == 2
+    assert all(vb.state["autoRange"][1] for vb in win._multi._extras())   # fitted to the height
+    win.set_overlay_axes(False)                                      # View: one shared axis
+    pump(app, 0.2)
+    assert all(m.getViewBox() is win.plots[0].vb for _, m in win._mirrors) and not win._multi.axes
+    win.set_overlay_axes(True)
+    pump(app, 0.2)
+    assert not win.plot_widgets[1].isVisible() and win.strips[1].isVisible()   # controls stay
+    x, y = win._mirrors[0][1].getOriginalDataset()
+    assert len(x) > 0 and np.array_equal(y, win.curves[1].getOriginalDataset()[1])   # follows the data
+    win.btn_rec.setChecked(True)
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    win.open_session(win.session_dir)                                # review: overlaid too
+    pump(app, 0.1)
+    assert len(win._mirrors) == 2 and not win.plot_widgets[2].parentWidget().isVisible()
+    assert settings.value("overlay_channels", type=bool) is True     # remembered
+    win.btn_overlay_ch.setChecked(False)
+    pump(app, 0.1)
+    assert win._mirrors == [] and win.plot_widgets[2].isVisible()
+    win.close()
+
+
+def _recorded_session(app, win, n=2):
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    for _ in range(n):
+        win.btn_rec.setChecked(True)
+        pump(app, 0.3)
+        win.btn_rec.setChecked(False)
+        pump(app, 0.05)
+    win.btn_run.setChecked(False)
+    folder = win.session_dir
+    win.save_as(folder.parent.parent / "saved_session")
+    return win.session_dir
+
+
+def test_back_to_live_from_an_opened_session_asks_and_can_add_to_it(app, settings, tmp_path):
+    from neusci_daq.gui import MainWindow
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    folder = _recorded_session(app, win)
+    win.new_session()
+    win.open_session(folder)                                         # a dataset loaded from disk
+    asked = []
+    win._ask_leave_review = lambda path: asked.append(path) or None  # Cancel: stay in review
+    win._activate("live")
+    assert asked == [folder] and win.mode == "review"
+    win._ask_leave_review = lambda path: "append"                    # add to it
+    win._activate("live")
+    assert win.mode == "live" and win.session_dir == folder and len(win.blocks) == 2
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    assert [b.name for b in session.list_blocks(folder)] == ["block_001.h5", "block_002.h5", "block_003.h5"]
+    win.open_session(folder)
+    win._ask_leave_review = lambda path: "new"                       # or a new session: nothing lost
+    win._activate("live")
+    assert win.mode == "live" and win.session_dir is None and len(session.list_blocks(folder)) == 3
+    win.close()
+
+
+def test_adding_to_a_recording_made_with_another_setup_can_take_its_setup(app, settings, tmp_path):
+    from neusci_daq.gui import MainWindow
+    from neusci_daq.channels import ChannelRow
+    from neusci_daq.config import Channel
+    win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
+    folder = _recorded_session(app, win)
+    mat = win.export()                                               # as a LabChart .mat ...
+    win.new_session()
+    win.apply_setup(rows=[ChannelRow(Channel("ai0", "Other"))], sample_rate=1000)   # ... then a new setup
+    imported = win.open_mat(mat)
+    win._ask_leave_review = lambda path: "append"
+    win._ask_adopt_setup = lambda path, problems: False             # No: stay
+    assert not win.leave_review() and win.mode == "review"
+    win._ask_adopt_setup = lambda path, problems: True
+    assert win.leave_review()
+    assert [c.name for c in win.cfg.channels] == ["Ch0", "Ch1"] and win.cfg.sample_rate == 2000
+    assert win.mode == "live" and win.session_dir == imported and len(win.blocks) == 2
+    win.close()
+

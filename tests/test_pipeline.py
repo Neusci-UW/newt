@@ -8,6 +8,8 @@ from neusci_daq import config
 from neusci_daq.backends import SimulatedBackend
 from neusci_daq.recorder import Recorder, load_recording
 
+from test_channels import app, pump, win  # noqa: F401  (fixtures)
+
 
 def make_cfg(**kw):
     c = config.Config(backend="simulated", sample_rate=1000, chunk_size=50,
@@ -65,3 +67,20 @@ def test_example_config_loads():
         warnings.simplefilter("error")
         cfg = config.load("config.toml")
     assert cfg.backend == "nidaqmx" and cfg.channels   # whatever channels this rig uses
+
+
+
+def test_blocks_are_labelled_with_the_new_rate_after_a_rate_change(app, win):
+    """The simulated backend used to keep the rate it was made with, so a block
+    recorded after changing the rate was stored at the old one (10× too long)."""
+    from neusci_daq import session
+    win.apply_setup(sample_rate=20000)
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 0.5)
+    win.btn_rec.setChecked(False)
+    win.btn_run.setChecked(False)
+    b = session.read_block(win.blocks[-1])
+    assert b["sample_rate"] == 20000 and win.backend.actual_rate == 20000
+    assert 0.3 < b["duration_s"] < 1.5

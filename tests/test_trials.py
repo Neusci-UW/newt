@@ -252,14 +252,19 @@ def test_trials_tab_replaces_the_placeholder(win):
     assert win.tabs.panes[0].bar.tabText(2) == "Trials"
 
 
-def test_run_needs_start_and_a_recorded_stimulus(app, win):
+def test_run_needs_a_recorded_stimulus_and_starts_acquiring_itself(app, win):
     tp = win.trials_page
-    tp._load_protocol_into_widgets(T.Protocol(a=T.Variable("amplitude_v", "range", 0.5, 1, 0.5), repeats=1))
+    tp._load_protocol_into_widgets(T.Protocol(a=T.Variable("amplitude_v", "range", 0.5, 1, 0.5), repeats=1,
+                                              gap_s=0.2))
     assert not tp.btn_run.isEnabled() and "Record the stimulus" in tp.summary.text()
     assert not tp.run_protocol()
     win.set_stim_monitor("ai3")
-    assert tp.btn_run.isEnabled()
-    assert not tp.run_protocol() and "Press Start" in tp.message.text()
+    assert tp.btn_run.isEnabled() and not win.btn_run.isChecked()
+    assert tp.run_protocol()                                         # no need to press Start first
+    assert win.btn_run.isChecked() and win.backend.running and tp.running
+    _run_to_end(app, tp)
+    assert len(tp.results) == 2 and all(r.found for r in tp.results.values())
+    win.btn_run.setChecked(False)
 
 
 def test_a_full_protocol_lines_up_every_trial_and_saves_it(app, win, tmp_path):

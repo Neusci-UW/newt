@@ -7,6 +7,9 @@ import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from . import simulation
+from .dsp import Calculation
+
 # USB-6003 limits (NI spec): one multiplexed ADC, 100 kS/s aggregate,
 # 8 single-ended / 4 differential inputs, fixed +/-10 V range.
 USB6003_MAX_AGGREGATE_RATE = 100_000
@@ -91,10 +94,11 @@ class Channel:
 
 @dataclass
 class Config:
-    backend: str = "nidaqmx"      # "nidaqmx" | "multichannelio" | "simulated"
+    backend: str = "nidaqmx"      # "nidaqmx" | "multichannelio" | "simulated" | "audio"
+    audio_device: str = ""        # audio backend: the input device's name ("" = the default one)
     device: str = "Dev1"
-    sample_rate: float = 1000.0   # per channel
-    chunk_size: int = 100         # samples per channel per read
+    sample_rate: float = 20000.0  # per channel; fast enough to see action potential shapes
+    chunk_size: int = 1000        # samples per channel per read (50 ms at 20 kHz)
     terminal_config: str = "RSE"  # "RSE" | "DIFF"
     channels: list[Channel] = field(default_factory=list)        # switched on: acquired and shown
     spare_channels: list[Channel] = field(default_factory=list)  # switched off: kept so they can be switched back on
@@ -105,6 +109,12 @@ class Config:
     stim_rate: float = 5000.0     # output samples per second (USB-6003 max 5,000)
     stim_max_v: float = 5.0       # safety limit: stimuli above this are refused
     stim_monitor: str = ""        # input that records the stimulus (wired from the output), or ""
+    stim_units: str = "V"         # units the Stimulator shows levels in, e.g. "µA" behind an isolator
+    stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
+    # Simulated backend only: the cells it simulates and what each input records
+    sim_network: simulation.Network = field(default_factory=simulation.default_network)
+    # Calculated channels (filters, arithmetic: see dsp.py), shown and analysed, never recorded
+    calculations: list = field(default_factory=list)
 
     @property
     def aggregate_rate(self) -> float:
@@ -117,14 +127,34 @@ class Config:
 
 
 def valid_inputs(cfg: Config) -> list[str]:
-    """Inputs available in the current wiring mode: in DIFF, ai4-ai7 are the minus inputs of ai0-ai3."""
+    """Inputs available in the current wiring mode: in DIFF, ai4-ai7 are the minus inputs of ai0-ai3.
+    An audio device's inputs are in1, in2, …"""
+    if cfg.backend == "audio":
+        from . import audio
+        return audio.input_names(audio.max_inputs(cfg.audio_device))
     return [f"ai{i}" for i in range(4 if cfg.terminal_config == "DIFF" else 8)]
+
+
+def use_audio_channels(cfg: Config) -> None:
+    """Switching to an audio device: its inputs (in1, in2) as the channels unless they
+    already are, at a rate it records at, and no stimulus input (it has no outputs here)."""
+    from . import audio
+    dev = audio.find(cfg.audio_device, "input")
+    n = min(2, dev["channels"]) if dev else 2
+    if not all(c.physical.startswith("in") for c in cfg.channels):
+        cfg.spare_channels = []
+        cfg.channels = [Channel(f"in{i + 1}", f"Audio {i + 1}") for i in range(n)]
+        fill_colors(cfg.channels)
+    if cfg.sample_rate not in audio.RATES:
+        cfg.sample_rate = dev["rate"] if dev else 48000.0
+    cfg.chunk_size = auto_chunk_size(cfg.sample_rate)
+    cfg.stim_monitor = ""
 
 
 def load(path: str | Path) -> Config:
     raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     dev, disp, rec = raw.get("device", {}), raw.get("display", {}), raw.get("recording", {})
-    st = raw.get("stimulator", {})
+    st, sim = raw.get("stimulator", {}), raw.get("simulated", {})
     chans = []
     for c in raw.get("channels", []):
         ch = Channel(**{k: v for k, v in c.items() if k != "range"})
@@ -135,9 +165,10 @@ def load(path: str | Path) -> Config:
     fill_colors(chans)
     cfg = Config(
         backend=dev.get("backend", "nidaqmx"),
+        audio_device=dev.get("audio_device", ""),
         device=dev.get("device", "Dev1"),
-        sample_rate=float(dev.get("sample_rate", 1000)),
-        chunk_size=int(dev.get("chunk_size", 100)),
+        sample_rate=float(dev.get("sample_rate", 20000)),
+        chunk_size=int(dev.get("chunk_size", auto_chunk_size(float(dev.get("sample_rate", 20000))))),
         terminal_config=dev.get("terminal_config", "RSE").upper(),
         window_s=float(disp.get("window_s", 10)),
         data_dir=rec.get("directory", "data"),
@@ -145,6 +176,11 @@ def load(path: str | Path) -> Config:
         stim_rate=float(st.get("rate", 5000)),
         stim_max_v=float(st.get("max_voltage", 5.0)),
         stim_monitor=str(st.get("monitor", "")).lower(),
+        stim_units=str(st.get("units", "V")).strip() or "V",
+        stim_scale=float(st.get("scale", 1.0)),
+        sim_network=simulation.from_toml(sim),
+        calculations=[Calculation(str(c.get("name", "")).strip(), str(c.get("formula", "")).strip(),
+                                  str(c.get("unit", "")).strip()) for c in raw.get("calculations", [])],
     ).with_channels(chans)
     validate(cfg)
     return cfg
@@ -154,7 +190,7 @@ def validate(cfg: Config) -> None:
     if not cfg.channels:
         raise ValueError("At least one channel must be on." if cfg.spare_channels
                          else "Config has no [[channels]].")
-    if cfg.backend not in ("nidaqmx", "multichannelio", "simulated"):
+    if cfg.backend not in ("nidaqmx", "multichannelio", "simulated", "audio"):
         raise ValueError(f"Unknown backend {cfg.backend!r}")
     if cfg.terminal_config not in ("RSE", "DIFF"):
         raise ValueError("terminal_config must be RSE or DIFF (USB-600x has no NRSE).")
@@ -164,9 +200,11 @@ def validate(cfg: Config) -> None:
         raise ValueError("[stimulator] rate must be between 0 and 5,000 S/s (USB-6003 limit).")
     if not 0 < cfg.stim_max_v <= 10:
         raise ValueError("[stimulator] max_voltage must be between 0 and 10 V.")
+    if not cfg.stim_scale > 0:
+        raise ValueError("[stimulator] scale must be positive (units per volt).")
     if cfg.sample_rate <= 0:
         raise ValueError("Sample rate must be positive.")
-    if cfg.aggregate_rate > USB6003_MAX_AGGREGATE_RATE:
+    if cfg.backend != "audio" and cfg.aggregate_rate > USB6003_MAX_AGGREGATE_RATE:
         n = len(cfg.channels)
         raise ValueError(
             f"{n} ch × {cfg.sample_rate:g} Hz = {cfg.aggregate_rate:g} S/s, over the USB-6003's "
@@ -177,8 +215,8 @@ def validate(cfg: Config) -> None:
     names: set[str] = set()
     for ch in cfg.channels:
         if ch.physical not in allowed:
-            raise ValueError(f"{ch.name}: {ch.physical} isn't available; use {allowed[0]}–{allowed[-1]} "
-                             f"in {cfg.terminal_config} mode.")
+            raise ValueError(f"{ch.name}: {ch.physical} isn't available; use {allowed[0]}–{allowed[-1]}"
+                             + ("." if cfg.backend == "audio" else f" in {cfg.terminal_config} mode."))
         if ch.physical in seen:
             raise ValueError(f"{seen[ch.physical]} and {ch.name} both use {ch.physical}. "
                              "Each input can only be one channel.")
@@ -190,7 +228,16 @@ def validate(cfg: Config) -> None:
             raise ValueError(f"Two channels are named {ch.name!r}; give each its own name.")
         seen[ch.physical] = ch.name
         names.add(ch.name)
-    if cfg.backend == "simulated":
+    simulation.validate(cfg.sim_network)
+    names = {c.name for c in cfg.channels}
+    seen_calc: set[str] = set()
+    for c in cfg.calculations:
+        if not c.name or not c.formula:
+            raise ValueError("Every calculated channel needs a name and a formula.")
+        if c.name in names or c.name in seen_calc:
+            raise ValueError(f"{c.name!r} is already a channel's name: give the calculation another.")
+        seen_calc.add(c.name)
+    if cfg.backend in ("simulated", "audio"):
         return
     for ch in cfg.channels:
         if tuple(ch.range) != USB6003_RANGE:
@@ -211,6 +258,7 @@ def dumps(cfg: Config) -> str:
     lines = [
         "[device]",
         f"backend = {_s(cfg.backend)}",
+        *([f"audio_device = {_s(cfg.audio_device)}"] if cfg.audio_device else []),
         f"device = {_s(cfg.device)}",
         f"sample_rate = {cfg.sample_rate:g}",
         f"chunk_size = {cfg.chunk_size}",
@@ -228,6 +276,12 @@ def dumps(cfg: Config) -> str:
         f"max_voltage = {cfg.stim_max_v:g}",
         f"monitor = {_s(cfg.stim_monitor)}",
     ]
+    if cfg.stim_units != "V" or cfg.stim_scale != 1.0:
+        lines += [f"units = {_s(cfg.stim_units)}", f"scale = {cfg.stim_scale:g}"]
+    for c in cfg.calculations:
+        lines += ["", "[[calculations]]", f"name = {_s(c.name)}", f"formula = {_s(c.formula)}", f"unit = {_s(c.unit)}"]
+    if cfg.sim_network != simulation.default_network():      # only when it's been changed
+        lines += ["", "[simulated]"] + simulation.to_toml_lines(cfg.sim_network)
     for c in cfg.channels + cfg.spare_channels:
         lines += ["", "[[channels]]",
                   f"physical = {_s(c.physical)}",

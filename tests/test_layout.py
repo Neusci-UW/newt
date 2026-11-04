@@ -327,8 +327,9 @@ def test_short_record_text_keeps_its_meaning_in_a_tooltip(app, win):
     win.btn_run.setChecked(True)
     win.btn_rec.setChecked(True)
     pump(app, 0.1)
-    win.resize(500, 640)                                       # far too narrow
-    pump(app, 0.1)
+    win.toolbar.setFixedWidth(300)                             # far too narrow: the window's minimum
+    pump(app, 0.1)                                             # width follows the font, so resizing
+    win._fit_toolbar()                                         # it may leave room (it did on Windows)
     assert win.btn_rec.text() in ("0:00", "0:01")
     assert win.btn_rec.toolTip() == "Stop recording"
     assert not win.lbl_rate.isVisible() and not win.lbl_window.isVisible()

@@ -67,4 +67,4 @@ other programs that could come next.
 
 ## Who
 
-Made for and by students from UW's neuroscience major!
+Made for and by those within UW's neuroscience major!

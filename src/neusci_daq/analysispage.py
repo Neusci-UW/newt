@@ -1,11 +1,12 @@
 """The Analysis tab: every block of the session, the action potentials in them,
 and how the channels compare. A bar at the top picks the highlighted block (slider,
-◀ ▶, or the ← → keys); three sub-tabs:
+◀ ▶, or the ← → keys); the Blocks panel beside the sub-tabs picks the blocks to analyze,
+the stimulus and analyzed channels, and Spread. Three sub-tabs:
 
 - Spike Sorting: the chosen blocks overlaid with their average and the
   highlighted block, with the stimulus below; Find action potentials (threshold or bimodal, sorted into
-  units, see analysis.py); a raster of the events in every block; spikes per
-  second across the session; and beside them a histogram of AP sizes and each
+  units, see analysis.py); a raster of the events in the chosen blocks; spikes
+  per second during a block; all on one time axis, zooming together; and beside them a histogram of AP sizes and each
   unit's waveforms.
 - Comparison: for the highlighted block, any channels on one time axis as V,
   dV/dt or d²V/dt², with the spike rate; and over the chosen blocks, the
@@ -14,7 +15,7 @@ and how the channels compare. A bar at the top picks the highlighted block (slid
   window, of single blocks, stimulus averages, or mean ± SD/SEM per stimulus
   (see datapadview.py).
 
-Averages can be shaded with their SD or SEM across trials (Spread, at the top).
+Averages can be shaded with their SD or SEM across trials (Spread, in the Blocks panel).
 
 The blocks are the ones being reviewed, or those recorded so far in live mode.
 """
@@ -33,6 +34,7 @@ from . import config as cfgmod
 from . import dsp
 from . import pages
 from . import style, theme
+from .blockspanel import BlocksPanel
 from .datapadview import DataPadView
 from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
@@ -76,34 +78,33 @@ class AnalysisPage(QtWidgets.QWidget):
             top.addWidget(w)
         lay.addLayout(top)
 
-        grp = QtWidgets.QHBoxLayout()
-        self.stim_channel = QtWidgets.QComboBox()
+        # The Blocks panel, beside every sub-tab: pick the blocks to analyze, and how.
+        self.blocks_panel = BlocksPanel(for_analysis=True)
+        self.blocks_panel.selection.connect(self._blocks_picked)
+        self.blocks_panel.activated.connect(self._block_clicked)
+        self.blocks_panel.btn_all.clicked.connect(lambda: self.select_blocks([]))
+        self.blocks_panel.rename_requested.connect(self.main._rename_dialog)
+        self.blocks_panel.move_requested.connect(
+            lambda i, page: self.main.move_block(i, page) if page else self.main._new_page_dialog(i))
+        self.blocks_panel.reset_requested.connect(self.main._reset_pages_dialog)
+        self.picked: list[int] = []               # the blocks selected; none means all of them
+        self._pick_timer = QtCore.QTimer(self, singleShot=True, interval=150)   # dragging picks many at once
+        self._pick_timer.timeout.connect(self.groups_changed)
+        self.stim_channel = self.blocks_panel.stim_ch
         self.stim_channel.setToolTip("The channel that recorded the stimulus, if one did; you can set it any "
                                      "time after recording. Its pulses give exact stimulus times, and blocks "
                                      "with the same stimulus are grouped. With None, the notes the app made as "
                                      "it sent each stimulus are used. Remembered for this session")
-        self.group = QtWidgets.QComboBox()
-        self.group.setMinimumContentsLength(16)
-        self.group.setToolTip("Look at just this group of blocks, on every sub-tab")
         self.group_note = _flexible_label()
-        grp.addWidget(QtWidgets.QLabel("Stimulus channel"))
-        grp.addWidget(self.stim_channel)
-        grp.addWidget(QtWidgets.QLabel("Show"))
-        grp.addWidget(self.group)
-        grp.addSpacing(12)
-        grp.addWidget(QtWidgets.QLabel("Spread"))
+        self.blocks_panel.layout().addWidget(self.group_note)
         self.spread_box = QtWidgets.QComboBox()
         for label, key in (("None", ""), ("± SD", "sd"), ("± SEM", "sem")):
             self.spread_box.addItem(label, key)
         self.spread_box.setToolTip("Shade every average with its standard deviation or standard error "
                                    "across the trials (blocks or stimuli) it's made of")
         self.spread_box.currentIndexChanged.connect(lambda *_: self.spread_changed())
-        grp.addWidget(self.spread_box)
-        grp.addWidget(self.group_note, 1)
-        lay.addLayout(grp)
         self.groups: list[tuple[str, list[int]]] = []
         self.stim_channel.currentIndexChanged.connect(lambda *_: self._stim_channel_picked())
-        self.group.currentIndexChanged.connect(lambda *_: self.groups_changed())
 
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -113,7 +114,13 @@ class AnalysisPage(QtWidgets.QWidget):
         self.tabs.addTab(self.compare, "Comparison")
         self.datapad = DataPadView(self)
         self.tabs.addTab(self.datapad, "DataPad")
-        lay.addWidget(self.tabs, 1)
+        self.blocks_panel.add_setting("Analyze", self.raw.channel)
+        self.blocks_panel.add_setting("Spread", self.spread_box)
+        body = QtWidgets.QHBoxLayout()
+        body.setSpacing(10)
+        body.addWidget(self.blocks_panel)
+        body.addWidget(self.tabs, 1)
+        lay.addLayout(body, 1)
 
         self.btn_prev.clicked.connect(lambda: self.step(-1))
         self.btn_next.clicked.connect(lambda: self.step(1))
@@ -164,7 +171,9 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def refresh(self) -> None:
         self._dirty = False
-        self._paths = list(self.main.analysis_blocks())
+        old, self._paths = self._paths, list(self.main.analysis_blocks())
+        if self._paths[:len(old)] != old:
+            self.picked = []                      # other blocks: the selection meant something else
         self.blocks = []
         for p in self._paths:
             try:
@@ -186,6 +195,7 @@ class AnalysisPage(QtWidgets.QWidget):
             w.setMaximum(max(1, n))
             w.blockSignals(False)
         self.n_label.setText(f"of {n}")
+        self.picked = [i for i in self.picked if i < n]
         recorded = good[0]["channel_names"] if good else []
         self._chain = dsp.Chain(self.main.cfg.calculations, recorded, good[0]["sample_rate"] if good else None)
         # calculated channels these blocks can have (each may use the ones above it)
@@ -233,14 +243,6 @@ class AnalysisPage(QtWidgets.QWidget):
             if b is not None and name in b["channel_names"]:
                 return b["units"][b["channel_names"].index(name)]
         return "V"
-
-    def starts(self) -> dict[int, float]:
-        """Each block's start in session time: blocks one after another."""
-        out, t = {}, 0.0
-        for i, b in enumerate(self.blocks):
-            out[i] = t
-            t += b["duration_s"] if b is not None else 0.0
-        return out
 
     # -- stimulus groups ------------------------------------------------------------------
     def _settings_key(self) -> str | None:
@@ -340,22 +342,19 @@ class AnalysisPage(QtWidgets.QWidget):
         folder = self.main.review_dir if self.main.mode == "review" else self.main.session_dir
         d = pages.load(folder)
         changed = d["moved"] or d["renamed"]
-        self.groups = pages.apply(auto, [p.stem for p in self._paths], d) if auto or changed else []
-        keep = self.group.currentText().rsplit(" (", 1)[0]
-        self.group.blockSignals(True)
-        self.group.clear()
-        self.group.addItem("All blocks")
-        for g, (label, blocks) in enumerate(self.groups):
-            self.group.addItem(style.dot_icon(self.group_color(g)),
-                               f"{label} ({len(blocks)} block{'s' if len(blocks) != 1 else ''})")
-        i = next((k + 1 for k, (label, _) in enumerate(self.groups) if label == keep), 0)
-        self.group.setCurrentIndex(i)
-        self.group.blockSignals(False)
+        stems = [p.stem for p in self._paths]
+        shown = pages.apply(auto, stems, d) if stems else []
+        self.groups = shown if auto or changed else []
+        labels = {i: (stem, f"{b['duration_s']:.1f} s" if b is not None else "?")
+                  for i, (stem, b) in enumerate(zip(stems, self.blocks))}
+        self.blocks_panel.populate(None, shown, [self.group_color(g) for g in range(max(1, len(shown)))], labels,
+                                   lambda i: pages.auto_page(auto, i, d), bool(changed), False)
+        self.blocks_panel.select(self.picked)
         n = len([g for g in self.groups if g[0] != "No stimulus found"])
         self.group_note.setText(
             "No stimulus channel or notes: pick the channel that recorded the stimulus" if not how else
             f"{n} different stimul{'us' if n == 1 else 'i'}" + (" (from the notes)" if how == "notes" else "")
-            + ": pick one with Show" if n else
+            + ": select a page to see just its blocks" if n else
             f"No stimulus pulses found on {how}: is it the right channel?" if how != "notes" else
             "No stimuli in the notes")
 
@@ -368,9 +367,24 @@ class AnalysisPage(QtWidgets.QWidget):
         return next((g for g, (_, blocks) in enumerate(self.groups) if i in blocks), None)
 
     def group_blocks(self) -> list[int] | None:
-        """The blocks of the picked group, or None for all blocks."""
-        i = self.group.currentIndex()
-        return self.groups[i - 1][1] if i > 0 and i - 1 < len(self.groups) else None
+        """The blocks selected in the Blocks panel, or None for all blocks."""
+        return self.picked or None
+
+    def _blocks_picked(self, picked: list[int]) -> None:
+        if picked != self.picked:
+            self.picked = picked
+            self._pick_timer.start()
+
+    def _block_clicked(self, data) -> None:
+        if isinstance(data, tuple) and data[0] == "block":
+            self.current.setValue(int(data[1]) + 1)
+
+    def select_blocks(self, blocks: list[int]) -> None:
+        """Analyze just these blocks (none: all of them)."""
+        self._pick_timer.stop()
+        self.picked = sorted(blocks)
+        self.blocks_panel.select(self.picked)
+        self.groups_changed()
 
     def onsets(self, i: int) -> np.ndarray | None:
         """When each stimulus started in block i (s): the first pulse of each train on the
@@ -449,9 +463,9 @@ class RawView(View):
         for label, key in _SHOW:
             self.show_what.addItem(label, key)
         self.rate_bin = UnitSpinBox(0.01, 600, "s", step=0.5)
-        self.rate_bin.setValue(1.0)
-        self.rate_bin.setToolTip("Spikes per second across the session are counted in bins this long")
-        f.addRow("Channel", self.channel)
+        self.rate_bin.setValue(0.1)
+        self.rate_bin.setToolTip("Spikes per second during a block are counted in bins this long")
+        self.channel.setToolTip("The channel to find action potentials on")
         f.addRow("Blocks", self.which)
         f.addRow("Show", self.show_what)
         f.addRow("Rate bins", self.rate_bin)
@@ -546,8 +560,8 @@ class RawView(View):
         self.raster = plot_widget()
         self.rate_plot = plot_widget()
         for pw, title, left_label in ((self.overlay, "Blocks overlaid", ""),
-                                      (self.raster, "Events in every block", "block"),
-                                      (self.rate_plot, "Spikes per second across the session", "spikes/s")):
+                                      (self.raster, "Events in the chosen blocks", "block"),
+                                      (self.rate_plot, "Spikes per second during a block", "spikes/s")):
             p = pw.getPlotItem()
             p.setTitle(title)
             p.setLabel("left", left_label)
@@ -555,8 +569,9 @@ class RawView(View):
         # seconds with a prefix as you zoom (ms, µs)
         self.overlay.getPlotItem().setLabel("bottom", "time in block", units="s")
         self.raster.getPlotItem().setLabel("bottom", "time in block", units="s")
-        self.rate_plot.getPlotItem().setLabel("bottom", "time in the session", units="s")
+        self.rate_plot.getPlotItem().setLabel("bottom", "time in block", units="s")
         self.raster.setXLink(self.overlay)
+        self.rate_plot.setXLink(self.overlay)                    # one time axis: they zoom together
         self.raster.getPlotItem().invertY(True)                  # block 1 at the top
         sp = self.stim_plot.getPlotItem()
         sp.showGrid(x=True, y=True, alpha=0.2)
@@ -580,8 +595,8 @@ class RawView(View):
         rv = QtWidgets.QVBoxLayout(right_box)
         rv.setContentsMargins(0, 0, 0, 0)
         rv.setSpacing(4)
-        norm = QtWidgets.QHBoxLayout()
-        norm.addWidget(QtWidgets.QLabel("Normalize"))
+        norm = QtWidgets.QGridLayout()
+        norm.addWidget(QtWidgets.QLabel("Normalize"), 0, 0, 2, 1)
         self.norm_sizes = QtWidgets.QCheckBox("AP sizes")
         self.norm_sizes.setToolTip("Each unit's histogram as a fraction of its own events, so units with "
                                    "different counts compare by shape")
@@ -591,11 +606,11 @@ class RawView(View):
         self.norm_waves.setToolTip("Each spike divided by the size of its own peak (peak = ±1), so shapes "
                                    "compare whatever their size")
         self.norm_rate = QtWidgets.QCheckBox("Rate")
-        self.norm_rate.setToolTip("Spikes per second across the session as a fraction of each unit's highest")
-        for w in (self.norm_sizes, self.norm_isi, self.norm_waves, self.norm_rate):
-            norm.addWidget(w)
+        self.norm_rate.setToolTip("Spikes per second during a block as a fraction of each unit's highest")
+        for k, w in enumerate((self.norm_sizes, self.norm_isi, self.norm_waves, self.norm_rate)):
+            norm.addWidget(w, k // 2, 1 + k % 2)
             w.toggled.connect(lambda *_: self._show_results() if self.events is not None else None)
-        norm.addStretch(1)
+        norm.setColumnStretch(3, 1)
         rv.addLayout(norm)
         right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.hist = plot_widget()
@@ -640,14 +655,16 @@ class RawView(View):
         self.thr_line.setZValue(30)
         self.thr_line.setToolTip("Threshold: drag to set a fixed level")
         op.addItem(self.thr_line)
-        self.raster_dots = pg.ScatterPlotItem(size=4, pen=None)
+        self.raster_dots = pg.ScatterPlotItem(size=2, pen=None)
+        self._rows: dict[int, int] = {}           # block -> its row in the raster
+        self._end = 0.0                           # where the longest chosen block ends (s)
         self.raster.getPlotItem().addItem(self.raster_dots)
         # each block's stimulus group, as a coloured mark at the start of its row
         self.group_marks = pg.ScatterPlotItem(size=8, symbol="s", pen=None)
         self.group_marks.setZValue(5)
         self.raster.getPlotItem().addItem(self.group_marks)
         self.group_avgs: list[TraceCurve] = []
-        self.bands: list = []                     # ± SD / SEM shading (Spread, at the top)
+        self.bands: list = []                     # ± SD / SEM shading (Spread, in the Blocks panel)
         self.overlay_legend = op.addLegend(offset=(-10, 10))
         self.cur_band = pg.LinearRegionItem(movable=False, orientation="horizontal")
         self.cur_band.setZValue(-10)
@@ -719,7 +736,7 @@ class RawView(View):
     def _averages(self, chosen: list[int], Y: np.ndarray):
         """[(group, label, mean, SD, SEM, n blocks)] across the chosen blocks (rows of Y):
         one per stimulus group when all blocks are shown grouped, else one (group None)."""
-        if self.page.group.currentIndex() == 0 and len(self.page.groups) > 1:
+        if self.page.group_blocks() is None and len(self.page.groups) > 1:
             sets = [(g, label, [r for r, i in enumerate(chosen) if i in blocks])
                     for g, (label, blocks) in enumerate(self.page.groups)]
         else:
@@ -786,23 +803,49 @@ class RawView(View):
                     item.setData(x, mean)
                     if spread:
                         self._band(x, mean, sd if spread == "sd" else sem, color)
-            self.overlay.getPlotItem().setXRange(0, n / fs, padding=0.01)
+            self._end = n / fs
+            self._set_time_limits((0.0, self._end))
+            self.overlay.getPlotItem().setXRange(0, self._end, padding=0)
             label_axis(self.overlay.getPlotItem(), "left", self.channel.currentText(),
                    self.page.unit_of(self.channel.currentText()))
-            self.raster.getPlotItem().setYRange(0.5, len(self.blocks) + 0.5, padding=0)
         else:
+            self._end = 0.0
+            self._set_time_limits(None)
             self.blocks_item.set_traces(np.empty((0, 0)), 1.0)
             self.avg_item.setData(np.empty(0), np.empty(0))
+        self._set_rows(chosen)
         self.overlay.getPlotItem().setTitle(f"{len(chosen)} block(s) overlaid", color=self._fg())
-        marks = [(i, self.page.group_of(i)) for i in range(len(self.blocks))]
+        marks = [(i, self.page.group_of(i)) for i in chosen]
         marks = [(i, g) for i, g in marks if g is not None]
-        self.group_marks.setData([0.0] * len(marks), [i + 1 for i, _ in marks],
+        self.group_marks.setData([0.0] * len(marks), [self._rows[i] for i, _ in marks],
                                  brush=[pg.mkBrush(self.page.group_color(g)) for _, g in marks])
         self.draw_current()
 
+    def _set_time_limits(self, limits: tuple[float, float] | None) -> None:
+        """The central plots share one time axis, ending where the data does."""
+        for pw in (self.overlay, self.stim_plot, self.raster, self.rate_plot):
+            pw.getPlotItem().vb.bounds[0] = limits
+
+    def _set_rows(self, chosen: list[int]) -> None:
+        """One raster row per chosen block, labelled with its block number."""
+        self._rows = {i: r for r, i in enumerate(chosen, 1)}
+        p = self.raster.getPlotItem()
+        n = len(chosen)
+        p.vb.bounds[1] = (0.5, n + 0.5) if n else None
+        step = -(-n // 12) or 1                  # about a dozen labels at most
+        p.getAxis("left").setTicks([[(r, str(i + 1)) for i, r in list(self._rows.items())[::step]]] if n else None)
+        if n:
+            p.setYRange(0.5, n + 0.5, padding=0)
+
+    def _event_rows(self, ev: A.Events) -> np.ndarray:
+        return np.array([self._rows.get(int(b), 0) for b in ev.block])
+
     def draw_current(self) -> None:
         i = self.page.index()
-        self.cur_band.setRegion((i + 0.5, i + 1.5))
+        row = self._rows.get(i)
+        self.cur_band.setVisible(row is not None)
+        if row is not None:
+            self.cur_band.setRegion((row - 0.5, row + 0.5))
         y = self._trace(i) if self.blocks else None
         if y is None:
             self.cur_item.setData(np.empty(0), np.empty(0))
@@ -826,8 +869,7 @@ class RawView(View):
             return
         on = self.page.onsets(i)
         if how == "notes":
-            sp.setTitle("Stimulus (from the notes)", size="9pt", color=self._fg())
-            sp.setLabel("left", "")
+            sp.setLabel("left", "Stimulus (notes)")
             if on is not None and len(on):
                 self.stim_onsets.setData(on, np.zeros(len(on)))
             return
@@ -836,8 +878,7 @@ class RawView(View):
             return
         fs = b["sample_rate"]
         self.stim_curve.setData(np.arange(len(y)) / fs, y)
-        sp.setTitle(f"Stimulus: {how}", size="9pt", color=self._fg())
-        label_axis(sp, "left", "", self.page.unit_of(how))
+        label_axis(sp, "left", how, self.page.unit_of(how))
         if on is not None and len(on):
             idx = np.clip(np.round(np.asarray(on) * fs).astype(int), 0, len(y) - 1)
             self.stim_onsets.setData(on, y[idx])
@@ -918,8 +959,8 @@ class RawView(View):
             if hl and u not in hl:
                 c.setAlpha(40)
             brushes.append(pg.mkBrush(c))
-            sizes.append(7 if u in hl else 4)
-        self.raster_dots.setData(ev.t, ev.block + 1, brush=brushes, size=sizes)
+            sizes.append(4 if u in hl else 2)
+        self.raster_dots.setData(ev.t, self._event_rows(ev), brush=brushes, size=sizes)
         for u, items in self._wave_items.items():
             for item in items:
                 item.setOpacity(1.0 if not hl or u in hl else 0.12)
@@ -1048,7 +1089,7 @@ class RawView(View):
         if ev is None:
             self.raster_dots.setData([], [])
             return
-        self.raster_dots.setData(ev.t, ev.block + 1, brush=[pg.mkBrush(unit_color(u)) for u in ev.unit])
+        self.raster_dots.setData(ev.t, self._event_rows(ev), brush=[pg.mkBrush(unit_color(u)) for u in ev.unit])
         sizes = np.abs(ev.amplitude)
         edges = np.histogram_bin_edges(sizes, bins=40) if len(sizes) else np.array([0.0, 1.0])
         all_isi = A.intervals_ms(ev)
@@ -1119,11 +1160,9 @@ class RawView(View):
         ev = self.events
         if ev is None or not len(ev.t):
             return
-        centres, rates = A.session_rate(ev, self.page.starts(), self.rate_bin.value())
-        if not len(centres):
+        edges, rates = A.block_rate(ev, len(self._rows), self._end, self.rate_bin.value())
+        if not len(edges):
             return
-        b = self.rate_bin.value()
-        edges = np.append(centres - b / 2, centres[-1] + b / 2)
         norm = self.norm_rate.isChecked()
         scale = (lambda r: r / r.max() if r.max() > 0 else r) if norm else (lambda r: r)
         p.setLabel("left", "fraction of the highest" if norm else "spikes/s")
@@ -1364,7 +1403,7 @@ class CompareView(View):
             self.redraw()
 
     def stimulus_channel_changed(self) -> None:
-        """Use the Stimulus channel picked at the top for the stimulus-triggered rate."""
+        """Use the Stimulus channel picked in the Blocks panel for the stimulus-triggered rate."""
         ch = self.page.stim_channel.currentData()
         i = self.trigger.findData(ch) if ch else 0
         if i >= 0:
@@ -1550,7 +1589,7 @@ class CompareView(View):
         groups = [(g, label, [k for k in blocks if k in triggers]) for g, (label, blocks) in enumerate(page.groups)]
         groups = [(g, label, blocks) for g, label, blocks in groups if blocks]
         self.psth_legend.clear()
-        if page.group.currentIndex() == 0 and len(groups) > 1:
+        if page.group_blocks() is None and len(groups) > 1:
             # all blocks, grouped by stimulus: one line each, to compare the responses
             n_trig = 0
             for g, label, blocks in groups:

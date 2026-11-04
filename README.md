@@ -48,6 +48,7 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - Moving windows: smoothing, RMS and envelope.
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.
 - **Analysis**:
+  - A Blocks panel beside every sub-tab: drag across blocks, or pick a page, to analyze just those; it also holds the stimulus and analyzed channels and Spread.
   - Spike Sorting: overlays and averages, with the stimulus below, with ± SD or SEM across trials; finding and sorting action potentials (point at a unit to highlight its spikes); raster, rate and ISI histograms.
   - Comparison: derivatives, PSTH and spike-triggered averages.
   - DataPad: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per block, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.

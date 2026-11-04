@@ -106,8 +106,8 @@ class DataPadView(View):
         self.source = QtWidgets.QComboBox()
         for label, key in SOURCES:
             self.source.addItem(label, key)
-        self.source.setToolTip("Blocks follow Blocks and Show (Spike Sorting tab and the top bar); the mean ± "
-                               "spread rows use Spread at the top (SD or SEM; SD if None)")
+        self.source.setToolTip("Blocks are the ones picked in the Blocks panel and the Spike Sorting tab; the "
+                               "mean ± spread rows use Spread in the Blocks panel (SD or SEM; SD if None)")
         f.addRow("From", self.source)
         btns = QtWidgets.QHBoxLayout()
         self.btn_add_rows = QtWidgets.QPushButton("Add rows")
@@ -182,7 +182,7 @@ class DataPadView(View):
         row = QtWidgets.QHBoxLayout()
         self.sx, self.sy = QtWidgets.QComboBox(), QtWidgets.QComboBox()
         for w in (self.sx, self.sy):
-            w.setMinimumContentsLength(18)
+            w.setMinimumContentsLength(10)
         row.addWidget(QtWidgets.QLabel("Y"))
         row.addWidget(self.sy)
         row.addWidget(QtWidgets.QLabel("against X"))

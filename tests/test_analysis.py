@@ -282,7 +282,7 @@ def test_raw_view_shows_rate_histogram_and_waveforms(app, win):
     raw.channel.setCurrentText("Ch2")
     ev = raw.find()
     assert ev is not None and len(ev.t) > 5
-    assert raw.rate_plot.getPlotItem().listDataItems()                # spikes/s across the session
+    assert raw.rate_plot.getPlotItem().listDataItems()                # spikes/s during a block
     assert raw.hist.getPlotItem().listDataItems()                     # AP sizes
     assert raw.wave_plot.getPlotItem().listDataItems()
 
@@ -387,10 +387,10 @@ def test_blocks_are_grouped_by_their_stimulus(app, win):
     ap.stim_channel.setCurrentIndex(ap.stim_channel.findData("Stim"))    # the same from the stimulus wire
     assert [blocks for _, blocks in ap.groups] == [[0, 1], [2, 3]]
     assert ap.groups[1][0].startswith("Pulse of 2 V")
-    ap.group.setCurrentIndex(2)                                      # just the 2 V blocks
+    ap.select_blocks([2, 3])                                         # just the 2 V blocks
     assert raw.chosen_or_none() == [2, 3]
     assert raw.blocks_item.getOriginalDataset()[1].shape[0] == 2
-    ap.group.setCurrentIndex(0)                                      # all blocks, then compare groups
+    ap.select_blocks([])                                             # all blocks, then compare groups
     raw.channel.setCurrentText("Ch2")
     raw.find()
     ap.tabs.setCurrentIndex(1)
@@ -433,7 +433,7 @@ def test_raw_view_shows_the_stimulus_groups(app, win):
     ap = win.analysis_page
     assert "2 different stimuli" in ap.group_note.text()
     assert len(ap.raw.group_avgs) == 2 and len(ap.raw.group_marks.data) == 4   # an average each; row marks
-    ap.group.setCurrentIndex(2)                                      # one group: just its blocks
+    ap.select_blocks([2, 3])                                         # one group: just its blocks
     assert ap.raw.chosen_or_none() == [2, 3] and ap.raw.group_avgs == []
 
 
@@ -455,7 +455,7 @@ def test_analysis_groups_are_the_named_pages(app, win):
     pump(app, 0.2)
     ap = win.analysis_page
     assert [(n, b) for n, b in ap.groups] == [("Weak", [0, 1]), ("Pulse of 2 V, 0.9 ms", [2]), ("Odd one", [3])]
-    assert ap.group.itemText(1) == "Weak (2 blocks)"
+    assert ap.blocks_panel.tree.topLevelItem(0).text(0) == "Weak  (2)"
 
 
 # ---------------------------------------------------------------- a chosen stimulus channel: any waveform
@@ -733,7 +733,7 @@ def test_spike_sorting_shows_the_stimulus_and_leaves_it_out_of_the_channels(app,
     assert len(raw.stim_onsets.data) >= 1
     ap.stim_channel.setCurrentIndex(0)                               # None: the notes
     assert "Stim" in [raw.channel.itemText(i) for i in range(raw.channel.count())]
-    assert "notes" in raw.stim_plot.getPlotItem().titleLabel.text
+    assert "notes" in raw.stim_plot.getPlotItem().getAxis("left").labelText
 
 
 def test_pointing_at_a_unit_highlights_its_events(app, win):
@@ -831,4 +831,79 @@ def test_datapad_drag_picks_a_window_and_traces_stay_sharp(app, win):
     pump(app, 0.3)
     ch2 = pad.traces["Ch2"]
     shown = len(ch2.xData) if ch2.xData is not None else 0
-    assert shown > 800                                              # drawn at the view's width, not ~50 px
+    assert shown > 400                                              # drawn at the view's width, not ~50 px
+
+
+def _spike_sorting(app, win):
+    stim_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    ap.raw.channel.setCurrentText("Ch2")
+    return ap, ap.raw
+
+
+def test_the_blocks_panel_picks_the_blocks_on_every_sub_tab(app, win):
+    ap, raw = _spike_sorting(app, win)
+    assert ap.blocks_panel.isVisible() and ap.blocks_panel.title.text().startswith("<b>Blocks</b>")
+    ap.tabs.setCurrentIndex(2)
+    pump(app, 0.05)
+    assert ap.blocks_panel.isVisible()
+    ap.tabs.setCurrentIndex(0)
+    tree = ap.blocks_panel.tree
+    for item in ap.blocks_panel.items():                             # as a drag across two blocks would
+        data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        item.setSelected(data[0] == "block" and data[1] in (0, 2))
+    pump(app, 0.3)
+    assert ap.picked == [0, 2] and raw.chosen_or_none() == [0, 2]
+    assert tree.selectedItems()
+    ap.source_changed()                                              # a refill keeps the selection
+    assert ap.blocks_panel.selected_blocks() == [0, 2]
+    ap.blocks_panel.btn_all.click()
+    pump(app, 0.05)
+    assert ap.picked == [] and not tree.selectedItems() and len(raw.chosen_or_none()) == len(ap.blocks)
+
+
+def test_the_raster_has_a_row_for_each_chosen_block(app, win):
+    ap, raw = _spike_sorting(app, win)
+    ap.select_blocks([0, 2])
+    ev = raw.find()
+    vb = raw.raster.getPlotItem().vb
+    assert vb.viewRange()[1] == pytest.approx([0.5, 2.5])
+    assert set(raw.raster_dots.data["y"]) <= {1, 2} and raw.raster_dots.data["size"].max() == 2
+    assert np.array_equal(raw.raster_dots.data["y"], np.where(ev.block == 0, 1, 2))
+    labels = raw.raster.getPlotItem().getAxis("left")._tickLevels[0]
+    assert labels == [(1, "1"), (2, "3")]                            # the rows say which blocks
+    ap.current.setValue(2)                                           # not chosen: no highlighted row
+    assert not raw.cur_band.isVisible()
+    ap.current.setValue(3)
+    assert raw.cur_band.isVisible() and raw.cur_band.getRegion() == pytest.approx((1.5, 2.5))
+
+
+def test_the_central_plots_share_one_time_axis_that_stops_at_the_data(app, win):
+    ap, raw = _spike_sorting(app, win)
+    raw.find()
+    pump(app, 0.05)
+    plots = [raw.overlay, raw.stim_plot, raw.raster, raw.rate_plot]
+    x = lambda pw: pw.getPlotItem().vb.viewRange()[0]
+    end = raw._end
+    for pw in plots:
+        assert x(pw) == pytest.approx([0, end], abs=1e-6)
+    raw.rate_plot.getPlotItem().vb.zoom_time(0.5, end / 2)           # zoom one: they all follow
+    pump(app, 0.05)
+    assert x(raw.overlay)[1] - x(raw.overlay)[0] == pytest.approx(end / 2, rel=0.01)
+    for pw in plots:
+        assert x(pw) == pytest.approx(x(raw.overlay))
+    raw.raster.getPlotItem().vb.zoom_time(100, end / 2)              # out: never past the data
+    pump(app, 0.05)
+    for pw in plots:
+        assert x(pw) == pytest.approx([0, end], abs=1e-6)
+
+
+def test_spikes_per_second_during_a_block():
+    ev = A.Events(block=np.array([0, 0, 1, 1]), t=np.array([0.1, 0.2, 0.1, 1.2]), unit=np.zeros(4, int),
+                  amplitude=np.ones(4), waves=np.empty((4, 0)), wave_t_ms=np.empty(0), level=1.0, duration_s=3.0)
+    edges, rates = A.block_rate(ev, 2, 1.5, 1.0)
+    assert edges.tolist() == [0, 1, 1.5]                             # the last bin stops at the data
+    assert rates[None].tolist() == [1.5, 1.0]                        # the mean of the 2 blocks

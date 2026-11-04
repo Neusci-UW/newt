@@ -32,12 +32,16 @@ class WheelViewBox(pg.ViewBox):
         super().__init__(*a, **kw)
         self._zoom_history: list = []
         self.on_drag_select = None              # f(x0, x1, finished): plain left-drag selects time
+        self.bounds = [None, None]              # (lo, hi) per axis, to use instead of the data's edges
 
     def updateViewRange(self, forceX=False, forceY=False):
         if self.clamp_to_data:
             lim = self.state["limits"]
             lim["xLimits"], lim["yLimits"] = [None, None], [None, None]
             for axis, key in ((0, "xLimits"), (1, "yLimits")):
+                if self.bounds[axis] is not None:
+                    lim[key] = list(self.bounds[axis])
+                    continue
                 if self.linkedView(axis) is not None:   # it follows the plot it's linked to
                     continue
                 b = self._data_limits(axis)
@@ -46,6 +50,20 @@ class WheelViewBox(pg.ViewBox):
                 pad = (b[1] - b[0]) * self.limit_pad[axis]
                 lim[key] = [b[0] - pad, b[1] + pad]
         super().updateViewRange(forceX, forceY)
+
+    def linkedViewChanged(self, view, axis):
+        """Linked plots show the same times, whatever their widths. (pyqtgraph lines up
+        their pixels, so plots of different widths would show different times.)"""
+        if axis != pg.ViewBox.XAxis or self.linksBlocked or view is None:
+            super().linkedViewChanged(view, axis)
+            return
+        lo, hi = view.viewRange()[0]
+        view.blockLink(True)
+        try:
+            self.enableAutoRange(pg.ViewBox.XAxis, False)
+            self.setXRange(lo, hi, padding=0)
+        finally:
+            view.blockLink(False)
 
     def _data_limits(self, axis: int) -> tuple[float, float] | None:
         """Where the data starts and ends on an axis. (childrenBounds pads by a pixel or
@@ -63,6 +81,11 @@ class WheelViewBox(pg.ViewBox):
             if np.isfinite(b[0]) and np.isfinite(b[1]):
                 lo, hi = min(lo, b[0]), max(hi, b[1])
         return (float(lo), float(hi)) if hi > lo else None
+
+    def _nothing_to_see(self, axis: int) -> bool:
+        """True if this axis has no data, so there's nothing to zoom out to."""
+        return (self.clamp_to_data and self.bounds[axis] is None and self.linkedView(axis) is None
+                and self._data_limits(axis) is None)
 
     def mouseDragEvent(self, ev, axis=None):
         if (axis is None and self.on_drag_select is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
@@ -120,7 +143,10 @@ class WheelViewBox(pg.ViewBox):
         mods = ev.modifiers()
         # Qt reports Cmd as Control on macOS.
         if axis == 1 or (axis is None and mods & QtCore.Qt.KeyboardModifier.ControlModifier):
-            super().wheelEvent(ev, axis=1)
+            if ev.delta() < 0 and self._nothing_to_see(1):
+                ev.accept()
+            else:
+                super().wheelEvent(ev, axis=1)
             return
         # macOS turns Shift+wheel into a sideways scroll, so check for both.
         if mods & QtCore.Qt.KeyboardModifier.ShiftModifier or ev.orientation() == QtCore.Qt.Orientation.Horizontal:
@@ -133,6 +159,8 @@ class WheelViewBox(pg.ViewBox):
 
     def zoom_time(self, s: float, x: float | None = None) -> None:
         """Scale the x range by s around x (the middle when the wheel is over an axis)."""
+        if s > 1 and self._nothing_to_see(0):
+            return
         lo, hi = self.viewRange()[0]
         x = (lo + hi) / 2 if x is None else x
         self.setXRange(x - (x - lo) * s, x + (hi - x) * s, padding=0)

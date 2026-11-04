@@ -1,5 +1,6 @@
-"""The Acquisition tab's Blocks panel: the stimulus channel, Reset pages, and a tree of
-Live (or Back to Live) and the session's blocks on their pages.
+"""The Blocks panel: the stimulus channel, Reset pages, and a tree of Live (or Back to
+Live) and the session's blocks on their pages. Acquisition has one to look at blocks;
+Analysis has one to pick the blocks to analyze (`for_analysis`), with its settings.
 
 The panel only shows things and reports what's clicked; the main window decides what
 the pages are and what clicking does. Clicks, selections and menu choices are acted on
@@ -24,10 +25,11 @@ class BlocksPanel(QtWidgets.QWidget):
     stim_channel_picked = QtCore.Signal(str)     # "" for None
     reset_requested = QtCore.Signal()
 
-    def __init__(self):
+    def __init__(self, for_analysis: bool = False):
         super().__init__()
+        self.for_analysis = for_analysis
         self.setObjectName("blocksPanel")
-        self.setFixedWidth(230)
+        self.setFixedWidth(210 if for_analysis else 230)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
@@ -44,6 +46,9 @@ class BlocksPanel(QtWidgets.QWidget):
                                   "pages again from the stimulus channel")
         self.btn_reset.clicked.connect(lambda: self.later(self.reset_requested.emit))
         lay.addWidget(self.btn_reset)
+        self.settings = QtWidgets.QFormLayout()  # what a page adds with add_setting
+        self.settings.setContentsMargins(0, 0, 0, 0)
+        lay.addLayout(self.settings)
         lay.addSpacing(6)
         self.title = QtWidgets.QLabel("<b>Blocks</b>")
         lay.addWidget(self.title)
@@ -59,11 +64,18 @@ class BlocksPanel(QtWidgets.QWidget):
         self.tree.itemSelectionChanged.connect(
             lambda: self.later(lambda picked=self.selected_blocks(): self.selection.emit(picked)))
         lay.addWidget(self.tree, 1)
+        self.btn_all = QtWidgets.QPushButton("Analyze all blocks")
+        self.btn_all.setToolTip("Clear the selection: every block is analyzed")
+        self.btn_all.setVisible(for_analysis)
+        lay.addWidget(self.btn_all)
         self._pages: list[tuple[str, list[int]]] = []
         self._home = lambda i: None
         self._queue: list = []
         self._timer = QtCore.QTimer(self, singleShot=True, interval=0)
         self._timer.timeout.connect(self._run)
+
+    def add_setting(self, label: str, widget: QtWidgets.QWidget) -> None:
+        self.settings.addRow(label, widget)
 
     # -- acting once Qt is done with the event ---------------------------------------------
     def later(self, fn) -> None:
@@ -119,8 +131,11 @@ class BlocksPanel(QtWidgets.QWidget):
                 stem, dur = labels.get(i, (f"block {i + 1}", "?"))
                 item = QtWidgets.QTreeWidgetItem([f"{name} {k}   ({stem})"])
                 item.setData(0, ROLE, ("block", i))
-                item.setToolTip(0, f"{stem}, {dur}: click to look at it; Cmd/Shift-click several to overlay "
-                                   "them; right-click to move it to another page")
+                item.setToolTip(0, f"{stem}, {dur}: click or drag across blocks to analyze just those; "
+                                   "Cmd/Shift-click to add more; right-click to move it to another page"
+                                if self.for_analysis else
+                                f"{stem}, {dur}: click to look at it; Cmd/Shift-click several to overlay "
+                                "them; right-click to move it to another page")
                 head.addChild(item)
             head.setExpanded(True)
             n_blocks += len(blocks)
@@ -128,7 +143,8 @@ class BlocksPanel(QtWidgets.QWidget):
         self.btn_reset.setEnabled(can_reset)
         tree.blockSignals(False)
         tree.setEnabled(not busy)
-        tree.setToolTip("Stop recording to look at other blocks" if busy else
+        tree.setToolTip("Click or drag across blocks, or pick a page, to analyze just those" if self.for_analysis
+                        else "Stop recording to look at other blocks" if busy else
                         "Click a block to look at it (this stops acquiring). Live goes back, and Record "
                         "carries on adding to the same session")
 
@@ -160,6 +176,14 @@ class BlocksPanel(QtWidgets.QWidget):
             if isinstance(data, tuple) and data[0] == "block":
                 item.setSelected(data[1] in overlay or (not overlay and data == want))
         tree.blockSignals(False)
+
+    def select(self, blocks: list[int]) -> None:
+        """Select just these blocks, without reporting it."""
+        self.tree.blockSignals(True)
+        for item in self.items():
+            data = item.data(0, ROLE)
+            item.setSelected(isinstance(data, tuple) and data[0] == "block" and data[1] in blocks)
+        self.tree.blockSignals(False)
 
     def selected_blocks(self) -> list[int]:
         """The blocks selected; a selected page counts as all its blocks."""

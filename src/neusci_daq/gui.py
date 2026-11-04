@@ -74,6 +74,9 @@ LIVE, REVIEW = "live", "review"
 _SI_BASE = {"V", "A", "s", "Hz", "Ω", "ohm", "N", "Pa", "W", "m", "g", "T"}
 
 
+WINDOW_MAX = 600.0
+
+
 class WindowBox(QtWidgets.QDoubleSpinBox):
     """Window length in seconds, shown as "10 s" rather than "10.00 s"."""
 
@@ -215,11 +218,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rate_box.setMinimumContentsLength(8)
         self.rate_box.lineEdit().editingFinished.connect(self._rate_entered)
         self.rate_box.activated.connect(lambda *_: self._rate_entered())
-        self.window_box = WindowBox(minimum=0.01, maximum=600, value=self.cfg.window_s,
+        self.window_box = WindowBox(minimum=0.01, maximum=WINDOW_MAX, value=self.cfg.window_s,
                                     suffix=" s", decimals=4)    # 4: wheel zoom at 0.01 s needs 0.0135
         self.window_box.setToolTip("How many seconds the plots show")
         self.window_box.setMinimumWidth(76)
         self.window_box.valueChanged.connect(self._window_changed)
+        self._window_wanted = None               # Window before the data's length cut it short
+        self._fitting_window = False
         # Only usable while recording, because that's when a comment can be saved.
         self.comment_edit = _CommentEdit()
         self.comment_edit.setAccessibleName("Comment")
@@ -1511,6 +1516,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._live_comments_dirty = self._live_comments_dirty or self.session_saved
         self._build_live_plots()
         self._set_mode(LIVE)
+        self._fit_window()
         self.status.setText("")
         self._fill_recorded()
         self.analysis_page.source_changed()
@@ -2076,6 +2082,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._curves_updated()
         self._draw_overlay()
         self.refresh_comments()
+        self._fit_window()
         self._update_scroll_range()
         self._update_wiring_label()
         self.plots[0].setXRange(0, min(self.window_box.value(), max(blk["duration_s"], 1e-3)), padding=0)
@@ -2182,7 +2189,34 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._show_stopped(start)
 
+    def _data_span(self) -> float | None:
+        """How many seconds of data there are to show, or None if Window isn't limited:
+        while acquiring, or with no trace."""
+        if self.mode == REVIEW:
+            return self.review_block["duration_s"] if self.review_block is not None else None
+        buf_t = self.buf_t
+        return None if self.btn_run.isChecked() or len(buf_t) < 2 else float(buf_t[-1] - buf_t[0])
+
+    def _fit_window(self) -> None:
+        """Window is what the plots show, so it can't be longer than the data. When the
+        data cuts it short, the old value comes back for the next run."""
+        wb, span = self.window_box, self._data_span()
+        self._fitting_window = True
+        if span is None:
+            wb.setMaximum(WINDOW_MAX)
+            if self._window_wanted is not None:
+                wb.setValue(self._window_wanted)
+                self._window_wanted = None
+        else:
+            limit = max(wb.minimum(), np.floor(span * 1e4) / 1e4)
+            if wb.value() > limit and self._window_wanted is None:
+                self._window_wanted = wb.value()
+            wb.setMaximum(limit)
+        self._fitting_window = False
+
     def _window_changed(self):
+        if not self._fitting_window:
+            self._window_wanted = None           # you picked it: that's the one to keep
         if self.mode == REVIEW:
             self._update_scroll_range()
             self._scrolled(self.scroll.value())
@@ -2205,6 +2239,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # No trace (e.g. a rate change cleared it): show Window from 0 s,
             # where the next run starts, so zooming still visibly does something.
             self.plots[0].setXRange(0, win, padding=0)
+            if not self._fitting_window:
+                self._fit_window()
             return
         x0, x1 = buf_t[0] - self._axis_zero, buf_t[-1] - self._axis_zero
         if start is None:
@@ -2233,6 +2269,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.critical(self, "Could not start acquisition", repr(e))
                 return
             self.ring.clear()
+            self._fit_window()
             self._alloc_buffers()                # back to Window's size, if stopped zooming grew it
             self._recompute_calc_ring()          # empty, filters reset
             self._clear_markers()
@@ -2253,6 +2290,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.timer.stop()
             self.btn_run.setText("Start")
             self.btn_rec.setEnabled(False)
+            self._fit_window()
 
     def _toggle_rec(self, on: bool):
         if on:

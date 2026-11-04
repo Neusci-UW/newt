@@ -359,19 +359,17 @@ def rate_trace(times_s: np.ndarray, duration_s: float, fs: float, sigma_ms: floa
     return np.convolve(train, k / k.sum(), mode="same")
 
 
-def session_rate(events: "Events", starts_s: dict[int, float], bin_s: float, units=None):
-    """Spikes/s in bins of bin_s across the whole session (blocks one after another,
-    block b starting at starts_s[b]). Returns (bin centres, {unit or None for all: rate})."""
-    if not len(events.t) or not starts_s:
+def block_rate(events: "Events", n_blocks: int, end_s: float, bin_s: float):
+    """Spikes/s during a block, from 0 to end_s in bins of bin_s (the last may be shorter),
+    averaged over n_blocks blocks. Returns (bin edges, {unit or None for all: rate})."""
+    if not len(events.t) or n_blocks < 1 or end_s <= 0:
         return np.empty(0), {}
-    t = np.array([starts_s[b] for b in events.block]) + events.t
-    end = max(starts_s.values()) + events.duration_s / max(1, len(starts_s))
-    edges = np.arange(0, end + bin_s, bin_s)
-    centres = edges[:-1] + bin_s / 2
-    out = {None: np.histogram(t, edges)[0] / bin_s}
-    for u in (range(events.n_units) if units is None else units):
-        out[u] = np.histogram(t[events.unit == u], edges)[0] / bin_s
-    return centres, out
+    edges = np.append(np.arange(0, end_s, bin_s), end_s)
+    per_bin = np.diff(edges) * n_blocks
+    out = {None: np.histogram(events.t, edges)[0] / per_bin}
+    for u in range(events.n_units):
+        out[u] = np.histogram(events.t[events.unit == u], edges)[0] / per_bin
+    return edges, out
 
 
 def stimulus_times(y: np.ndarray, fs: float) -> np.ndarray:

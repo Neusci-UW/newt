@@ -149,7 +149,7 @@ QFrame#commentPopup {{ background: {t['panel']}; border: 1px solid {t['field_bor
 QTabBar {{ background: {t['tabbar']}; }}
 QTabBar::tab {{
     background: transparent; color: {t['muted']}; padding: 7px 16px; margin: 4px 2px 0 2px;
-    border: none; border-bottom: 2px solid transparent;
+    border: 1px solid #ffffff; border-bottom: 2px solid transparent;
     border-top-left-radius: 6px; border-top-right-radius: 6px;
 }}
 QTabBar::tab:selected {{ background: {t['tab_on']}; color: {t['ink']}; font-weight: 600;
@@ -159,9 +159,9 @@ QWidget#paneHead {{ background: {t['tabbar']}; border-bottom: 1px solid {t['line
 QSplitter::handle {{ background: {t['tab_on']}; }}
 QWidget#subHead {{ background: {t['ground']}; border-bottom: 1px solid {t['line']}; }}
 QTabBar#subTabs {{ background: transparent; }}
-QTabBar#subTabs::tab {{ padding: 4px 14px; margin: 5px 2px; border: none; border-radius: 6px; }}
+QTabBar#subTabs::tab {{ padding: 4px 14px; margin: 5px 2px; border: 1px solid #ffffff; border-radius: 6px; }}
 QTabBar#subTabs::tab:selected {{ background: {t['button']}; color: {t['ink']}; font-weight: 600;
-    border: none; }}
+    border: 1px solid #ffffff; }}
 QWidget#stimChip {{ background: {t['button']}; border-radius: 6px; }}
 QWidget#stimChip QPushButton {{ background: {t['button_hover']}; padding: 3px 9px; min-height: 16px; }}
 QWidget#stimChip QPushButton:hover {{ background: {t['button_down']}; }}

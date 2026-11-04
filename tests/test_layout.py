@@ -471,6 +471,35 @@ def test_wheel_zooms_time_and_cmd_wheel_zooms_voltage(app, win):
     assert not vb.autoRangeEnabled()[1]
 
 
+def test_window_can_never_be_longer_than_the_data(app, win):
+    win.window_box.setValue(5.0)
+    win.show()
+    win.btn_run.setChecked(True)
+    pump(app, 0.3)
+    win.btn_run.setChecked(False)
+    pump(app, 0.05)
+    wb, vb = win.window_box, win.plots[0].vb
+    assert wb.value() == wb.maximum() < 1.0                  # only this much was recorded
+    wb.setValue(wb.maximum() + 10)
+    x0, x1 = vb.viewRange()[0]
+    assert x1 - x0 == pytest.approx(wb.value(), rel=0.01)    # the box and the chart agree
+    vb.wheelEvent(_Wheel(vb, delta=-120))                    # zooming out stops at the data too
+    assert wb.value() == wb.maximum()
+    win.btn_run.setChecked(True)
+    pump(app, 0.05)
+    assert wb.value() == 5.0 and wb.maximum() == 600         # the next run gets its Window back
+    win.btn_run.setChecked(False)
+
+
+def test_a_plot_with_no_data_has_nothing_to_zoom_out_to(app):
+    from neusci_daq.plotzoom import plot_widget
+    vb = plot_widget().getPlotItem().vb
+    before = vb.viewRange()
+    vb.zoom_time(2.0)
+    vb.wheelEvent(_Wheel(vb, delta=-120, cmd=True))
+    assert vb.viewRange() == before
+
+
 def test_wheel_in_review_keeps_the_time_under_the_mouse(app, win):
     win.window_box.setValue(0.5)
     win.btn_run.setChecked(True)

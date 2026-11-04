@@ -15,6 +15,7 @@ from . import config as cfgmod
 from . import simulation as sim
 from . import style, theme
 from .stimwindow import UnitSpinBox, _same_kind, parse_quantity
+from .viewkit import scroll_column
 
 # Cells table: (heading, Cell field, unit, tooltip)
 _CELL_COLUMNS = (
@@ -87,7 +88,7 @@ class SimPage(QtWidgets.QWidget):
 
         box = QtWidgets.QGroupBox("⚡ Stimulator → network: which cells the stimulus drives")
         v = QtWidgets.QVBoxLayout(box)
-        hint = QtWidgets.QLabel("Whatever the Stimulator or Trials tab sends is injected as a current into the "
+        hint = QtWidgets.QLabel("Whatever the Stimulator or Trials page sends is injected as a current into the "
                                 "ticked cells. Strength: the depolarization from a 1 V, 1 ms pulse.")
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -146,7 +147,10 @@ class SimPage(QtWidgets.QWidget):
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
         left.addWidget(self.message)
-        outer.addLayout(left, 3)
+        left_box = QtWidgets.QWidget()
+        left_box.setLayout(left)
+        left.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll_column(left_box), 3)
 
         # ---- right: a picture of the network ---------------------------------------
         right = QtWidgets.QVBoxLayout()
@@ -249,7 +253,7 @@ class SimPage(QtWidgets.QWidget):
                     item = _readonly("")
                 self.recs.setItem(r, col, item)
             if monitor:
-                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Stimulator tab › Record on): "
+                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Stimulator › Record on): "
                                                       "it records the stimulus")
                 self.recs.item(r, 2).setText("records the stimulus")
 

@@ -37,7 +37,7 @@ from .datapadview import DataPadView
 from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
-from .viewkit import View, label_axis, style_plot, unit_color, with_unit
+from .viewkit import View, label_axis, scroll_column, style_plot, unit_color, with_unit
 
 _SHOW = (("Blocks and average", "both"), ("Blocks", "blocks"), ("Average", "average"))
 MAX_WAVES = 150                    # per unit in the waveform plot
@@ -59,14 +59,13 @@ class AnalysisPage(QtWidgets.QWidget):
         lay.setSpacing(8)
 
         top = QtWidgets.QHBoxLayout()
-        self.source = QtWidgets.QLabel()
-        top.addWidget(self.source)
-        top.addStretch(1)
+        self.source = _flexible_label()
+        top.addWidget(self.source, 1)
         top.addWidget(QtWidgets.QLabel("Block"))
         self.btn_prev = QtWidgets.QToolButton(text="◀", autoRaise=True)
         self.btn_prev.setToolTip("Previous block (←)")
         self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, minimum=1, maximum=1)
-        self.slider.setMinimumWidth(260)
+        self.slider.setMinimumWidth(120)
         self.slider.setToolTip("Drag to flip through the blocks; ← and → step one at a time")
         self.btn_next = QtWidgets.QToolButton(text="▶", autoRaise=True)
         self.btn_next.setToolTip("Next block (→)")
@@ -84,9 +83,9 @@ class AnalysisPage(QtWidgets.QWidget):
                                      "with the same stimulus are grouped. With None, the notes the app made as "
                                      "it sent each stimulus are used. Remembered for this session")
         self.group = QtWidgets.QComboBox()
-        self.group.setMinimumContentsLength(28)
+        self.group.setMinimumContentsLength(16)
         self.group.setToolTip("Look at just this group of blocks, on every sub-tab")
-        self.group_note = QtWidgets.QLabel()
+        self.group_note = _flexible_label()
         grp.addWidget(QtWidgets.QLabel("Stimulus channel"))
         grp.addWidget(self.stim_channel)
         grp.addWidget(QtWidgets.QLabel("Show"))
@@ -418,6 +417,15 @@ class AnalysisPage(QtWidgets.QWidget):
         self.datapad.apply_theme(mode)
 
 
+def _flexible_label() -> QtWidgets.QLabel:
+    """A message that wraps to whatever width is left, rather than setting the window's
+    minimum width (one long message made the window 1,150 px wide)."""
+    lbl = QtWidgets.QLabel()
+    lbl.setWordWrap(True)
+    lbl.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
+    return lbl
+
+
 class RawView(View):
     def __init__(self, page: AnalysisPage):
         super().__init__(page)
@@ -529,7 +537,7 @@ class RawView(View):
         exports.addWidget(self.btn_export)
         exports.addWidget(self.btn_export_avg)
         left.addLayout(exports)
-        outer.addWidget(side)
+        outer.addWidget(scroll_column(side))
 
         # ---- middle: the blocks, the raster, the rate ----------------------------------
         mid = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -1283,7 +1291,7 @@ class CompareView(View):
         self.message.setWordWrap(True)
         left.addWidget(self.message)
         left.addStretch(1)
-        outer.addWidget(side)
+        outer.addWidget(scroll_column(side))
 
         right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.traces_box = QtWidgets.QWidget()

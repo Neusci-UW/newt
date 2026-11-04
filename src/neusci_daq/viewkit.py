@@ -3,11 +3,28 @@ units, and a base class with the page, the theme and a message line."""
 from __future__ import annotations
 
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import config as cfgmod
 from . import style, theme
 from .units import best_prefix
+
+
+def scroll_column(column: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
+    """`column` in a scroll area that scrolls up and down only, so a tall settings
+    panel scrolls on a short screen instead of making the window taller than it."""
+    sa = QtWidgets.QScrollArea()
+    sa.setWidget(column)
+    sa.setWidgetResizable(True)
+    sa.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+    sa.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    bar = sa.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent)
+    widest = column.maximumWidth()
+    sa.setMinimumWidth(min(column.minimumSizeHint().width(), widest) + bar)   # room for the bar
+    if widest < 16777215:
+        sa.setMaximumWidth(widest + bar)
+    sa.setSizePolicy(column.sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Policy.Ignored)
+    return sa
 
 
 def unit_color(u: int) -> str:

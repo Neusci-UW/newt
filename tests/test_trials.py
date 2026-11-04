@@ -249,7 +249,7 @@ def _run_to_end(app, tp, limit=20):
 
 def test_trials_tab_replaces_the_placeholder(win):
     assert win.tabs.pages["trials"] is win.trials_page
-    assert win.tabs.panes[0].bar.tabText(2) == "Trials"
+    assert win.tabs.panes[0].sub_bar.tabText(2) == "Trials"      # a sub-page of Acquisition
 
 
 def test_run_needs_a_recorded_stimulus_and_starts_acquiring_itself(app, win):

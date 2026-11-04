@@ -27,7 +27,7 @@ from . import style, theme
 from .plotzoom import MultiAxis, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
-from .viewkit import View, label_axis, style_plot, unit_color
+from .viewkit import View, label_axis, scroll_column, style_plot, unit_color
 
 SOURCES = (("The highlighted block", "current"), ("Each chosen block", "blocks"),
            ("Each stimulus group's average trace", "avg"),
@@ -132,7 +132,7 @@ class DataPadView(View):
         self.message.setWordWrap(True)
         left.addWidget(self.message)
         left.addStretch(1)
-        outer.addWidget(side)
+        outer.addWidget(scroll_column(side))
 
         right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         top = QtWidgets.QWidget()

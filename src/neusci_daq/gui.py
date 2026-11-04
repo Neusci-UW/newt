@@ -403,12 +403,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # What the fake recording contains: only with the simulated backend.
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
         placeholder = lambda title, text: self._placeholder(title, text)
+        # Record, Stimulator and Trials are sub-pages of Acquisition. Either half of
+        # a split can show any page, two of Acquisition's included.
         self.tabs = TabArea([
-            ("acq", "Acquisition", central),
+            ("acq", "Record", central),
             ("stim", "Stimulator", self.stim_page),
             ("trials", "Trials", self.trials_page),
             ("analysis", "Analysis", self.analysis_page),
-        ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else []))
+        ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else []), groups=[
+            ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
+            ("analysis", "Analysis", ["analysis"]),
+            ("sim", "Simulation", ["sim"]),
+        ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
 
@@ -993,7 +999,7 @@ class MainWindow(QtWidgets.QMainWindow):
         on = self.repeating or busy or protocol
         if protocol:
             self.stim_chip_text.setText(self.trials_page.chip_text())
-            self.stim_chip.setToolTip("A trial protocol is running (Trials tab). Stop ends it.")
+            self.stim_chip.setToolTip("A trial protocol is running (Acquisition › Trials). Stop ends it.")
         elif on:
             self.stim_chip_text.setText("Stimulating")      # the interval is in the tooltip
             self.stim_chip.setToolTip(f"Repeating every {self.stim_repeat_s:g} s" if self.repeating
@@ -2421,7 +2427,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
         if self.trials_page.running:
-            self._stim_message("A trial protocol is running (Trials tab); stop it first.", error=True)
+            self._stim_message("A trial protocol is running (Acquisition › Trials); stop it first.", error=True)
             return False
         try:
             wave = self.stimulus.waveform(self.cfg.stim_rate)
@@ -2460,7 +2466,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_repeat(self, on: bool) -> None:
         if on and hasattr(self, "trials_page") and self.trials_page.running:
-            self._stim_message("A trial protocol is running (Trials tab); stop it first.", error=True)
+            self._stim_message("A trial protocol is running (Acquisition › Trials); stop it first.", error=True)
             on = False
         if on and not self.repeating:
             self.repeating = True          # set first, so the chip shows "every N s"

@@ -16,10 +16,64 @@ def shown(w):
 
 
 # ---------------------------------------------------------------- tabs and split
-def test_starts_on_acquisition_with_four_tabs(win):
+def tab_texts(bar):
+    return [bar.tabText(i) for i in range(bar.count())]
+
+
+def test_starts_on_acquisition_record_with_sub_pages(win):
     assert shown(win) == ["acq"]
-    assert [win.tabs.panes[0].bar.tabText(i) for i in range(4)] == \
-        ["Acquisition", "Stimulator", "Trials", "Analysis"]
+    pane = win.tabs.panes[0]
+    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "Simulation"]
+    assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Trials"]
+    assert pane.sub_bar.currentIndex() == 0 and not pane.sub_head.isHidden()
+
+
+def test_sub_page_bar_only_under_tabs_that_have_sub_pages(win):
+    pane = win.tabs.panes[0]
+    win.tabs.pick_group(0, "analysis")
+    assert shown(win) == ["analysis"] and pane.sub_head.isHidden()
+    assert pane.bar.currentIndex() == 1
+    win.tabs.pick_group(0, "acquisition")
+    assert shown(win) == ["acq"] and not pane.sub_head.isHidden()
+
+
+def test_a_tab_comes_back_to_the_sub_page_last_used(win):
+    win.tabs.pick(0, "trials")
+    win.tabs.pick_group(0, "analysis")
+    win.tabs.pick_group(0, "acquisition")
+    assert shown(win) == ["trials"]
+    assert win.tabs.panes[0].sub_bar.currentIndex() == 2
+
+
+def test_clicking_the_sub_page_bar_picks_the_page(win):
+    pane = win.tabs.panes[0]
+    pane.sub_bar.tabBarClicked.emit(1)
+    assert shown(win) == ["stim"] and pane.bar.currentIndex() == 0
+
+
+def test_any_page_can_go_in_either_half(win):
+    """Two sub-pages of Acquisition side by side, or a sub-page beside another tab."""
+    win.tabs.set_layout(SIDE)
+    for left, right in (("acq", "stim"), ("trials", "acq"), ("stim", "analysis"), ("analysis", "trials"),
+                        ("sim", "stim"), ("acq", "sim")):
+        if win.tabs.shown[1] == left:                        # move it out of the way first,
+            spare = next(p for p in win.tabs.ids if p not in (left, right, win.tabs.shown[0]))
+            win.tabs.pick(1, spare)                          # or picking it would un-split
+        win.tabs.pick(0, left)
+        win.tabs.pick(1, right)
+        assert shown(win) == [left, right], (left, right)
+        for pane, pid in zip(win.tabs.panes, (left, right)):
+            assert pane.page_id == pid and win.tabs.pages[pid].isVisibleTo(pane)
+
+
+def test_picking_a_tab_in_a_split_avoids_the_page_the_other_half_shows(win):
+    win.tabs.set_layout(SIDE)                                # Record | Stimulator
+    win.tabs.pick_group(1, "analysis")                       # Record | Analysis
+    win.tabs.pick_group(1, "acquisition")                    # back: Stimulator, not Record again
+    assert shown(win) == ["acq", "stim"] and win.tabs.layout_mode == SIDE
+    win.tabs.pick_group(0, "analysis")
+    win.tabs.pick_group(1, "analysis")                       # only one page: shows it full screen
+    assert win.tabs.layout_mode == ONE and shown(win) == ["analysis"]
 
 
 def test_tab_bars_never_show_scroll_arrows(app, win):
@@ -610,6 +664,8 @@ def test_zoomed_out_traces_average_without_shimmer(app):
     assert yp.max() > 3                                      # min/max keeps the extremes
     TraceCurve.mode = "mean"
     pw.close()
+    pw.deleteLater()                                         # not left to the garbage collector,
+    pump(app, 0.05)                                          # which crashes pyqtgraph later
 
 
 def test_zoomed_out_trace_mode_is_a_remembered_menu_choice(app, win, tmp_path):
@@ -621,6 +677,8 @@ def test_zoomed_out_trace_mode_is_a_remembered_menu_choice(app, win, tmp_path):
     w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)
     assert w2.act_trace_mode["peak"].isChecked()
     w2.close()
+    w2.deleteLater()
+    pump(app, 0.05)
     win.set_trace_mode("mean")
 
 
@@ -778,3 +836,28 @@ def test_charts_stop_at_the_edges_of_their_data(app):
     assert other.getPlotItem().vb.viewRange()[0] == pytest.approx([1.2, 2.8], abs=0.05)
     other.close()
     pw.close()
+
+
+@pytest.mark.parametrize("tab", ["analysis", "sim"])
+def test_tall_tabs_fit_a_short_laptop_screen(app, win, tab):
+    """A 1280 × 800 laptop at 125% leaves about 1024 × 560 for the window. Analysis used to
+    force it to 1,158 × 935 (one long message and a tall settings column); now the
+    settings scroll and the messages wrap."""
+    if tab == "sim" and not win.sim_page:
+        pytest.skip("no Simulation tab with this backend")
+    old_sheet, old_pal = app.styleSheet(), app.palette()
+    try:
+        style.apply(app, style.DARK)
+        win.resize(1024, 560)
+        win.show()
+        win.tabs.pick(0, tab)
+        pump(app, 0.2)
+        assert (win.width(), win.height()) == (1024, 560)
+        page = win.analysis_page if tab == "analysis" else win.sim_page
+        scrolls = [s for s in page.findChildren(QtWidgets.QScrollArea)
+                   if s.isVisible() and s.verticalScrollBar().maximum() > 0]
+        assert scrolls, "the settings should scroll, not be cut off"
+    finally:
+        style._applied["mode"] = None
+        app.setStyleSheet(old_sheet)
+        app.setPalette(old_pal)

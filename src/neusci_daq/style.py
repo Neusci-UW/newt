@@ -157,6 +157,11 @@ QTabBar::tab:selected {{ background: {t['tab_on']}; color: {t['ink']}; font-weig
 QTabBar::tab:hover:!selected {{ color: {t['ink']}; }}
 QWidget#paneHead {{ background: {t['tabbar']}; border-bottom: 1px solid {t['line']}; }}
 QSplitter::handle {{ background: {t['tab_on']}; }}
+QWidget#subHead {{ background: {t['ground']}; border-bottom: 1px solid {t['line']}; }}
+QTabBar#subTabs {{ background: transparent; }}
+QTabBar#subTabs::tab {{ padding: 4px 14px; margin: 5px 2px; border: none; border-radius: 6px; }}
+QTabBar#subTabs::tab:selected {{ background: {t['button']}; color: {t['ink']}; font-weight: 600;
+    border: none; }}
 QWidget#stimChip {{ background: {t['button']}; border-radius: 6px; }}
 QWidget#stimChip QPushButton {{ background: {t['button_hover']}; padding: 3px 9px; min-height: 16px; }}
 QWidget#stimChip QPushButton:hover {{ background: {t['button_down']}; }}

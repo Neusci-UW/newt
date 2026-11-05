@@ -103,3 +103,20 @@ def test_icon_is_drawn_at_full_resolution_when_scaled(app):
     for scale in (1.0, 1.25, 1.5, 2.0):
         pix = icon.pixmap(QtCore.QSize(20, 20), scale)
         assert pix.width() == round(20 * scale) and pix.devicePixelRatio() == scale
+
+
+def test_every_analysis_plot_follows_the_theme(app, win):
+    """The stimulus strip under Spike Sorting's overlay stayed black in light mode."""
+    import pyqtgraph as pg
+    from neusci_daq import theme
+    win.tabs.pick(0, "analysis")
+    for mode, dark in ((theme.LIGHT, False), (theme.DARK, True)):
+        win.set_plot_theme(mode)
+        plots = win.analysis_page.findChildren(pg.PlotWidget)
+        assert plots
+        wrong = [pw.getPlotItem().titleLabel.text or type(pw.parent()).__name__ for pw in plots
+                 if (pw.backgroundBrush().color().lightness() < 128) != dark]
+        assert not wrong, (mode, wrong)
+    win.set_plot_theme(theme.LIGHT)
+    stim_pen = win.analysis_page.raw.stim_curve.opts["pen"]
+    assert pg.mkPen(stim_pen).color().lightness() < 128           # dark line on the white plot

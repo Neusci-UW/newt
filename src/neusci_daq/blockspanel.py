@@ -29,7 +29,11 @@ class BlocksPanel(QtWidgets.QWidget):
         super().__init__()
         self.for_analysis = for_analysis
         self.setObjectName("blocksPanel")
-        self.setFixedWidth(210 if for_analysis else 230)
+        if for_analysis:      # 210 when there's room, down to 170 on a small laptop
+            self.setMinimumWidth(170)
+            self.setMaximumWidth(210)
+        else:
+            self.setFixedWidth(230)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
@@ -73,6 +77,10 @@ class BlocksPanel(QtWidgets.QWidget):
         self._queue: list = []
         self._timer = QtCore.QTimer(self, singleShot=True, interval=0)
         self._timer.timeout.connect(self._run)
+
+    def sizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(self.maximumWidth(), super().sizeHint().height()) if self.for_analysis \
+            else super().sizeHint()
 
     def add_setting(self, label: str, widget: QtWidgets.QWidget) -> None:
         self.settings.addRow(label, widget)

@@ -27,7 +27,7 @@ from . import style, theme
 from .plotzoom import MultiAxis, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
-from .viewkit import View, label_axis, scroll_column, style_plot, unit_color
+from .viewkit import View, label_axis, scroll_column, shrink_combos, style_plot, unit_color
 
 SOURCES = (("The highlighted block", "current"), ("Each chosen block", "blocks"),
            ("Each stimulus group's average trace", "avg"),
@@ -74,14 +74,17 @@ class DataPadView(View):
         self.btn_add_col = QtWidgets.QPushButton("Add")
         pick.addWidget(self.channel, 1)
         pick.addWidget(self.measurement, 1)
-        pick.addWidget(self.btn_add_col)
         v.addLayout(pick)
         self.col_list = QtWidgets.QListWidget()
         self.col_list.setMaximumHeight(130)
         self.col_list.setToolTip("The table's columns, in order")
         v.addWidget(self.col_list)
         self.btn_del_col = QtWidgets.QPushButton("Remove column")
-        v.addWidget(self.btn_del_col, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+        col_btns = QtWidgets.QHBoxLayout()           # Add here, not beside the menus: narrower
+        col_btns.addWidget(self.btn_add_col)
+        col_btns.addWidget(self.btn_del_col)
+        col_btns.addStretch(1)
+        v.addLayout(col_btns)
         left.addWidget(box)
 
         box = QtWidgets.QGroupBox("Window: when, in each block")
@@ -182,7 +185,7 @@ class DataPadView(View):
         row = QtWidgets.QHBoxLayout()
         self.sx, self.sy = QtWidgets.QComboBox(), QtWidgets.QComboBox()
         for w in (self.sx, self.sy):
-            w.setMinimumContentsLength(10)
+            w.setMinimumContentsLength(8)
         row.addWidget(QtWidgets.QLabel("Y"))
         row.addWidget(self.sy)
         row.addWidget(QtWidgets.QLabel("against X"))
@@ -197,6 +200,7 @@ class DataPadView(View):
         self.out_tabs.addTab(sc, "Scatter")
         self.out_tabs.addTab(self._fit_panel(), "Fit")
         right.addWidget(self.out_tabs)
+        shrink_combos(self.out_tabs)
         right.setSizes([300, 440])
         outer.addWidget(right, 1)
 

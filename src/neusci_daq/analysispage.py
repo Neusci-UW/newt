@@ -1232,8 +1232,10 @@ class RawView(View):
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
-        for pw in (self.overlay, self.raster, self.rate_plot, self.hist, self.isi, self.wave_plot):
+        for pw in (self.overlay, self.stim_plot, self.raster, self.rate_plot, self.hist, self.isi,
+                   self.wave_plot):
             style_plot(pw, th)
+        self.stim_curve.setPen(pg.mkPen(th.foreground, width=1.2))   # the stimulus, in the text colour
         trace = QtGui.QColor(cfgmod.PALETTE[1])
         faint = QtGui.QColor(th.foreground)
         faint.setAlpha(35)

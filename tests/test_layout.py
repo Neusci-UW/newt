@@ -867,16 +867,28 @@ def test_charts_stop_at_the_edges_of_their_data(app):
     pw.close()
 
 
+@pytest.mark.parametrize("scale", [1.0, 1.15])
 @pytest.mark.parametrize("tab", ["analysis", "sim"])
-def test_tall_tabs_fit_a_short_laptop_screen(app, win, tab):
+def test_tall_tabs_fit_a_short_laptop_screen(app, tmp_path, tab, scale):
     """A 1280 × 800 laptop at 125% leaves about 1024 × 560 for the window. Analysis used to
     force it to 1,158 × 935 (one long message and a tall settings column); now the
-    settings scroll and the messages wrap."""
-    if tab == "sim" and not win.sim_page:
-        pytest.skip("no Simulation tab with this backend")
-    old_sheet, old_pal = app.styleSheet(), app.palette()
+    settings scroll and the messages wrap. `scale` widens the font as macOS's is: the
+    Analysis Blocks panel once left 4 px to spare here and didn't fit on the Mac runner.
+    Built as Argus starts (font and stylesheet first, then the window): styling a window
+    that already exists leaves some sizes as they were, and hid that."""
+    from pyqtgraph.Qt import QtCore
+    from neusci_daq.gui import MainWindow
+    old_sheet, old_pal, old_font = app.styleSheet(), app.palette(), app.font()
+    f = QtGui.QFont(old_font)
+    f.setPointSizeF(old_font.pointSizeF() * scale)
+    app.setFont(f)
+    style.apply(app, style.DARK)
+    st = QtCore.QSettings(str(tmp_path / "s.ini"), QtCore.QSettings.Format.IniFormat)
+    win = MainWindow(make_cfg(tmp_path), settings=st, config_path=tmp_path / "config.toml")
+    win._ask_unsaved = lambda: "discard"
     try:
-        style.apply(app, style.DARK)
+        if tab == "sim" and not win.sim_page:
+            pytest.skip("no Simulation tab with this backend")
         win.resize(1024, 560)
         win.show()
         win.tabs.pick(0, tab)
@@ -887,6 +899,10 @@ def test_tall_tabs_fit_a_short_laptop_screen(app, win, tab):
                    if s.isVisible() and s.verticalScrollBar().maximum() > 0]
         assert scrolls, "the settings should scroll, not be cut off"
     finally:
+        win.close()
+        win.deleteLater()
+        pump(app, 0.05)
         style._applied["mode"] = None
+        app.setFont(old_font)
         app.setStyleSheet(old_sheet)
         app.setPalette(old_pal)

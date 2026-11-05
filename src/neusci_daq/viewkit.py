@@ -10,9 +10,24 @@ from . import style, theme
 from .units import best_prefix
 
 
+COMBO_CHARS = 8                 # the narrowest a settings drop-down gets, in characters
+
+
+def shrink_combos(widget: QtWidgets.QWidget) -> None:
+    """Let the drop-downs in `widget` be narrower than their longest choice. A drop-down as
+    wide as its longest choice sets the window's minimum width: DataPad's made Analysis
+    too wide for a 1024 px laptop on macOS. Each shows what fits; its open list still
+    shows every choice in full."""
+    for box in widget.findChildren(QtWidgets.QComboBox):
+        if box.minimumContentsLength() == 0:
+            box.setMinimumContentsLength(COMBO_CHARS)
+        box.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+
+
 def scroll_column(column: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
     """`column` in a scroll area that scrolls up and down only, so a tall settings
     panel scrolls on a short screen instead of making the window taller than it."""
+    shrink_combos(column)
     sa = QtWidgets.QScrollArea()
     sa.setWidget(column)
     sa.setWidgetResizable(True)

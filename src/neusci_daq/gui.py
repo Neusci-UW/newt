@@ -1366,7 +1366,7 @@ class MainWindow(QtWidgets.QMainWindow):
             where = "Untitled session* — Live"
         else:
             where = "Untitled session — Live"
-        self.setWindowTitle(f"{where} — neusci-daq-visualizer ({self.cfg.device}, {self.cfg.backend})")
+        self.setWindowTitle(f"{where} — Argus ({self.cfg.device}, {self.cfg.backend})")
 
     def _update_menu_state(self):
         recording = self.recorder.recording
@@ -3074,7 +3074,7 @@ _WINDOWS: list = []        # windows opened by Setup › Input device, kept aliv
 
 
 def run(cfg: Config, config_path: str | Path | None = None):
-    app = pg.mkQApp("neusci-daq-visualizer")
+    app = pg.mkQApp("Argus")
     # pyqtgraph sets its own icon and Windows taskbar ID in mkQApp; replace both
     # before the window opens, or the taskbar keeps showing pyqtgraph's icon.
     if sys.platform == "win32":

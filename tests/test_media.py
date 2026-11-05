@@ -226,3 +226,46 @@ def test_camera_panel_follows_review_and_records_only_with_a_camera(app, win, tm
     assert not panel.live and "Click a plot" in panel.message.text()
     panel.nudge.setValue(0.05)                                        # saved with the block
     assert json.loads(video.sidecar(block).read_text())["nudge_s"] == pytest.approx(0.05)
+
+
+# ---------------------------------------------------------------- finding cameras
+def test_no_camera_says_what_to_check(app, win, monkeypatch):
+    monkeypatch.setattr(video, "_camera_list", lambda: [])
+    panel = win.camera_panel
+    panel.fill_cameras()
+    assert [panel.camera_box.itemText(i) for i in range(panel.camera_box.count())] == ["Off"]
+    if video.available():                      # Qt without multimedia says that instead
+        return
+    assert "No camera found" in panel.message.text() and "Camera app" in panel.message.text()
+
+
+def test_cameras_plugged_in_later_appear_and_two_alike_are_told_apart(app, win, monkeypatch):
+    panel = win.camera_panel
+    monkeypatch.setattr(video, "_camera_list", lambda: [])
+    panel.fill_cameras()
+    plugged = [("AmScope MU500", "aa01"), ("AmScope MU500 (2)", "aa02")]
+    monkeypatch.setattr(video, "_camera_list", lambda: plugged)
+    panel.btn_refresh.click()                  # also runs by itself when Qt sees a change
+    texts = [panel.camera_box.itemText(i) for i in range(panel.camera_box.count())]
+    assert texts == ["Off", "AmScope MU500", "AmScope MU500 (2)"]
+    assert panel.camera_box.itemData(2) == "aa02"
+    assert "2 cameras found" in panel.message.text()
+
+
+def test_the_list_keeps_the_camera_picked_and_notices_it_unplugged(app, win, monkeypatch):
+    panel = win.camera_panel
+    monkeypatch.setattr(video, "_camera_list", lambda: [("Cam A", "01"), ("Cam B", "02")])
+    panel.fill_cameras()
+    panel.camera_box.blockSignals(True)        # no real camera to open here
+    panel.camera_box.setCurrentIndex(2)
+    panel.camera_box.blockSignals(False)
+    monkeypatch.setattr(video, "_camera_list", lambda: [("Cam C", "03"), ("Cam B", "02")])
+    panel.fill_cameras()
+    assert panel.camera_box.currentData() == "02"          # still Cam B, though it moved
+    monkeypatch.setattr(video, "_camera_list", lambda: [("Cam C", "03")])
+    panel.fill_cameras()
+    assert panel.camera_box.currentData() == "" and "unplugged" in panel.message.text()
+
+
+def test_window_title_says_argus(win):
+    assert "Argus" in win.windowTitle() and "neusci-daq-visualizer" not in win.windowTitle()

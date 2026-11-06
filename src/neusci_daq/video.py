@@ -130,6 +130,7 @@ class CameraPanel(QtWidgets.QFrame):
         self.btn_refresh.setToolTip("Look for cameras again")
         self.btn_refresh.setAccessibleName("Look for cameras again")
         self.record_video = QtWidgets.QCheckBox("Record video with each block")
+        self.record_video.setToolTip("Save a video next to each block while Record is on")
         self.record_video.setChecked(True)
         pick = QtWidgets.QHBoxLayout()
         pick.addWidget(self.camera_box, 1)

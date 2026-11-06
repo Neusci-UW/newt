@@ -1,9 +1,10 @@
 """Analysis: block lists, event detection, spike sorting, and the Analysis tab."""
 import numpy as np
-from pyqtgraph.Qt import QtCore
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pytest
 
 from neusci_daq import analysis as A, session, simulation as sim
+from neusci_daq.channels import ColorButton
 from neusci_daq.gui import REVIEW
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
@@ -749,17 +750,16 @@ def test_pointing_at_a_unit_highlights_its_events(app, win):
     raw._show_results()
     assert raw.table.rowCount() == 2
     assert raw.event_hl.getData()[0] is None or not len(raw.event_hl.getData()[0])   # nothing yet
-    both = [b for b in range(4) if {0, 1} <= set(ev.unit[ev.block == b])]
-    assert both, "the simulation gave no block with both units"
-    win.analysis_page.current.setValue(both[0] + 1)                  # a block with both units
+    assert len(raw.marks.data) == len(ev.t)                          # every chosen block's events are marked
     raw.table.selectRow(1)                                           # click unit 2
-    i = win.analysis_page.index()
-    mine = (ev.block == i) & (ev.unit == 1)
+    mine = ev.unit == 1
     xs = raw.event_hl.getData()[0]
-    assert np.isfinite(xs).sum() > 0 and mine.sum() == np.isnan(xs).sum()   # one segment per event
-    sizes = raw.marks.data["size"]
-    assert set(sizes[ev.unit[ev.block == i] == 1]) == {14} and set(sizes[ev.unit[ev.block == i] == 0]) == {9}
-    assert all(it.opacity() < 0.5 for it in raw._wave_items[0])     # the other unit's waveforms fade
+    assert np.isfinite(xs).sum() > 0 and mine.sum() == np.isnan(xs).sum()   # one segment per event, in any block
+    assert len(raw.marks.data) == mine.sum() and len(raw.raster_dots.data) == mine.sum()   # the others are gone
+    assert all(not it.isVisible() for it in raw._unit_items[0])      # from sizes, intervals and waveforms
+    assert all(it.isVisible() for it in raw._unit_items[1])
+    assert raw._rate_items[1].isVisible() and not raw._rate_items[0].isVisible()
+    assert not raw._rate_items[None].isVisible()
     raw._hover(0)                                                    # pointing at unit 1 wins
     assert raw.highlighted_units() == {0}
     raw._hover(None)
@@ -786,7 +786,12 @@ def test_normalize_options(app, win):
         assert y.sum() == pytest.approx(1)                           # a fraction of the unit's events
     peak = int(np.argmin(np.abs(ev.wave_t_ms)))
     mean = raw.wave_plot.getPlotItem().listDataItems()[1].getData()[1]
-    assert abs(mean[peak]) == pytest.approx(1, abs=1e-6)             # each spike ÷ its own peak
+    assert abs(mean[peak]) == pytest.approx(1, abs=1e-6)             # the unit's average peak is 1
+    shown = raw.wave_plot.getPlotItem().listDataItems()[0].getData()[1]
+    tall = ev.waves[ev.unit == 0][:, peak]
+    if np.ptp(tall):                                                 # spikes keep their sizes within a unit
+        spikes = shown.reshape(-1, len(ev.wave_t_ms) + 1)[:, peak]
+        assert np.ptp(np.abs(spikes)) > 0
     rate = raw.rate_plot.getPlotItem().listDataItems()[-1].getData()[1]
     assert np.nanmax(rate) == pytest.approx(1)
 
@@ -871,10 +876,9 @@ def test_the_raster_has_a_row_for_each_chosen_block(app, win):
     ev = raw.find()
     vb = raw.raster.getPlotItem().vb
     assert vb.viewRange()[1] == pytest.approx([0.5, 2.5])
-    assert set(raw.raster_dots.data["y"]) <= {1, 2} and raw.raster_dots.data["size"].max() == 2
+    assert set(raw.raster_dots.data["y"]) <= {1, 2} and raw.raster_dots.opts["size"] == 2
     assert np.array_equal(raw.raster_dots.data["y"], np.where(ev.block == 0, 1, 2))
-    labels = raw.raster.getPlotItem().getAxis("left")._tickLevels[0]
-    assert labels == [(1, "1"), (2, "3")]                            # the rows say which blocks
+    assert not raw.raster.getPlotItem().getAxis("left").style["showValues"]   # no block numbers
     ap.current.setValue(2)                                           # not chosen: no highlighted row
     assert not raw.cur_band.isVisible()
     ap.current.setValue(3)
@@ -907,3 +911,105 @@ def test_spikes_per_second_during_a_block():
     edges, rates = A.block_rate(ev, 2, 1.5, 1.0)
     assert edges.tolist() == [0, 1, 1.5]                             # the last bin stops at the data
     assert rates[None].tolist() == [1.5, 1.0]                        # the mean of the 2 blocks
+
+
+def test_the_stimulus_is_above_the_blocks_and_the_block_bar_leaves_spike_sorting(app, win):
+    ap, raw = _spike_sorting(app, win)
+    mid = raw.overlay.parentWidget()
+    assert mid.indexOf(raw.stim_plot) < mid.indexOf(raw.overlay) < mid.indexOf(raw.raster)
+    assert not ap.block_bar.isVisible()
+    ap.tabs.setCurrentWidget(ap.compare)
+    pump(app, 0.1)
+    assert ap.block_bar.isVisible()
+    ap.tabs.setCurrentWidget(ap.raw)
+    pump(app, 0.1)
+    assert not ap.block_bar.isVisible()
+    ap._block_clicked(("block", 1))                                  # the Blocks panel still picks it
+    assert ap.index() == 1
+    ap.select_blocks([2, 3])                                         # and it stays among the chosen ones
+    assert ap.index() == 2
+
+
+def test_rate_bins_sit_with_the_rate_graph(app, win):
+    ap, raw = _spike_sorting(app, win)
+    assert raw.rate_bins.parentWidget() is raw.rate_plot and raw.rate_bin.isVisible()
+    assert raw.rate_bins.geometry().right() < raw.rate_plot.width()
+
+
+def test_blocks_are_drawn_alike(app, win):
+    ap, raw = _spike_sorting(app, win)
+    assert not hasattr(raw, "cur_item")                              # no block drawn differently
+    many = raw.blocks_item.opts["pen"].color().alpha()
+    ap.select_blocks([0])
+    assert raw.blocks_item.opts["pen"].color().alpha() == 255 > many  # one block on its own is solid
+
+
+def test_find_rescales_y_and_settings_search_again(app, win):
+    ap, raw = _spike_sorting(app, win)
+    raw.btn_find.click()
+    first = raw.events
+    assert first is not None
+    vb = raw.overlay.getPlotItem().vb
+    fit = vb.viewRange()[1]
+    vb.setYRange(fit[0] / 100, fit[1] / 100, padding=0)              # zoomed in, as by hand
+    raw.hist.getPlotItem().setYRange(0, 0.001, padding=0)
+    raw.raster.getPlotItem().setYRange(1, 2, padding=0)
+    raw.btn_find.click()
+    pump(app, 0.2)
+    assert vb.viewRange()[1] == pytest.approx(fit, rel=0.05)
+    assert raw.hist.getPlotItem().vb.viewRange()[1][1] > 0.001
+    assert raw.raster.getPlotItem().vb.viewRange()[1] == pytest.approx([0.5, len(raw._rows) + 0.5])
+    zoomed = (fit[0] / 100, fit[1] / 100)
+    vb.setYRange(*zoomed, padding=0)
+    for change in (lambda: raw.dead.setValue(2.0), lambda: raw.post.setValue(3.0),
+                   lambda: raw.units.setCurrentIndex(2), lambda: raw.bip_frac.setValue(0.5)):
+        was = raw.events
+        change()
+        pump(app, 0.5)
+        assert raw.events is not None and raw.events is not was      # searched without pressing Find
+    assert vb.viewRange()[1] == pytest.approx(zoomed, rel=1e-3)      # and left the zoom alone
+    raw.thr_line.setValue(raw.thr_line.value() * 1.1)
+    raw._threshold_dragged()
+    pump(app, 0.5)
+    assert raw.events is not None
+
+
+def test_a_unit_colour_reaches_every_graph(app, win):
+    ap, raw = _spike_sorting(app, win)
+    ev = raw.find()
+    ev.unit = np.arange(len(ev.t)) % 2
+    raw._show_results()
+    assert isinstance(raw.table.cellWidget(0, 5), ColorButton) and raw.table.cellWidget(0, 5).toolTip()
+    raw.set_unit_color(0, "#123456")
+    want = QtGui.QColor("#123456")
+    assert raw.table.cellWidget(0, 5).color == "#123456"
+    assert raw._rate_items[0].opts["pen"].color() == want
+    assert raw._unit_items[0][0].opts["pen"].color() == want         # sizes
+    assert raw._unit_items[0][1].opts["pen"].color() == want         # intervals
+    assert raw._unit_items[0][-1].opts["pen"].color() == want        # waveforms
+    first = np.flatnonzero(ev.unit == 0)[0]
+    assert raw.raster_dots.data["brush"][first].color() == want
+    assert raw.marks.data["brush"][first].color() == want
+    ap.compare._sync_units()
+    pix = ap.compare.unit_pick.itemIcon(1).pixmap(8, 8).toImage()
+    assert pix.pixelColor(4, 4) == want
+
+
+def test_every_setting_says_what_it_does(app, win):
+    kinds = (QtWidgets.QComboBox, QtWidgets.QAbstractSpinBox, QtWidgets.QCheckBox, QtWidgets.QRadioButton,
+             QtWidgets.QLineEdit, QtWidgets.QSlider)
+    win.show()
+    pump(app, 0.1)
+    bare = []
+    for page in (win, win.stim_page, win.trials_page, win.analysis_page, win.sim_page, win.camera_panel):
+        for w in page.findChildren(QtWidgets.QWidget):
+            owners = []
+            q = w.parentWidget()
+            while q is not None:
+                owners.append(q)
+                q = q.parentWidget()
+            if (isinstance(w, kinds) and not w.toolTip() and
+                    not any(isinstance(q, (QtWidgets.QMenu, QtWidgets.QComboBox, QtWidgets.QAbstractSpinBox))
+                            or type(q).__module__.startswith("pyqtgraph") for q in owners)):
+                bare.append(f"{type(page).__name__}: {type(w).__name__} {getattr(w, 'text', str)()!r}")
+    assert not bare, bare

@@ -67,7 +67,9 @@ class DataPadView(View):
         v = QtWidgets.QVBoxLayout(box)
         pick = QtWidgets.QHBoxLayout()
         self.channel = QtWidgets.QComboBox()
+        self.channel.setToolTip("The channel to measure")
         self.measurement = QtWidgets.QComboBox()
+        self.measurement.setToolTip("What to measure from the trace in the chosen time window")
         for key, (label, _, tip) in D.MEASUREMENTS.items():
             self.measurement.addItem(label, key)
             self.measurement.setItemData(self.measurement.count() - 1, tip, QtCore.Qt.ItemDataRole.ToolTipRole)
@@ -90,6 +92,7 @@ class DataPadView(View):
         box = QtWidgets.QGroupBox("Window: when, in each block")
         f = QtWidgets.QFormLayout(box)
         self.whole = QtWidgets.QCheckBox("The whole block")
+        self.whole.setToolTip("Measure the whole block instead of a window you drag on the plot")
         self.whole.setChecked(True)
         self.t0 = UnitSpinBox(0, 1e5, "s", step=0.01)
         self.t1 = UnitSpinBox(0, 1e5, "s", step=0.01)
@@ -184,6 +187,8 @@ class DataPadView(View):
         sv.setContentsMargins(0, 6, 0, 0)
         row = QtWidgets.QHBoxLayout()
         self.sx, self.sy = QtWidgets.QComboBox(), QtWidgets.QComboBox()
+        self.sx.setToolTip("The measurement along the scatter plot's x axis")
+        self.sy.setToolTip("The measurement along the scatter plot's y axis")
         for w in (self.sx, self.sy):
             w.setMinimumContentsLength(8)
         row.addWidget(QtWidgets.QLabel("Y"))
@@ -675,6 +680,7 @@ class DataPadView(View):
         self.fit_on.setToolTip("Scatter: Y against X on the Scatter tab. Trace: the first channel shown on "
                                "the preview, in the window (e.g. an exponential for a time constant)")
         self.fit_model = QtWidgets.QComboBox()
+        self.fit_model.setToolTip("The curve to fit to the points on the scatter plot")
         for key, label in FIT.MODELS.items():
             self.fit_model.addItem(label, key)
         self.fit_degree = QtWidgets.QSpinBox(minimum=0, maximum=12, value=1)

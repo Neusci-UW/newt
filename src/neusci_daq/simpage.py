@@ -237,8 +237,10 @@ class SimPage(QtWidgets.QWidget):
             monitor = ch.physical == cfg.stim_monitor
             cell = QtWidgets.QComboBox()
             cell.addItems([f"Cell {i + 1}" for i in range(n)])
+            cell.setToolTip("The cell this input records")
             cell.setCurrentIndex(min(rec.cell, n - 1))
             kind = QtWidgets.QComboBox()
+            kind.setToolTip("How this input records the cell")
             for label, key in _KINDS:
                 kind.addItem(label, key)
             kind.setCurrentIndex(max(0, kind.findData(rec.kind)))
@@ -266,6 +268,7 @@ class SimPage(QtWidgets.QWidget):
         self.stim_boxes = []
         for i, c in enumerate(self.net.cells):
             tick = QtWidgets.QCheckBox(f"Cell {i + 1}")
+            tick.setToolTip("Whether the stimulus reaches this cell")
             tick.setChecked(c.stimulus != 0)
             strength = UnitSpinBox(-1000, 1000, "mV", step=1)
             strength.setValue(c.stimulus if c.stimulus else self._strength.get(i, 25.0))

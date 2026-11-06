@@ -553,7 +553,6 @@ class RawView(View):
         self.table.setToolTip("Point at a unit, or click it (Cmd/Shift-click for several), to see only "
                               "that unit on every graph")
         self.table.setMouseTracking(True)
-        self.table.viewport().installEventFilter(self)
         left.addWidget(self.table, 1)
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
@@ -712,6 +711,7 @@ class RawView(View):
         self.thr_line.sigPositionChangeFinished.connect(self._threshold_dragged)
         self.table.itemSelectionChanged.connect(self._apply_highlight)
         self.table.cellEntered.connect(lambda r, _c: self._hover(r))
+        self.table.viewport().installEventFilter(self)
         # Changing how events are found searches again, once the changes stop.
         self._find_timer = QtCore.QTimer(self, singleShot=True, interval=250)
         self._find_timer.timeout.connect(self._find_again)

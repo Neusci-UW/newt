@@ -320,7 +320,8 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
     win.move_block(2, "Drug")                                        # into a new page
     texts = [it.text(0) for it in win.blocks_panel.items()]
     assert any(t.startswith("Drug  (1)") for t in texts) and any(t.startswith("Drug 1") for t in texts)
-    assert pages.load(win.session_dir) == {"renamed": {"Blocks": "Baseline"}, "moved": {"block_003": "Drug"}}
+    saved = pages.load(win.session_dir)
+    assert saved["renamed"] == {"Blocks": "Baseline"} and saved["moved"] == {"block_003": "Drug"}
     win.rename_page("Drug", "Drug A")                                # its block follows
     assert pages.load(win.session_dir)["moved"] == {"block_003": "Drug A"}
     win.move_block(2, "Baseline")                                    # back home: no longer "moved"
@@ -328,7 +329,8 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
     win.move_block(0, "Somewhere")
     assert win.blocks_panel.btn_reset.isEnabled()
     win.reset_pages()                                                # forget names and moves
-    assert pages.load(win.session_dir) == {"renamed": {}, "moved": {}}
+    saved = pages.load(win.session_dir)
+    assert saved["renamed"] == {} and saved["moved"] == {}
     assert [it.text(0) for it in win.blocks_panel.items()][1].startswith("Blocks  (3)")
     assert not win.blocks_panel.btn_reset.isEnabled()
     win.close()

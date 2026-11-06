@@ -27,7 +27,8 @@ from . import style, theme
 from .plotzoom import MultiAxis, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
-from .viewkit import View, label_axis, scroll_column, shrink_combos, style_plot, unit_color
+from .helpview import add_help
+from .viewkit import ChartToggles, View, label_axis, scroll_column, shrink_combos, style_plot, unit_color
 
 SOURCES = (("The highlighted block", "current"), ("Each chosen block", "blocks"),
            ("Each stimulus group's average trace", "avg"),
@@ -64,6 +65,7 @@ class DataPadView(View):
         left.setSpacing(10)
 
         box = QtWidgets.QGroupBox("Columns: what to measure")
+        add_help(box, "datapad")
         v = QtWidgets.QVBoxLayout(box)
         pick = QtWidgets.QHBoxLayout()
         self.channel = QtWidgets.QComboBox()
@@ -134,6 +136,8 @@ class DataPadView(View):
         out.addWidget(self.btn_csv)
         out.addWidget(self.btn_copy)
         left.addLayout(out)
+        self.charts_slot = QtWidgets.QVBoxLayout()   # the Charts box, once the charts exist
+        left.addLayout(self.charts_slot)
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
         left.addWidget(self.message)
@@ -208,6 +212,11 @@ class DataPadView(View):
         shrink_combos(self.out_tabs)
         right.setSizes([300, 440])
         outer.addWidget(right, 1)
+        self.charts = ChartToggles(self.main.settings, "datapad", [
+            ("Preview", "The highlighted block, and the window measured", top),
+            ("Results", "The table, scatter plot and fit", self.out_tabs)])
+        self.charts_slot.addWidget(self.charts)
+        self.charts.apply()
 
         self.btn_add_col.clicked.connect(lambda: self.add_column(self.channel.currentText(),
                                                                  self.measurement.currentData()))

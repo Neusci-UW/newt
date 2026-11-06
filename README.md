@@ -44,8 +44,9 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - Moving windows: smoothing, RMS and envelope.
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.
 - **Analysis**:
-  - A Blocks panel beside every sub-tab: drag across blocks, or pick a page, to analyze just those; it also holds the stimulus and analyzed channels and Spread.
-  - Spike Sorting: overlays and averages, with the stimulus below, with ± SD or SEM across trials; finding and sorting action potentials (point at a unit to highlight its spikes); raster, rate and ISI histograms.
+  - A Blocks panel beside every sub-tab: pick a page to see its average, or drag across blocks to see those trials; it also holds the stimulus and analyzed channels, Spread, and the colours of pages and trials (editable, or from a colour map).
+  - Every sub-tab has Charts checkboxes to show just the charts you want, and a ? button with an explanation and glossary.
+  - Spike Sorting: overlays and averages, with the stimulus above, with ± SD or SEM across trials; finding and sorting action potentials (point at a unit to see just its spikes); raster, rate, a PCA map of the units, waveforms, and size and ISI histograms.
   - Comparison: derivatives, PSTH and spike-triggered averages.
   - DataPad: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per block, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
 - **Simulation**: a network of up to 10 integrate-and-fire cells with tunable synapses, to practise without an animal.

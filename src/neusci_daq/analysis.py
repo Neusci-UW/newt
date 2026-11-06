@@ -211,6 +211,15 @@ def _silhouette(X: np.ndarray, labels: np.ndarray) -> float:
     return float(s.mean())
 
 
+def principal_components(w: np.ndarray, n: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """Waveforms (rows of w) as points on their first n principal components, and the
+    share of the differences between them that each component holds."""
+    centered = w - w.mean(0)
+    _, sv, vt = np.linalg.svd(centered, full_matrices=False)
+    power = sv ** 2
+    return centered @ vt[:n].T, (power / power.sum() if power.sum() else power)[:n]
+
+
 def sort_spikes(w: np.ndarray, n_units: int | None = None, max_units: int = 6,
                 seed: int = 0) -> np.ndarray:
     """Unit label (0 = the smallest unit) for each waveform (rows of w). n_units=None
@@ -221,9 +230,7 @@ def sort_spikes(w: np.ndarray, n_units: int | None = None, max_units: int = 6,
     if n < 3 or n_units == 1:
         return np.zeros(n, int)
     rng = np.random.default_rng(seed)
-    centered = w - w.mean(0)
-    _, sv, vt = np.linalg.svd(centered, full_matrices=False)
-    X = centered @ vt[:3].T                                   # first 3 principal components
+    X, _ = principal_components(w)
     # One scale for all three: scaling each to the same spread would blow the weak,
     # mostly-noise components up and split cells on noise.
     X = X / (X[:, 0].std() or 1.0)

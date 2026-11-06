@@ -115,3 +115,13 @@ The top picks for a teaching lab, roughly in order:
 - **Synaptic plasticity** (paired-pulse facilitation, depression, LTP) in the network. (Brian2, NEST)
 - **Guided lab exercises**: a side panel with steps, questions and "check your measurement". (LabChart Lab Tutor / Guided Experiments)
 - **Noise sources in the simulator**: 60 Hz hum, electrode drift and movement artifacts, so students can practise filtering. Some of this already exists.
+
+## To recode later
+
+Notes to act on later; nothing here has been changed yet.
+
+- **Stimulator: charts rescale when a setting changes them.** Ticking Biphasic on the Acquisition
+  Stimulator page doesn't rescale the chart's x axis. In general, whenever a parameter changes
+  the scale of the data, the charts should update their scaling automatically.
+- **Spike Sorting: stimulus matches its response.** A stimulus trace should always be the same
+  color as its response trace, whether that's a page color, a trial color or a color map.

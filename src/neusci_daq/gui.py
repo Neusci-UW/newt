@@ -405,6 +405,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stim_page = StimPage(self)
         self.trials_page = TrialsPage(self)
         self.analysis_page = AnalysisPage(self)
+        self.blocks_panel.color_requested.connect(self.analysis_page.pick_color)
+        self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
         # What the fake recording contains: only with the simulated backend.
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
         placeholder = lambda title, text: self._placeholder(title, text)
@@ -1755,7 +1757,8 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 labels[i] = (p.stem, "?")
         top = LIVE_ITEM if self.mode == LIVE else (BACK_ITEM if self._live_state is not None else None)
-        colors = [self.analysis_page.group_color(g) for g in range(max(1, len(pages)))]
+        names_of = [name for name, _ in pages]
+        colors = [self.analysis_page.group_color(g, names_of, d) for g in range(max(1, len(pages)))]
         self.blocks_panel.populate(top, pages, colors, labels, lambda i: pagesmod.auto_page(auto, i, d),
                                    bool(d["renamed"] or d["moved"]), self.recorder.recording)
         self._mark_block_list()
@@ -1872,7 +1875,7 @@ class MainWindow(QtWidgets.QMainWindow):
         folder = self._panel_folder()
         if folder is None:
             return
-        (Path(folder) / pagesmod.FILE).unlink(missing_ok=True)
+        pagesmod.save(folder, {**pagesmod.load(folder), "renamed": {}, "moved": {}})
         self._fill_recorded()
         self.analysis_page.source_changed()
 

@@ -24,6 +24,8 @@ class BlocksPanel(QtWidgets.QWidget):
     move_requested = QtCore.Signal(int, str)     # block, page ("" asks for a new page's name)
     stim_channel_picked = QtCore.Signal(str)     # "" for None
     reset_requested = QtCore.Signal()
+    color_requested = QtCore.Signal(str)         # a page's name: pick its colour
+    color_cleared = QtCore.Signal(str)           # a page's name: back to the default colour
 
     def __init__(self, for_analysis: bool = False):
         super().__init__()
@@ -59,6 +61,7 @@ class BlocksPanel(QtWidgets.QWidget):
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(12)
+        self.tree.setMinimumHeight(60)           # its settings above still fit a small laptop screen
         # Cmd/Shift-click several blocks (or pick a page) to overlay them
         self.tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
@@ -133,7 +136,9 @@ class BlocksPanel(QtWidgets.QWidget):
             head = bold(QtWidgets.QTreeWidgetItem([f"{name}  ({len(blocks)})"]))
             head.setData(0, ROLE, ("page", name))
             head.setIcon(0, style.dot_icon(colors[g % len(colors)]))
-            head.setToolTip(0, "Double-click to rename this page; its blocks take the new name")
+            head.setToolTip(0, "Click to see this page's average; double-click to rename it; right-click "
+                               "to change its colour" if self.for_analysis else
+                            "Double-click to rename this page; its blocks take the new name")
             tree.addTopLevelItem(head)
             for k, i in enumerate(blocks, 1):
                 stem, dur = labels.get(i, (f"block {i + 1}", "?"))
@@ -151,7 +156,8 @@ class BlocksPanel(QtWidgets.QWidget):
         self.btn_reset.setEnabled(can_reset)
         tree.blockSignals(False)
         tree.setEnabled(not busy)
-        tree.setToolTip("Click or drag across blocks, or pick a page, to analyze just those" if self.for_analysis
+        tree.setToolTip("Pick a page to see its average, or click or drag across blocks to see those trials"
+                        if self.for_analysis
                         else "Stop recording to look at other blocks" if busy else
                         "Click a block to look at it (this stops acquiring). Live goes back, and Record "
                         "carries on adding to the same session")
@@ -185,12 +191,14 @@ class BlocksPanel(QtWidgets.QWidget):
                 item.setSelected(data[1] in overlay or (not overlay and data == want))
         tree.blockSignals(False)
 
-    def select(self, blocks: list[int]) -> None:
-        """Select just these blocks, without reporting it."""
+    def select(self, blocks: list[int], pages: list[str] = ()) -> None:
+        """Select just these blocks and pages, without reporting it."""
         self.tree.blockSignals(True)
         for item in self.items():
             data = item.data(0, ROLE)
-            item.setSelected(isinstance(data, tuple) and data[0] == "block" and data[1] in blocks)
+            item.setSelected(isinstance(data, tuple) and
+                             (data[1] in pages if data[0] == "page" else
+                              data[0] == "block" and data[1] in blocks))
         self.tree.blockSignals(False)
 
     def selected_blocks(self) -> list[int]:
@@ -203,6 +211,11 @@ class BlocksPanel(QtWidgets.QWidget):
             elif isinstance(data, tuple) and data[0] == "page":
                 picked.update(int(item.child(c).data(0, ROLE)[1]) for c in range(item.childCount()))
         return sorted(picked)
+
+    def selected_pages(self) -> list[str]:
+        """The names of the pages selected (not those with just some blocks selected)."""
+        return [item.data(0, ROLE)[1] for item in self.tree.selectedItems()
+                if isinstance(item.data(0, ROLE), tuple) and item.data(0, ROLE)[0] == "page"]
 
     # -- page actions --------------------------------------------------------------------------
     def _double(self, data) -> None:
@@ -217,6 +230,8 @@ class BlocksPanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         if data[0] == "page":
             menu.addAction("Rename page…", lambda: self.later(lambda: self.rename_requested.emit(data[1])))
+            menu.addAction("Colour…", lambda: self.later(lambda: self.color_requested.emit(data[1])))
+            menu.addAction("Default colour", lambda: self.later(lambda: self.color_cleared.emit(data[1])))
         else:
             i = int(data[1])
             here = next((name for name, blocks in self._pages if i in blocks), None)

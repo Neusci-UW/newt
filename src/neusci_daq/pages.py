@@ -8,6 +8,9 @@ to another page or a new one; each block is shown under its page's name ("Baseli
 What you change is kept in the session folder, in pages.json:
   renamed  {stimulus page's label: the name you gave it}
   moved    {block file stem: the page you put it in}
+  colors   {page's name: the colour you gave it}
+  page_map the colour map across the pages (colormaps.PAGE_STYLES)
+  trial_map how the trials of a page are drawn (colormaps.TRIAL_STYLES)
 """
 from __future__ import annotations
 
@@ -19,13 +22,15 @@ ALL = "Blocks"                    # the one page when there's nothing to group b
 
 
 def load(folder: str | Path | None) -> dict:
-    out = {"renamed": {}, "moved": {}}
+    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": ""}
     if folder is None:
         return out
     try:
         d = json.loads((Path(folder) / FILE).read_text(encoding="utf-8"))
         out["renamed"] = {str(k): str(v) for k, v in d.get("renamed", {}).items()}
         out["moved"] = {str(k): str(v) for k, v in d.get("moved", {}).items()}
+        out["colors"] = {str(k): str(v) for k, v in d.get("colors", {}).items()}
+        out["page_map"], out["trial_map"] = str(d.get("page_map", "")), str(d.get("trial_map", ""))
     except (OSError, ValueError, AttributeError):
         pass
     return out
@@ -67,7 +72,8 @@ def rename(auto: list[tuple[str, list[int]]], d: dict, old: str, new: str) -> di
         if renamed.get(label, label) == old:
             renamed[label] = new
     moved = {stem: (new if page == old else page) for stem, page in d.get("moved", {}).items()}
-    return {"renamed": renamed, "moved": moved}
+    colors = {(new if page == old else page): c for page, c in d.get("colors", {}).items()}
+    return {**d, "renamed": renamed, "moved": moved, "colors": colors}
 
 
 def move(auto: list[tuple[str, list[int]]], stems: list[str], d: dict, i: int, page: str) -> dict:
@@ -79,4 +85,4 @@ def move(auto: list[tuple[str, list[int]]], stems: list[str], d: dict, i: int, p
         moved.pop(stems[i], None)
     else:
         moved[stems[i]] = page
-    return {"renamed": dict(d.get("renamed", {})), "moved": moved}
+    return {**d, "renamed": dict(d.get("renamed", {})), "moved": moved}

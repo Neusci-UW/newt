@@ -118,5 +118,3 @@ def test_every_analysis_plot_follows_the_theme(app, win):
                  if (pw.backgroundBrush().color().lightness() < 128) != dark]
         assert not wrong, (mode, wrong)
     win.set_plot_theme(theme.LIGHT)
-    stim_pen = win.analysis_page.raw.stim_curve.opts["pen"]
-    assert pg.mkPen(stim_pen).color().lightness() < 128           # dark line on the white plot

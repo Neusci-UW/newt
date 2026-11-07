@@ -410,6 +410,7 @@ class StimPage(QtWidgets.QWidget):
         t = np.arange(len(wave)) / cfg.stim_rate
         # draw each sample as a flat step, which is what the output really does
         self.curve.setData(np.repeat(t, 2)[1:], np.repeat(wave * k, 2)[:-1])
+        self.preview.getPlotItem().enableAutoRange()      # a new stimulus can change the scale
         peak = float(np.max(np.abs(wave))) * k
         notes = s.rounding_notes(cfg.stim_rate)
         self.show_message(f"{s.describe(units, k)}\nPeak {peak:g} {units} · {len(wave) / cfg.stim_rate * 1000:g} ms · "

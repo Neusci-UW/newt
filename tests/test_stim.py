@@ -486,3 +486,17 @@ def test_fields_show_numbers_under_1000_with_a_prefix(win):
     assert page.n_freq.text() == "2 kHz"
     type_into(page.repeat, "3600 s")                         # no bigger prefix than s: stays in s
     assert page.repeat.text() == "3600 s"
+
+
+def test_the_preview_fits_a_stimulus_that_changes_its_scale(app, win):
+    from neusci_daq.stim import Stimulus
+    page = win.stim_page
+    vb = page.preview.getPlotItem().vb
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=1, width_ms=1))
+    page._update_preview()
+    vb.setXRange(0, 0.0005, padding=0)                               # zoomed in by hand
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=1, width_ms=1, biphasic=True))
+    page._update_preview()
+    vb.updateAutoRange()
+    end = page.curve.getData()[0][-1]
+    assert vb.viewRange()[0][1] >= end * 0.99

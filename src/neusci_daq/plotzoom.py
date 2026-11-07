@@ -34,7 +34,7 @@ class WheelViewBox(pg.ViewBox):
         self.on_drag_select = None              # f(x0, x1, finished): plain left-drag selects time
         self.bounds = [None, None]              # (lo, hi) per axis, to use instead of the data's edges
 
-    def updateViewRange(self, forceX=False, forceY=False):
+    def _refresh_limits(self) -> None:
         if self.clamp_to_data:
             lim = self.state["limits"]
             lim["xLimits"], lim["yLimits"] = [None, None], [None, None]
@@ -49,6 +49,13 @@ class WheelViewBox(pg.ViewBox):
                     continue
                 pad = (b[1] - b[0]) * self.limit_pad[axis]
                 lim[key] = [b[0] - pad, b[1] + pad]
+
+    def setRange(self, *a, **kw):
+        self._refresh_limits()                  # or the old data's edges would cut the new range short
+        super().setRange(*a, **kw)
+
+    def updateViewRange(self, forceX=False, forceY=False):
+        self._refresh_limits()
         super().updateViewRange(forceX, forceY)
 
     def linkedViewChanged(self, view, axis):
@@ -198,6 +205,10 @@ class TraceCurve(pg.PlotDataItem):
             self._redisplay()
         else:
             super().setData(*args, **kw)
+
+    def viewTransformChanged(self):
+        super().viewTransformChanged()
+        self.viewRangeChanged()                 # a plot that grew has room for finer groups
 
     def viewRangeChanged(self, vb=None, ranges=None, changed=None):
         super().viewRangeChanged(vb, ranges, changed)

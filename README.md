@@ -45,9 +45,11 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.
 - **Analysis**:
   - A Blocks panel beside every sub-tab: pick a page to see its average, or drag across blocks to see those trials; it also holds the stimulus and analyzed channels, Spread, and the colours of pages and trials (editable, or from a colour map).
-  - Every sub-tab has Charts checkboxes to show just the charts you want, and a ? button with an explanation and glossary.
-  - Spike Sorting: overlays and averages, with the stimulus above, with ± SD or SEM across trials; finding and sorting action potentials (point at a unit to see just its spikes); raster, rate, a PCA map of the units, waveforms, and size and ISI histograms.
-  - Comparison: derivatives, PSTH and spike-triggered averages.
+  - Every sub-tab has Charts checkboxes to show just the charts you want, and a ? button with an explanation and glossary. Spike Sorting and Response can swap their axes for draggable scale bars.
+  - A gain per channel, and a fit that cleans up a noisy or coarse recorded stimulus, both applied as data is read: the recordings never change.
+  - Spike Sorting: overlays and averages, with the stimulus above, with ± SD or SEM across trials; finding and sorting action potentials (tick the units to show, on every sub-tab); raster, rate, a PCA map of the units, waveforms, and size and ISI histograms.
+  - Response: the chosen blocks' channels and derivatives, PSTH and spike-triggered averages, and stimulus cycles: the repeats of any repeating stimulus overlaid by phase, with a raster per cycle, a phase histogram with vector strength, and a loop of response against stimulus.
+  - Waveforms: the action potentials as a phase plot of V against dV/dt, and against time.
   - DataPad: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per block, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
 - **Simulation**: a network of up to 10 integrate-and-fire cells with tunable synapses, to practise without an animal.
 - **Files**: opens and saves LabChart `.mat` exports.

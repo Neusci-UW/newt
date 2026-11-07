@@ -11,6 +11,10 @@ What you change is kept in the session folder, in pages.json:
   colors   {page's name: the colour you gave it}
   page_map the colour map across the pages (colormaps.PAGE_STYLES)
   trial_map how the trials of a page are drawn (colormaps.TRIAL_STYLES)
+  gains    {channel: the factor its data is multiplied by when read}
+  stim_fit the fit applied to the stimulus channel when it's read (analysis.FITS)
+
+Gains and fits are applied as data is read: the recorded blocks are never changed.
 """
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ ALL = "Blocks"                    # the one page when there's nothing to group b
 
 
 def load(folder: str | Path | None) -> dict:
-    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": ""}
+    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "gains": {}, "stim_fit": ""}
     if folder is None:
         return out
     try:
@@ -31,7 +35,9 @@ def load(folder: str | Path | None) -> dict:
         out["moved"] = {str(k): str(v) for k, v in d.get("moved", {}).items()}
         out["colors"] = {str(k): str(v) for k, v in d.get("colors", {}).items()}
         out["page_map"], out["trial_map"] = str(d.get("page_map", "")), str(d.get("trial_map", ""))
-    except (OSError, ValueError, AttributeError):
+        out["gains"] = {str(k): float(v) for k, v in d.get("gains", {}).items()}
+        out["stim_fit"] = str(d.get("stim_fit", ""))
+    except (OSError, ValueError, AttributeError, TypeError):
         pass
     return out
 

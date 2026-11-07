@@ -15,7 +15,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import dsp
-from .plotzoom import TraceCurve
+from .plotzoom import TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import unit_factor
 
@@ -191,7 +191,7 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
         form2.addRow("Unit", self.unit)
         form2.addRow("Formula", self.formula)
         lay.addLayout(form2)
-        self.plot = pg.PlotWidget()
+        self.plot = plot_widget()
         self.plot.setMinimumHeight(160)
         self.plot.getPlotItem().setLabel("bottom", "time", units="s")
         self.plot.getPlotItem().showGrid(x=True, y=True, alpha=0.2)

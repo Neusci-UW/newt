@@ -804,6 +804,7 @@ class TrialsPage(QtWidgets.QWidget):
         c, p, cfg = self.chk, self.protocol, self.main.cfg
         pi = self.preview.getPlotItem()
         pi.clear()
+        pi.enableAutoRange()                          # new settings can change the scale
         if not c or not c.a_vals:
             return
         b = c.b_vals[self._plan_row] if c.b_vals else None

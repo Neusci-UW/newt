@@ -1,5 +1,5 @@
 """The Analysis tab: every block of the session, the action potentials in them,
-and how the channels compare. A bar at the top of Comparison and DataPad picks the
+and how the channels compare. A bar at the top of DataPad picks the
 highlighted block (slider, ◀ ▶, or the ← → keys); clicking a block in the Blocks panel
 picks it on any sub-tab. The Blocks panel beside the sub-tabs picks the blocks to analyze,
 the stimulus and analyzed channels, and Spread. Three sub-tabs:
@@ -11,7 +11,7 @@ the stimulus and analyzed channels, and Spread. Three sub-tabs:
   second during a block; all on one time axis, zooming together; and beside them a
   PCA map of the units, their waveforms, and histograms of AP sizes and intervals.
   Pointing at a unit shows only that unit, on every graph but the PCA map.
-- Comparison: for the highlighted block, any channels on one time axis as V,
+- Response: for the chosen blocks, any channels on one time axis as V,
   dV/dt or d²V/dt², with the spike rate; and over the chosen blocks, the
   stimulus-triggered spike rate (PSTH) and the spike-triggered average of a channel.
 - DataPad: a table of measurements (mean, peak, area, slope, spike rate…) in a time
@@ -45,12 +45,33 @@ from .helpview import add_help
 from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
-from .viewkit import (ChartToggles, PlotCorner, View, even_out, label_axis, scroll_column, style_plot, unit_color,
-                      with_unit)
+from .waveformview import WaveformView
+from .viewkit import (ChartToggles, PlotCorner, View, even_out, label_axis, scroll_column, show_scale_bar, style_plot,
+                      unit_color, with_unit)
 
 MAX_WAVES = 150                    # per unit in the waveform plot
 MAX_MARKED = 2000                  # spikes drawn over the blocks when a unit is highlighted
 _SERIES = (("V", 0), ("dV/dt", 1), ("d²V/dt²", 2))
+_CYCLE_STACK = ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase")
+_CYCLE_CHARTS = (*_CYCLE_STACK, "Response against stimulus")
+
+
+def _draw_band(p: pg.PlotItem, x: np.ndarray, mean: np.ndarray, spread: np.ndarray, color: str) -> list:
+    """A shaded band from mean − spread to mean + spread. Returns its items."""
+    edges = []
+    for sign in (1, -1):
+        c = TraceCurve()
+        c.setPen(pg.mkPen(None))
+        c.setZValue(4)
+        p.addItem(c)
+        c.setData(x, mean + sign * np.nan_to_num(spread))
+        edges.append(c)
+    fill = QtGui.QColor(color)
+    fill.setAlpha(55)
+    band = pg.FillBetweenItem(edges[0], edges[1], brush=pg.mkBrush(fill))
+    band.setZValue(4)
+    p.addItem(band)
+    return edges + [band]
 
 
 class AnalysisPage(QtWidgets.QWidget):
@@ -132,18 +153,46 @@ class AnalysisPage(QtWidgets.QWidget):
         self.groups: list[tuple[str, list[int]]] = []
         self.stim_channel.currentIndexChanged.connect(lambda *_: self._stim_channel_picked())
 
+        self.gain_channel = QtWidgets.QComboBox()
+        self.gain_channel.setToolTip("The channel to correct")
+        self.gain = QtWidgets.QDoubleSpinBox(decimals=4, minimum=0.0001, maximum=1000000, value=1, prefix="× ")
+        self.gain.setKeyboardTracking(False)
+        self.gain.setMinimumWidth(56)                # the Blocks panel is narrow
+        self.gain_channel.setMinimumWidth(50)
+        self.gain.setToolTip("Multiplies this channel in every analysis and analysis export, as a correction "
+                             "(say for an amplifier's gain). The recorded blocks never change. Saved with the session")
+        self.gain_channel.currentIndexChanged.connect(lambda *_: self._show_gain())
+        self.gain.valueChanged.connect(self._gain_edited)
+        self.gain_row = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(self.gain_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(self.gain_channel, 1)
+        row.addWidget(self.gain, 1)
+        self.fit_box = QtWidgets.QComboBox()
+        self.fit_box.addItems(A.FITS)
+        self.fit_box.setToolTip("Removes sampling noise and coarse voltage steps from the stimulus channel. Piecewise "
+                                "linear: pulses, steps, ramps, custom shapes. Smooth: other shapes, without shifting "
+                                "timing. Sine: a sine. Repeat average, Harmonics: anything that repeats. The recorded "
+                                "blocks never change. Saved with the session")
+        self.fit_box.currentTextChanged.connect(self._fit_picked)
+
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setDocumentMode(True)
         self.raw = RawView(self)
         self.compare = CompareView(self)
         self.tabs.addTab(self.raw, "Spike Sorting")
-        self.tabs.addTab(self.compare, "Comparison")
+        self.tabs.addTab(self.compare, "Response")
+        self.waveforms = WaveformView(self)
+        self.tabs.addTab(self.waveforms, "Waveforms")
         self.datapad = DataPadView(self)
         self.tabs.addTab(self.datapad, "DataPad")
         self.blocks_panel.add_setting("Analyze", self.raw.channel)
         self.blocks_panel.add_setting("Spread", self.spread_box)
         self.blocks_panel.add_setting("Pages", self.page_map)
         self.blocks_panel.add_setting("Trials", self.trial_map)
+        self.blocks_panel.add_setting("Gain", self.gain_row)
+        self.blocks_panel.add_setting("Stim fit", self.fit_box)
         self.blocks_panel.color_requested.connect(self.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.set_page_color(name, None))
         body = QtWidgets.QHBoxLayout()
@@ -157,8 +206,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.slider.valueChanged.connect(self.current.setValue)
         self.current.valueChanged.connect(self._current_changed)
         self.tabs.currentChanged.connect(lambda *_: self.compare.redraw() if self.compare.isVisible() else None)
-        self.tabs.currentChanged.connect(lambda *_: self.block_bar.setVisible(self.tabs.currentWidget() is not self.raw))
-        self.block_bar.setVisible(self.tabs.currentWidget() is not self.raw)
+        self.tabs.currentChanged.connect(lambda *_: self._show_block_bar())
+        self._show_block_bar()
 
     # -- the highlighted block -----------------------------------------------------------
     def index(self) -> int:
@@ -235,6 +284,13 @@ class AnalysisPage(QtWidgets.QWidget):
         names = self.names()
         self._fill_stim_channel(recorded)             # the stimulus is a recorded channel
         self.raw.set_channels(names)
+        keep = self.gain_channel.currentText()
+        self.gain_channel.blockSignals(True)
+        self.gain_channel.clear()
+        self.gain_channel.addItems(recorded)
+        self.gain_channel.setCurrentIndex(max(0, self.gain_channel.findText(keep)))
+        self.gain_channel.blockSignals(False)
+        self._show_gain()
         self.compare.set_channels(names)
         self.datapad.set_channels(names)
         self.compare.stimulus_channel_changed()
@@ -252,20 +308,60 @@ class AnalysisPage(QtWidgets.QWidget):
         return name in b["channel_names"] or (calc is not None and
                                               self._chain.needs.get(name, {""}) <= set(b["channel_names"]))
 
-    def trace(self, i: int, name: str) -> np.ndarray | None:
+    def gain_of(self, name: str) -> float:
+        return self._looks["gains"].get(name, 1.0)
+
+    def recorded(self, i: int, name: str) -> np.ndarray | None:
+        """A channel of block i with its gain, before any stimulus fit."""
         b = self.blocks[i] if 0 <= i < len(self.blocks) else None
         if b is None:
             return None
         if name in b["channel_names"]:
-            return b["data"][b["channel_names"].index(name)]
+            y = b["data"][b["channel_names"].index(name)]
+            g = self.gain_of(name)
+            return y if g == 1 else y * g
         calc = getattr(self, "_calcs", {}).get(name)
         if calc is None or not self._chain.needs.get(name, {""}) <= set(b["channel_names"]):
             return None
-        env = dict(zip(b["channel_names"], b["data"]))
+        gains = self._looks["gains"]
+        env = {n: y * gains.get(n, 1.0) for n, y in zip(b["channel_names"], b["data"])}
         # worked out once per block file (zero-phase), shared with the Acquisition tab
-        ys = self.main.store.memo(self._paths[i], ("calcs", self._chain.key()),
-                                  lambda: self._chain.offline(env, b["sample_rate"]))
+        key = ("calcs", self._chain.key()) if not gains else ("calcs", self._chain.key(), tuple(sorted(gains.items())))
+        ys = self.main.store.memo(self._paths[i], key, lambda: self._chain.offline(env, b["sample_rate"]))
         return ys[[c.name for c in self._chain.calcs].index(name)]
+
+    def trace(self, i: int, name: str) -> np.ndarray | None:
+        """A channel of block i as every analysis sees it: with its gain and, on the
+        stimulus channel, the stimulus fit."""
+        y = self.recorded(i, name)
+        fit = self._looks["stim_fit"]
+        if y is None or not fit or fit == "Off" or name != self.stim_channel.currentData():
+            return y
+        hand = self.compare.repeat_setting()
+        return self.main.store.memo(
+            self._paths[i], ("fit", name, fit, self.gain_of(name), hand),
+            lambda: A.fit_stimulus(y, self.blocks[i]["sample_rate"], fit, *hand))
+
+    def _show_gain(self) -> None:
+        self.gain.blockSignals(True)
+        self.gain.setValue(self.gain_of(self.gain_channel.currentText()))
+        self.gain.blockSignals(False)
+
+    def _gain_edited(self, v: float) -> None:
+        gains = {**self._looks["gains"], self.gain_channel.currentText(): v}
+        self._looks = {**self._looks, "gains": {k: g for k, g in gains.items() if g != 1}}
+        self._data_changed()
+
+    def _fit_picked(self, kind: str) -> None:
+        self._looks = {**self._looks, "stim_fit": "" if kind == "Off" else kind}
+        self.compare._charts_changed()
+        self._data_changed()
+
+    def _data_changed(self) -> None:
+        """A gain or fit changes what every analysis reads."""
+        self._save_looks()
+        if self.datapad.rows:
+            self.datapad.recompute()
 
     def unit_of(self, name: str) -> str:
         calc = getattr(self, "_calcs", {}).get(name)
@@ -398,16 +494,19 @@ class AnalysisPage(QtWidgets.QWidget):
         """Use the colours saved with this session, if it has any yet."""
         if self._folder() is not None:
             self._looks = d
-        for box, key in ((self.page_map, "page_map"), (self.trial_map, "trial_map")):
+        for box, key in ((self.page_map, "page_map"), (self.trial_map, "trial_map"), (self.fit_box, "stim_fit")):
             box.blockSignals(True)
             box.setCurrentIndex(max(0, box.findText(self._looks.get(key, ""))))
             box.blockSignals(False)
+        self._show_gain()
+        self.compare._charts_changed()
 
     def _save_looks(self) -> None:
         folder = self._folder()
         if folder is not None:
             d = pages.load(folder)
-            pages.save(folder, {**d, **{k: self._looks[k] for k in ("colors", "page_map", "trial_map")}})
+            pages.save(folder, {**d, **{k: self._looks[k] for k in ("colors", "page_map", "trial_map", "gains",
+                                                                    "stim_fit")}})
         self._compute_groups()
         self.main._fill_recorded()                  # the Acquisition Blocks panel shows them too
         self.groups_changed()
@@ -510,7 +609,8 @@ class AnalysisPage(QtWidgets.QWidget):
         y = self.trace(i, how)
         if y is None:
             return None
-        sig = self._signature_of(self._paths, how)(i, y, b["sample_rate"])
+        sig = self.main.store.memo(self._paths[i], ("as read", how, self.gain_of(how), self._looks["stim_fit"]),
+                                   lambda: A.stimulus_signature(y, b["sample_rate"]))
         if sig is not None and sig[0] == "wave":
             # a wave starts where the channel first leaves its middle level
             moved = np.flatnonzero(np.abs(np.nan_to_num(y) - sig[3]) > 0.1 * sig[2])
@@ -536,12 +636,18 @@ class AnalysisPage(QtWidgets.QWidget):
     def events_changed(self) -> None:
         if self.compare.isVisible():
             self.compare.redraw()
+        if self.waveforms.isVisible():
+            self.waveforms.redraw()
+
+    def _show_block_bar(self) -> None:
+        self.block_bar.setVisible(self.tabs.currentWidget() not in (self.raw, self.compare, self.waveforms))
 
     # -- looks ----------------------------------------------------------------------------
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         self.raw.apply_theme(mode)
         self.compare.apply_theme(mode)
+        self.waveforms.apply_theme(mode)
         self.datapad.apply_theme(mode)
 
 
@@ -578,8 +684,15 @@ class RawView(View):
         self.rate_bin.setMaximumWidth(76)
         self.point_size = QtWidgets.QSpinBox(minimum=1, maximum=12)
         self.point_size.setValue(self.main.settings.value("raster_point_size", 2, type=int))
-        self.point_size.setToolTip("The size of the points in the raster")
+        self.point_size.setToolTip("The size of the dots in the raster")
+        self.mark_size = QtWidgets.QSpinBox(minimum=1, maximum=20)
+        self.mark_size.setValue(self.main.settings.value("mark_point_size", 9, type=int))
+        self.mark_size.setToolTip("The size of the dots marking each spike on the raw data")
         self.point_size.setMaximumWidth(56)
+        self.mark_size.setMaximumWidth(56)
+        self.show_thr = QtWidgets.QCheckBox()
+        self.show_thr.setChecked(self.main.settings.value("show_threshold", True, type=bool))
+        self.show_thr.setToolTip("Show the threshold line on the raw data. Hiding it doesn't change the search")
 
         box = QtWidgets.QGroupBox("Find action potentials")
         f = QtWidgets.QFormLayout(box)
@@ -652,11 +765,16 @@ class RawView(View):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setToolTip("Point at a unit, or click it (Cmd/Shift-click for several), to see only "
-                              "that unit on every graph")
-        self.table.setMouseTracking(True)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
+        self.table.setToolTip("Tick the units to include: every chart here and on the other tabs shows just those")
         left.addWidget(self.table, 1)
+        dots = QtWidgets.QHBoxLayout()
+        dots.addWidget(QtWidgets.QLabel("Dot size: raster"))
+        dots.addWidget(self.point_size)
+        dots.addWidget(QtWidgets.QLabel("raw data"))
+        dots.addWidget(self.mark_size)
+        dots.addStretch(1)
+        left.addLayout(dots)
         self.charts_slot = QtWidgets.QVBoxLayout()   # the Charts box, once the charts exist
         left.addLayout(self.charts_slot)
         self.message = QtWidgets.QLabel()
@@ -700,14 +818,12 @@ class RawView(View):
         sp.showGrid(x=True, y=True, alpha=0.2)
         sp.setXLink(self.overlay)
         sp.getAxis("bottom").setStyle(showValues=False)
-        self.stim_curve = OverlayCurve()
-        self.stim_curve.mode = "peak"
-        sp.addItem(self.stim_curve)
+        self.stim_items: list[OverlayCurve] = []  # in the colours of the responses below
         self.stim_onsets = pg.ScatterPlotItem(size=10, symbol="t1", pen=None, brush=pg.mkBrush("#E69F00"))
         sp.addItem(self.stim_onsets)
         self.stim_plot.setMaximumHeight(170)
         self.rate_corner = PlotCorner(self.rate_plot, "Bins", self.rate_bin)
-        self.raster_corner = PlotCorner(self.raster, "Size", self.point_size)
+        self.overlay_corner = PlotCorner(self.overlay, "Threshold", self.show_thr)
         for w in (self.stim_plot, self.overlay, self.raster, self.rate_plot):
             mid.addWidget(w)
         mid.setSizes([110, 360, 220, 180])
@@ -768,14 +884,14 @@ class RawView(View):
 
         op = self.overlay.getPlotItem()
         self.trial_items: list[OverlayCurve] = []    # the trials shown, one item per colour
-        self.marks = pg.ScatterPlotItem(size=9, pen=None)
+        self.marks = pg.ScatterPlotItem(size=self.mark_size.value(), pen=None)
         self.marks.setZValue(20)
         op.addItem(self.marks)
         # the highlighted unit's events, drawn over the trace in its colour
         self.event_hl = pg.PlotCurveItem(connect="finite")
         self.event_hl.setZValue(15)
         op.addItem(self.event_hl)
-        self._hover_unit: int | None = None
+        self._unticked: set[int] = set()            # units left out of the charts
         self._unit_items: dict[int, list] = {}      # unit -> its items on the size, interval and waveform plots
         self._rate_items: dict[int | None, object] = {}   # unit (None: all of them) -> its rate curve
         self._heights: tuple | None = None          # (events, each event's height on its trace)
@@ -798,7 +914,7 @@ class RawView(View):
         self.raster.getPlotItem().addItem(self.group_marks)
         self.group_avgs: list[TraceCurve] = []
         self.bands: list = []                     # ± SD / SEM shading (Spread, in the Blocks panel)
-        self.overlay_legend = op.addLegend(offset=(-10, 10))
+        self.overlay_legend = op.addLegend(offset=(-10, 30))     # below the Threshold box
         self.cur_band = pg.LinearRegionItem(movable=False, orientation="horizontal")
         self.cur_band.setZValue(-10)
         self.raster.getPlotItem().addItem(self.cur_band)
@@ -809,11 +925,11 @@ class RawView(View):
         self.btn_find.clicked.connect(self._find_pressed)
         self.btn_clear.clicked.connect(self.clear)
         self.point_size.valueChanged.connect(self._point_size_changed)
+        self.mark_size.valueChanged.connect(self._mark_size_changed)
+        self.show_thr.toggled.connect(self._show_thr_changed)
         self.btn_export.clicked.connect(self._export_dialog)
         self.thr_line.sigPositionChangeFinished.connect(self._threshold_dragged)
-        self.table.itemSelectionChanged.connect(self._apply_highlight)
-        self.table.cellEntered.connect(lambda r, _c: self._hover(r))
-        self.table.viewport().installEventFilter(self)
+        self.table.itemChanged.connect(self._unit_ticked)
         # Changing how events are found searches again, once the changes stop.
         self._find_timer = QtCore.QTimer(self, singleShot=True, interval=250)
         self._find_timer.timeout.connect(self._find_again)
@@ -832,7 +948,8 @@ class RawView(View):
             ("PCA map", "Each spike as a point, coloured by its unit", self.pca),
             ("Waveforms", "The spikes of each unit", self.wave_plot),
             ("AP sizes", "A histogram of each unit's spike sizes", self.hist),
-            ("Intervals", "A histogram of the time between each unit's spikes", self.isi)], self._charts_changed)
+            ("Intervals", "A histogram of the time between each unit's spikes", self.isi)], self._charts_changed,
+            self._show_scale_bars)
         self.charts_slot.addWidget(self.charts)
         self.charts.apply()
         self.apply_theme(style.LIGHT)
@@ -904,21 +1021,7 @@ class RawView(View):
 
     def _band(self, x: np.ndarray, mean: np.ndarray, spread: np.ndarray, color: str) -> None:
         """A shaded band from mean − spread to mean + spread."""
-        p = self.overlay.getPlotItem()
-        edges = []
-        for sign in (1, -1):
-            c = TraceCurve()
-            c.setPen(pg.mkPen(None))
-            c.setZValue(4)
-            p.addItem(c)
-            c.setData(x, mean + sign * np.nan_to_num(spread))
-            edges.append(c)
-        fill = QtGui.QColor(color)
-        fill.setAlpha(55)
-        band = pg.FillBetweenItem(edges[0], edges[1], brush=pg.mkBrush(fill))
-        band.setZValue(4)
-        p.addItem(band)
-        self.bands += edges + [band]
+        self.bands += _draw_band(self.overlay.getPlotItem(), x, mean, spread, color)
 
     def _draw_trials(self, Y: np.ndarray, chosen: list[int], trials: list[int], fs: float) -> None:
         """The trials, one item for each colour, so hundreds of them stay quick."""
@@ -980,6 +1083,16 @@ class RawView(View):
                                  brush=[pg.mkBrush(self.page.group_color(g)) for _, g in marks])
         self._draw_stimulus()
         self.draw_current()
+        self._show_scale_bars()
+
+    def _show_scale_bars(self) -> None:
+        """All four plots lose their axes together, so they still line up in time."""
+        on, fg = self.charts.bars.isChecked(), self._fg()
+        how = self.page.how()
+        show_scale_bar(self.stim_plot, on, fg, self.page.unit_of(how) if how and how != "notes" else None)
+        show_scale_bar(self.overlay, on, fg, self._unit(), "s")
+        show_scale_bar(self.raster, on, fg)
+        show_scale_bar(self.rate_plot, on, fg, None if self.norm_rate.isChecked() else "spikes/s")
 
     def _set_time_limits(self, limits: tuple[float, float] | None) -> None:
         """The central plots share one time axis, ending where the data does."""
@@ -1015,7 +1128,9 @@ class RawView(View):
         """The chosen blocks' stimulus channel above the traces (or the notes' times)."""
         how, chosen = self.page.how(), self.chosen_or_none()
         sp = self.stim_plot.getPlotItem()
-        self.stim_curve.set_traces(np.empty((0, 0)), 1.0)
+        for item in self.stim_items:
+            sp.removeItem(item)
+        self.stim_items = []
         self.stim_onsets.setData([], [])
         self._draw_stimulus_visible()
         if not how or not chosen:
@@ -1036,7 +1151,17 @@ class RawView(View):
         Y = np.full((len(traces), max(len(y) for y in traces.values())), np.nan)
         for r, y in enumerate(traces.values()):
             Y[r, :len(y)] = y
-        self.stim_curve.set_traces(Y, fs)
+        rows = {i: r for r, i in enumerate(traces)}
+        averaged, trials = self.page.plan(list(traces))
+        sets = [(QtGui.QColor(self.page.group_color(g)), blocks) for g, _, blocks in averaged]
+        sets += [(c, [i]) for i, c in self.page.trial_colors(trials).items()]
+        for color, blocks in sets:
+            item = OverlayCurve()
+            item.mode = "peak"
+            item.setPen(pg.mkPen(color, width=1.2))
+            sp.addItem(item)
+            item.set_traces(Y[[rows[i] for i in blocks]], fs)
+            self.stim_items.append(item)
         label_axis(sp, "left", how, self.page.unit_of(how))
         xs, ys = [], []
         for i, on in ons:
@@ -1048,33 +1173,32 @@ class RawView(View):
             self.stim_onsets.setData(np.concatenate(xs), np.concatenate(ys))
 
     # -- highlighting a unit --------------------------------------------------------------------
+    def shown_units(self) -> set[int]:
+        """0-based units ticked in the table: these are in the charts, on every sub-tab."""
+        n = self.events.n_units if self.events is not None else 0
+        return set(range(n)) - self._unticked
+
     def highlighted_units(self) -> set[int]:
-        """0-based units to highlight: the one pointed at, else the ones selected."""
-        if self._hover_unit is not None:
-            return {self._hover_unit}
-        return {r.row() for r in self.table.selectionModel().selectedRows()}
+        """The units picked out, if some are unticked; with all of them on, none is."""
+        on = self.shown_units()
+        return on if self.events is not None and len(on) < self.events.n_units else set()
 
-    def select_units(self, units) -> None:
-        self.table.clearSelection()
-        mode = self.table.selectionMode()
-        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
-        for u in units:
-            self.table.selectRow(u)
-        self.table.setSelectionMode(mode)
+    def show_units(self, units) -> None:
+        """Tick just these units."""
+        for r in range(self.table.rowCount()):
+            self.table.item(r, 0).setCheckState(QtCore.Qt.CheckState.Checked if r in units
+                                                else QtCore.Qt.CheckState.Unchecked)
 
-    def _hover(self, row: int | None) -> None:
-        if row != self._hover_unit:
-            self._hover_unit = row
+    def _unit_ticked(self, item: QtWidgets.QTableWidgetItem) -> None:
+        if item.column() != 0:
+            return
+        u = item.row()
+        was = u in self._unticked
+        now = item.checkState() != QtCore.Qt.CheckState.Checked
+        if was != now:
+            self._unticked ^= {u}
             self._apply_highlight()
-
-    def eventFilter(self, obj, ev):
-        if obj is self.table.viewport() and ev.type() == QtCore.QEvent.Type.Leave:
-            self._hover(None)
-        elif isinstance(obj, ColorButton) and ev.type() == QtCore.QEvent.Type.Enter:
-            self._hover(obj.property("unit"))
-        elif isinstance(obj, ColorButton) and ev.type() == QtCore.QEvent.Type.Leave:
-            self._hover(None)
-        return super().eventFilter(obj, ev)
+            self.page.events_changed()
 
     def color_of(self, u: int) -> str:
         """Unit u's colour (0-based): the one picked for it, else its place in the palette."""
@@ -1103,10 +1227,11 @@ class RawView(View):
         return self._heights[1]
 
     def _apply_highlight(self) -> None:
-        """Mark the events on the chosen blocks. With units highlighted, every graph shows
-        only those units, and their spikes are drawn over the blocks in their colour."""
+        """Mark the events on the chosen blocks. Every graph shows only the ticked units, and
+        if some are unticked, the spikes of the rest are drawn over the blocks in their colour."""
         ev = self.events
-        hl = self.highlighted_units() if ev is not None else set()
+        hl = self.highlighted_units()
+        on = self.shown_units()
         self.event_hl.setData(np.empty(0), np.empty(0))
         for item in self.trial_items:                     # the highlighted spikes stand out from them
             item.setOpacity(0.35 if hl else 1.0)
@@ -1114,21 +1239,29 @@ class RawView(View):
             self.marks.setData([], [])
             self.raster_dots.setData([], [])
             return
-        show = np.isin(ev.unit, list(hl)) if hl else np.ones(len(ev.t), bool)
+        show = np.isin(ev.unit, list(on))
         self.marks.setData(ev.t[show], self._event_heights()[show], brush=self._brushes(ev.unit[show]),
-                           size=9 if hl else 6, pen=pg.mkPen(self._fg(), width=1) if hl else pg.mkPen(None))
+                           size=self.mark_size.value(), pen=pg.mkPen(self._fg(), width=1) if hl else pg.mkPen(None))
         self.raster_dots.setData(ev.t[show], self._event_rows(ev)[show], brush=self._brushes(ev.unit[show]),
                                  size=self.point_size.value())
         if hl:
             self._draw_spikes(np.flatnonzero(show), hl)
         for u, items in self._unit_items.items():
             for item in items:
-                item.setVisible(not hl or u in hl)
-        self._show_rates(hl)
+                item.setVisible(u in on)
+        self._show_rates(on)
 
     def _point_size_changed(self, v: int) -> None:
         self.main.settings.setValue("raster_point_size", v)
         self._apply_highlight()
+
+    def _mark_size_changed(self, v: int) -> None:
+        self.main.settings.setValue("mark_point_size", v)
+        self._apply_highlight()
+
+    def _show_thr_changed(self, on: bool) -> None:
+        self.main.settings.setValue("show_threshold", on)
+        self._draw_threshold()
 
     def _draw_spikes(self, which: np.ndarray, hl: set[int]) -> None:
         """Events `which`, drawn over their blocks' traces."""
@@ -1150,10 +1283,11 @@ class RawView(View):
             color = self.color_of(next(iter(hl))) if len(hl) == 1 else self._fg()
             self.event_hl.setData(np.concatenate(xs), np.concatenate(ys), pen=pg.mkPen(color, width=2.5))
 
-    def _show_rates(self, hl: set[int]) -> None:
+    def _show_rates(self, on: set[int]) -> None:
         split = len(self._rate_items) > 1        # all units together is just one more curve
+        every = self.events is not None and len(on) == self.events.n_units
         for u, item in self._rate_items.items():
-            item.setVisible(not hl or not split or u in hl)
+            item.setVisible(every or (split and u in on))
 
     def _baseline(self) -> float:
         y = self._trace(self.page.index()) if self.blocks else None
@@ -1228,7 +1362,7 @@ class RawView(View):
         self.thr_label.setFormat(f"threshold {self._fmt(level)}")
         self.thr_label.anchors = [(1, 1 if sign > 0 else 0)] * 2     # on the side away from the traces
         self.thr_label.updatePosition()
-        self.thr_line.show()
+        self.thr_line.setVisible(self.show_thr.isChecked())
 
     def _threshold_dragged(self) -> None:
         level = abs(self.thr_line.value() - self._baseline())
@@ -1252,6 +1386,7 @@ class RawView(View):
         self._find_timer.stop()
         self._paused = True
         self.events = None
+        self._unticked = set()
         self._show_results()
         self.draw_current()
         self.page.events_changed()
@@ -1300,10 +1435,8 @@ class RawView(View):
 
     def _show_results(self) -> None:
         ev = self.events
-        keep = {r.row() for r in self.table.selectionModel().selectedRows()}
         self.table.blockSignals(True)
         self.table.setRowCount(0)
-        self.table.blockSignals(False)
         wp, hp, ip, cp = (pw.getPlotItem() for pw in (self.wave_plot, self.hist, self.isi, self.pca))
         for p in (wp, hp, ip, cp):
             for item in list(p.listDataItems()):
@@ -1311,6 +1444,7 @@ class RawView(View):
         self.btn_export.setEnabled(ev is not None and len(ev.t) > 0)
         self._draw_rate()
         if ev is None:
+            self.table.blockSignals(False)
             self.raster_dots.setData([], [])
             return
         sizes = np.abs(ev.amplitude)
@@ -1344,13 +1478,14 @@ class RawView(View):
             self.table.insertRow(r)
             unit_item = QtWidgets.QTableWidgetItem(f"Unit {s['unit']}")
             unit_item.setIcon(style.dot_icon(self.color_of(u)))
+            unit_item.setFlags(QtCore.Qt.ItemFlag.ItemIsUserCheckable | QtCore.Qt.ItemFlag.ItemIsEnabled)
+            unit_item.setCheckState(QtCore.Qt.CheckState.Unchecked if u in self._unticked
+                                    else QtCore.Qt.CheckState.Checked)
             self.table.setItem(r, 0, unit_item)
             pick = ColorButton(self.color_of(u), lambda c, u=u: self.set_unit_color(u, c),
                                f"Pick Unit {s['unit']}'s colour, used on every graph")
             pick.setFixedWidth(26)
             pick.setText("▾")
-            pick.setProperty("unit", u)
-            pick.installEventFilter(self)            # pointing at it still highlights the unit
             self.table.setCellWidget(r, 5, pick)
             for c, text in enumerate((f"{s['count']}", f"{s['rate']:.2f} /s", self._fmt(s['amplitude']),
                                       f"{s['width_ms']:.2f} ms"), 1):
@@ -1379,10 +1514,7 @@ class RawView(View):
                 items.append(wp.plot(xs, ys, pen=pg.mkPen(faint, width=1), connect="finite"))
             items.append(wp.plot(ev.wave_t_ms, w.mean(0), pen=pg.mkPen(color, width=3)))
             self._unit_items[u] = items
-        if keep and max(keep) < self.table.rowCount():
-            self.table.blockSignals(True)
-            self.select_units(keep)
-            self.table.blockSignals(False)
+        self.table.blockSignals(False)
         self._apply_highlight()
         n = len(ev.t)
         msg = (f"{n} event(s) in {len(np.unique(ev.block))} block(s), {ev.n_units} unit(s); threshold "
@@ -1410,7 +1542,8 @@ class RawView(View):
                                              pen=pg.mkPen(self.color_of(u), width=1.5))
         self._rate_items[None] = p.plot(edges, scale(rates[None]), stepMode="center",
                                         pen=pg.mkPen(self._fg(), width=2))
-        self._show_rates(self.highlighted_units())
+        p.enableAutoRange(axis="y")                   # a new bin width changes the scale
+        self._show_rates(self.shown_units())
 
     def export(self, path: str | Path) -> Path:
         ev = self.events
@@ -1477,8 +1610,8 @@ class RawView(View):
                    self.hist, self.isi):
             style_plot(pw, th)
         self.rate_corner.place()
-        self.raster_corner.place()
-        self.stim_curve.setPen(pg.mkPen(th.foreground, width=1.2))   # the stimulus, in the text colour
+        self.overlay_corner.place()
+        self._show_scale_bars()
         trace = QtGui.QColor(cfgmod.PALETTE[1])
         self.thr_line.setPen(pg.mkPen("#e0524f", width=1.5, style=QtCore.Qt.PenStyle.DashLine))
         self.raster_dots.setBrush(pg.mkBrush(th.foreground))
@@ -1495,6 +1628,7 @@ class CompareView(View):
     def __init__(self, page: AnalysisPage):
         super().__init__(page)
         self._plots: list[pg.PlotWidget] = []
+        self._plot_units: list[str] = []
         outer = QtWidgets.QHBoxLayout(self)
         outer.setContentsMargins(0, 8, 0, 0)
         outer.setSpacing(12)
@@ -1505,7 +1639,7 @@ class CompareView(View):
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(10)
 
-        box = QtWidgets.QGroupBox("Traces: the highlighted block")
+        box = QtWidgets.QGroupBox("Traces: the chosen blocks")
         v = QtWidgets.QVBoxLayout(box)
         self.series = QtWidgets.QTableWidget(0, len(_SERIES))
         self.series.setHorizontalHeaderLabels([s for s, _ in _SERIES])
@@ -1514,30 +1648,16 @@ class CompareView(View):
         self.series.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         v.addWidget(self.series)
         f = QtWidgets.QFormLayout()
-        rate = QtWidgets.QHBoxLayout()
-        self.show_rate = QtWidgets.QCheckBox("Spike rate")
-        self.show_rate.setChecked(True)
-        self.show_rate.setToolTip("Spikes per second through the block, from the events found on the "
-                                  "Spike Sorting tab (each spike smoothed into a Gaussian)")
-        self.rate_sigma = UnitSpinBox(1, 1000, "ms", step=5)
-        self.rate_sigma.setValue(20)
-        self.rate_sigma.setToolTip("Smoothing: the SD of each spike's Gaussian")
-        rate.addWidget(self.show_rate)
-        rate.addWidget(QtWidgets.QLabel("smoothed"))
-        rate.addWidget(self.rate_sigma)
         self.d_smooth = UnitSpinBox(0, 50, "ms", step=0.1)
         self.d_smooth.setValue(0.2)
         self.d_smooth.setToolTip("Differentiating amplifies noise: average over this long first (0 = none)")
         self.layout_mode = QtWidgets.QComboBox()
-        self.layout_mode.setToolTip("Show the channels on separate axes, or on one plot with each scaled to fit")
+        self.layout_mode.setToolTip("Show the channels on separate axes, in page and trial colours like Spike "
+                                    "Sorting, or the average of each on one plot, scaled to fit")
         self.layout_mode.addItem("Stacked, each on its own axis", "stacked")
         self.layout_mode.addItem("Overlaid, each scaled to fit", "overlaid")
-        self.unit_pick = QtWidgets.QComboBox()
-        self.unit_pick.setToolTip("Which unit's spikes the rate and averages use")
-        f.addRow(rate)
         f.addRow("Smooth for d/dt", self.d_smooth)
         f.addRow("Layout", self.layout_mode)
-        f.addRow("Spikes of", self.unit_pick)
         v.addLayout(f)
         left.addWidget(box)
 
@@ -1572,6 +1692,49 @@ class CompareView(View):
         f.addRow("After spike", self.sta_after)
         left.addWidget(box)
         add_help(box, "comparison")
+
+        box = QtWidgets.QGroupBox("Stimulus cycles: the chosen blocks")
+        f = QtWidgets.QFormLayout(box)
+        self.cycle_stim = QtWidgets.QComboBox()
+        self.cycle_stim.setToolTip("The channel that records a repeating stimulus, such as a sine. Each "
+                                   "cycle starts where it rises through its middle level")
+        self.cycle_resp = QtWidgets.QComboBox()
+        self.cycle_resp.setToolTip("The channel to cut into cycles and overlay by stimulus phase")
+        self.cycle_skip = QtWidgets.QSpinBox(minimum=0, maximum=10000)
+        self.cycle_skip.setToolTip("Leave out this many cycles at the start of each block, "
+                                   "while the response settles")
+        self.cycle_each = QtWidgets.QCheckBox("Each cycle")
+        self.cycle_each.setChecked(True)
+        self.cycle_each.setToolTip("Draw every cycle behind the average")
+        self.cycle_map = QtWidgets.QComboBox()
+        self.cycle_map.addItems(cm.TRIAL_STYLES)
+        self.cycle_map.setCurrentText("Viridis")
+        self.cycle_map.setToolTip("How to colour the cycles, from the first of a block to the last: a colour "
+                                  "map shows how the response changes through the stimulus")
+        self.phase_bin = QtWidgets.QSpinBox(minimum=1, maximum=90, suffix="°")
+        self.phase_bin.setValue(10)
+        self.phase_bin.setToolTip("Bin width of Spikes per phase")
+        self.cycle_len = UnitSpinBox(0, 600000, "ms", step=10)
+        self.cycle_len.setToolTip("How long one repeat is. 0: Argus finds it, by matching the stimulus's shape "
+                                  "against itself, or else from its rises through its middle level")
+        self._cycle_start: float | None = None      # where you marked a repeat (s)
+        self.btn_mark = QtWidgets.QPushButton("Mark one")
+        self.btn_mark.setCheckable(True)
+        self.btn_mark.setToolTip("Then drag across one repeat on the traces, to use it as the template")
+        length = QtWidgets.QHBoxLayout()
+        length.addWidget(self.cycle_len, 1)
+        length.addWidget(self.btn_mark)
+        each = QtWidgets.QHBoxLayout()
+        each.addWidget(self.cycle_each)
+        each.addWidget(self.cycle_map, 1)
+        f.addRow("Stimulus from", self.cycle_stim)
+        f.addRow("Response", self.cycle_resp)
+        f.addRow("Repeat length", length)
+        f.addRow("Skip first", self.cycle_skip)
+        f.addRow(each)
+        f.addRow("Phase bin", self.phase_bin)
+        left.addWidget(box)
+        add_help(box, "cycles")
         self.charts_slot = QtWidgets.QVBoxLayout()   # the Charts box, once the charts exist
         left.addLayout(self.charts_slot)
         self.message = QtWidgets.QLabel()
@@ -1602,33 +1765,106 @@ class CompareView(View):
             pw.getPlotItem().showGrid(x=True, y=True, alpha=0.2)
             pw.getPlotItem().addItem(pg.InfiniteLine(0, angle=90, pen=pg.mkPen("#888", style=QtCore.Qt.PenStyle.DashLine)))
             bottom.addWidget(pw)
+        self.loop = plot_widget()
+        self.loop.getPlotItem().setTitle("Response against stimulus")
+        self.loop.getPlotItem().showGrid(x=True, y=True, alpha=0.2)
+        bottom.addWidget(self.loop)
         right.addWidget(bottom)
-        right.setSizes([520, 300])
-        outer.addWidget(right, 1)
+        self.fit_box = QtWidgets.QWidget()           # only with a stimulus fit: what it did
+        fits = QtWidgets.QVBoxLayout(self.fit_box)
+        fits.setContentsMargins(0, 0, 0, 0)
+        fits.setSpacing(2)
+        self.fit_plot, self.resid_plot = plot_widget(), plot_widget()
+        self.fit_rec, self.fit_line, self.resid_line = TraceCurve(), TraceCurve(), TraceCurve()
+        self.fit_plot.getPlotItem().addItem(self.fit_rec)
+        self.fit_plot.getPlotItem().addItem(self.fit_line)
+        self.resid_plot.getPlotItem().addItem(self.resid_line)
+        self.resid_plot.getPlotItem().setXLink(self.fit_plot)
+        for pw in (self.fit_plot, self.resid_plot):
+            pw.getPlotItem().showGrid(x=True, y=True, alpha=0.2)
+            pw.setMinimumHeight(60)
+            fits.addWidget(pw)
+        for curve in (self.fit_rec, self.fit_line, self.resid_line):
+            curve.mode = "peak"
+        right.addWidget(self.fit_box)
+        right.setSizes([520, 300, 200])
+        self._right = right
         self._bottom = bottom
+
+        # the charts on the stimulus's phase, one above the other on one axis
+        self._cycles = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.cycle_stim_plot, self.cycle_plot, self.cycle_raster, self.phase_hist = phase_plots = [
+            plot_widget() for _ in _CYCLE_STACK]
+        for pw, title in zip(phase_plots, ("Stimulus", "Response, each cycle", "Spikes by cycle", "Spikes per phase")):
+            p = pw.getPlotItem()
+            p.setTitle(title)
+            p.showGrid(x=True, y=True, alpha=0.2)
+            p.vb.bounds[0] = (0.0, 360.0)
+            p.setXRange(0, 360, padding=0)
+            p.getAxis("bottom").setTicks([[(d, f"{d}°") for d in range(0, 361, 90)]])
+            pw.setMinimumHeight(60)
+            if pw is not self.cycle_stim_plot:
+                p.setXLink(self.cycle_stim_plot)
+            self._cycles.addWidget(pw)
+        self.cycle_stim_plot.setMaximumHeight(170)
+        self.cycle_raster.getPlotItem().invertY(True)                # the first cycle at the top
+        self.cycle_raster.getPlotItem().setLabel("left", "cycle")
+        self.phase_hist.getPlotItem().setLabel("left", "spikes/cycle")
+        self.cycle_legend = self.cycle_plot.getPlotItem().addLegend(offset=(-10, 10))
+        self.phase_legend = self.phase_hist.getPlotItem().addLegend(offset=(-10, 10))
+        self._phase_axes = AxisGroup()
+        self._phase_axes.set_plots(phase_plots)
+        columns = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        columns.addWidget(right)
+        columns.addWidget(self._cycles)
+        outer.addWidget(columns, 1)
+        self._columns = columns
         self.charts = ChartToggles(self.main.settings, "comparison", [
             ("Traces", "The highlighted block's channels", self.traces_box),
             ("Stimulus-triggered rate", "How spiking changes after a stimulus", self.psth),
-            ("Spike-triggered average", "What a channel does around each spike", self.sta)], self._charts_changed)
+            ("Spike-triggered average", "What a channel does around each spike", self.sta),
+            ("Stimulus cycle", "One cycle of the stimulus, by phase", self.cycle_stim_plot),
+            ("Response by cycle", "Every cycle of the response overlaid by phase", self.cycle_plot),
+            ("Spikes by cycle", "A raster of each cycle's spikes, by phase", self.cycle_raster),
+            ("Spikes per phase", "When in the cycle spikes happen", self.phase_hist),
+            ("Response against stimulus", "The response plotted against the stimulus: a loop", self.loop),
+            ("Stimulus fit", "With a Stim fit picked: the fit over the recording, and what it left out", None)],
+            self._charts_changed, self._show_scale_bars)
         self.charts_slot.addWidget(self.charts)
         self.charts.apply()
 
         self.series.itemChanged.connect(lambda *_: self.redraw_traces())
-        for w in (self.show_rate,):
-            w.toggled.connect(lambda *_: self.redraw_traces())
-        for w in (self.rate_sigma, self.d_smooth):
-            w.valueChanged.connect(lambda *_: self.redraw_traces())
+        self.d_smooth.valueChanged.connect(lambda *_: self.redraw_traces())
         self.layout_mode.currentIndexChanged.connect(lambda *_: self.redraw_traces())
-        self.unit_pick.currentIndexChanged.connect(lambda *_: self.redraw())
         for w in (self.trigger, self.sta_channel):
             w.currentIndexChanged.connect(lambda *_: self.redraw_averages())
         for w in (self.before, self.after, self.bin, self.sta_before, self.sta_after):
             w.valueChanged.connect(lambda *_: self.redraw_averages())
+        for w in (self.cycle_stim, self.cycle_resp, self.cycle_map):
+            w.currentIndexChanged.connect(lambda *_: self.redraw_cycles())
+        for w in (self.cycle_skip, self.phase_bin):
+            w.valueChanged.connect(lambda *_: self.redraw_cycles())
+        self.cycle_each.toggled.connect(lambda *_: self.redraw_cycles())
+        self.cycle_len.valueChanged.connect(self._repeat_typed)
+        self.btn_mark.toggled.connect(lambda *_: self._listen_for_mark())
         self.apply_theme(style.LIGHT)
 
     def _charts_changed(self) -> None:
-        self._bottom.setVisible(self.charts.is_on("Stimulus-triggered rate")
-                                or self.charts.is_on("Spike-triggered average"))
+        on = self.charts.is_on
+        self._bottom.setVisible(on("Stimulus-triggered rate") or on("Spike-triggered average")
+                                or on("Response against stimulus"))
+        self.fit_box.setVisible(on("Stimulus fit") and bool(self.page._looks["stim_fit"]))
+        self._right.setVisible(self._bottom.isVisibleTo(self) or on("Traces") or self.fit_box.isVisibleTo(self))
+        stack = [n for n in _CYCLE_STACK if on(n)]
+        self._cycles.setVisible(bool(stack))
+        for name, pw in zip(_CYCLE_STACK, (self.cycle_stim_plot, self.cycle_plot, self.cycle_raster, self.phase_hist)):
+            last = bool(stack) and name == stack[-1]              # the phases, once, along the bottom
+            pw.getPlotItem().getAxis("bottom").setStyle(showValues=last)
+            pw.getPlotItem().setLabel("bottom", "stimulus phase" if last else None)
+        even_out(self._bottom)
+        even_out(self._columns)
+        if self.isVisible():
+            self.redraw_cycles()
 
     # -- settings ------------------------------------------------------------------------------
     def set_channels(self, names: list[str]) -> None:
@@ -1658,15 +1894,27 @@ class CompareView(View):
                 i = next((k for k in range(combo.count()) if "stim" in str(combo.itemData(k)).lower()), 0)
             combo.setCurrentIndex(max(0, i))
             combo.blockSignals(False)
+        stim = next((k for k, name in enumerate(names) if "stim" in name.lower()), 0)
+        for combo, first in ((self.cycle_stim, stim), (self.cycle_resp, 1 if stim == 0 else 0)):
+            keep = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(names)
+            i = combo.findText(keep)
+            combo.setCurrentIndex(i if i >= 0 else min(first, len(names) - 1))
+            combo.blockSignals(False)
         if self.isVisible():
             self.redraw()
 
     def stimulus_channel_changed(self) -> None:
-        """Use the Stimulus channel picked in the Blocks panel for the stimulus-triggered rate."""
+        """Use the Stimulus channel picked in the Blocks panel for the stimulus-triggered rate
+        and the cycles."""
         ch = self.page.stim_channel.currentData()
         i = self.trigger.findData(ch) if ch else 0
         if i >= 0:
             self.trigger.setCurrentIndex(i)
+        if ch and self.cycle_stim.findText(ch) >= 0:
+            self.cycle_stim.setCurrentText(ch)
 
     def _ticked(self) -> set[tuple[str, int]]:
         out = set()
@@ -1679,28 +1927,15 @@ class CompareView(View):
         return out
 
     def _events_of_unit(self):
-        """(block -> spike times s) for the picked unit, or None without events."""
+        """(block -> spike times s) of the units ticked on Spike Sorting, or None without events."""
         ev = self.page.events
         if ev is None:
             return None
-        u = self.unit_pick.currentData()
-        m = np.ones(len(ev.t), bool) if u is None else ev.unit == u
+        m = np.isin(ev.unit, list(self.page.raw.shown_units()))
         out: dict[int, np.ndarray] = {}
         for b in np.unique(ev.block[m]):
             out[int(b)] = ev.t[m & (ev.block == b)]
         return out
-
-    def _sync_units(self) -> None:
-        ev = self.page.events
-        keep = self.unit_pick.currentData()
-        self.unit_pick.blockSignals(True)
-        self.unit_pick.clear()
-        self.unit_pick.addItem("All units", None)
-        for u in range(ev.n_units if ev is not None else 0):
-            self.unit_pick.addItem(style.dot_icon(self.page.raw.color_of(u)), f"Unit {u + 1}", u)
-        i = self.unit_pick.findData(keep)
-        self.unit_pick.setCurrentIndex(max(0, i))
-        self.unit_pick.blockSignals(False)
 
     # -- drawing -------------------------------------------------------------------------------
     def showEvent(self, ev):
@@ -1708,7 +1943,6 @@ class CompareView(View):
         self.redraw()
 
     def redraw(self) -> None:
-        self._sync_units()
         self.redraw_traces()
         self.redraw_averages()
 
@@ -1718,37 +1952,74 @@ class CompareView(View):
             pw.deleteLater()
         self._plots = []
 
+    def _draw_series(self, p: pg.PlotItem, ys: dict[int, np.ndarray], fs: float) -> None:
+        """One channel of the chosen blocks, by Spike Sorting's rules: a picked page's average
+        (with its Spread), a picked block's trial, in their colours."""
+        page = self.page
+        averaged, trials = page.plan(list(ys))
+        Y = np.full((len(ys), max(len(y) for y in ys.values())), np.nan)
+        rows = {b: r for r, b in enumerate(ys)}
+        for b, y in ys.items():
+            Y[rows[b], :len(y)] = y
+        by_color: dict[str, tuple[QtGui.QColor, list[int]]] = {}
+        for b, c in page.trial_colors(trials).items():
+            by_color.setdefault(c.name(QtGui.QColor.NameFormat.HexArgb), (c, []))[1].append(rows[b])
+        for color, picked in by_color.values():
+            item = OverlayCurve()
+            item.mode = "peak"
+            item.setPen(pg.mkPen(color, width=1))
+            p.addItem(item)
+            item.set_traces(Y[picked], fs)
+        x = np.arange(Y.shape[1]) / fs
+        spread = page.spread()
+        for g, _, blocks in averaged:
+            mean, sd, sem, _ = A.mean_spread(Y[[rows[b] for b in blocks]])
+            color = page.group_color(g)
+            if spread:
+                _draw_band(p, x, mean, sd if spread == "sd" else sem, color)
+            item = TraceCurve()
+            item.mode = "peak"
+            item.setPen(pg.mkPen(color, width=2))
+            item.setZValue(6)
+            p.addItem(item)
+            item.setData(x, mean)
+
+    def _mark_cuts(self, p: pg.PlotItem, ys: dict[int, np.ndarray], fs: float) -> None:
+        """Where each repeat starts, on the stimulus's own trace, to check the cuts by eye."""
+        xs, heights = [], []
+        for b, y in ys.items():
+            at = self._repeats(b).bounds[:, 0]
+            xs.append(at / fs)
+            heights.append(y[np.clip(np.round(at).astype(int), 0, len(y) - 1)])
+        if xs and len(np.concatenate(xs)):
+            marks = pg.ScatterPlotItem(np.concatenate(xs), np.concatenate(heights), size=9, symbol="t1", pen=None,
+                                       brush=pg.mkBrush("#E69F00"))
+            marks.setZValue(8)
+            p.addItem(marks)
+
     def redraw_traces(self) -> None:
         self._clear_traces()
-        page, i = self.page, self.page.index()
-        if not page.blocks or not (0 <= i < len(page.blocks)) or page.blocks[i] is None:
+        page = self.page
+        chosen = page.raw.chosen_or_none()
+        if not chosen:
             return
-        fs = page.blocks[i]["sample_rate"]
-        series = []                                   # (label, unit, y)
+        fs = page.blocks[chosen[0]]["sample_rate"]
+        series = []                                   # (label, unit, block -> y, the channel if it's its V)
         for name, c in sorted(self._ticked(), key=lambda nc: (page.names().index(nc[0])
                                                               if nc[0] in page.names() else 99, nc[1])):
-            y = page.trace(i, name)
-            if y is None:
+            ys = {b: page.trace(b, name) for b in chosen}
+            ys = {b: y for b, y in ys.items() if y is not None}
+            if not ys:
                 continue
             unit = page.unit_of(name)
             if c == 0:
-                series.append((name, unit, np.asarray(y, float)))
+                series.append((name, unit, {b: np.asarray(y, float) for b, y in ys.items()}, name))
             else:
                 series.append((f"{name} {_SERIES[c][0]}", f"{unit}/s" if c == 1 else f"{unit}/s²",
-                               A.derivative(y, fs, c, self.d_smooth.value())))
-        n = len(page.blocks[i]["data"][0]) if page.blocks[i]["data"].size else 0
-        notes = []
-        if self.show_rate.isChecked():
-            times = self._events_of_unit()
-            if times is None:
-                notes.append("No spike rate yet: find action potentials on the Spike Sorting tab first.")
-            else:
-                series.append(("Spike rate", "spikes/s",
-                               A.rate_trace(times.get(i, np.empty(0)), n / fs, fs, self.rate_sigma.value())))
-        self._show_message(" ".join(notes))
+                               {b: A.derivative(y, fs, c, self.d_smooth.value()) for b, y in ys.items()}, None))
         if not series:
             return
-        t = np.arange(n) / fs
+        n = max(len(y) for s in series for y in s[2].values())
         th = theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT]
         colors = [cfgmod.PALETTE[(k + 1) % len(cfgmod.PALETTE)] for k in range(len(series))]
         if self.layout_mode.currentData() == "overlaid":
@@ -1756,11 +2027,14 @@ class CompareView(View):
             p = pw.getPlotItem()
             legend = p.addLegend(offset=(10, 10))
             multi = MultiAxis(p)                          # each on its own axis, fitted to the height
-            for (label, unit, y), color in zip(series, colors):
+            for (label, unit, ys, _), color in zip(series, colors):
+                Y = np.full((len(ys), n), np.nan)
+                for r, y in enumerate(ys.values()):
+                    Y[r, :len(y)] = y
                 curve = TraceCurve()
                 curve.mode = "peak"
                 curve.setPen(pg.mkPen(color, width=1.5))
-                curve.setData(t, y)
+                curve.setData(np.arange(n) / fs, A.mean_spread(Y)[0])
                 multi.add(curve, label, unit, color)
                 legend.addItem(curve, label)
             multi.fit()
@@ -1768,22 +2042,21 @@ class CompareView(View):
             plots = [pw]
         else:
             plots = []
-            for (label, unit, y), color in zip(series, colors):
+            for label, unit, ys, channel in series:
                 pw = plot_widget()
                 p = pw.getPlotItem()
                 p.setTitle(label, size="9pt")                     # the name above, the unit beside
                 label_axis(p, "left", "", unit)
-                curve = TraceCurve()
-                curve.mode = "peak"
-                curve.setPen(pg.mkPen(color, width=1.2))
-                p.addItem(curve)
-                curve.setData(t, y)
+                self._draw_series(p, ys, fs)
+                if channel is not None and channel == self.cycle_stim.currentText():
+                    self._mark_cuts(p, ys, fs)
                 if plots:
                     p.setXLink(plots[0])
                 plots.append(pw)
         for pw in plots:
             p = pw.getPlotItem()
             p.showGrid(x=True, y=True, alpha=0.2)
+            p.vb.bounds[0] = (0.0, n / fs)
             style_plot(pw, th)
             self.traces_lay.addWidget(pw, 1)
         # plain seconds on every row, so they read the same
@@ -1791,14 +2064,26 @@ class CompareView(View):
             pw.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
         if self.layout_mode.currentData() == "overlaid":
             self._multi.recolor()                         # the theme reset the left axis's colour
-        plots[-1].getPlotItem().setLabel("bottom", f"time in block {i + 1} (s)")
+        plots[-1].getPlotItem().setLabel("bottom", "time in block (s)")
         plots[0].getPlotItem().setXRange(0, n / fs, padding=0)
         self._plots = plots
         self._trace_axes.set_plots(plots)             # the stacked traces line up
+        self._plot_units = [s[1] for s in series] if len(plots) == len(series) else []
+        self._listen_for_mark()
+        self._show_scale_bars()
+
+    def _show_scale_bars(self) -> None:
+        """The stacked traces, each with its own unit and the last with the time too."""
+        for k, (pw, unit) in enumerate(zip(self._plots, self._plot_units)):
+            show_scale_bar(pw, self.charts.bars.isChecked(), self._fg(), unit,
+                           "s" if k == len(self._plots) - 1 else None)
 
     def redraw_averages(self) -> None:
+        self.redraw_cycles()
         page = self.page
         pp, sp = self.psth.getPlotItem(), self.sta.getPlotItem()
+        for p in (pp, sp):
+            p.enableAutoRange()                       # a new window or bin can change the scale
         for p in (pp, sp):
             for item in list(p.listDataItems()):
                 p.removeItem(item)
@@ -1890,11 +2175,208 @@ class CompareView(View):
         sp.setTitle(f"Spike-triggered average of {name} ({n} spikes{tag})" if n else
                     "Spike-triggered average: no spikes far enough from the block ends", color=self._fg())
 
+    def _redraw_fit(self) -> None:
+        """The stimulus fit of the first chosen block over the recording, and what it left out."""
+        page, stim = self.page, self.page.stim_channel.currentData()
+        chosen = page.raw.chosen_or_none()
+        fit = page._looks["stim_fit"]
+        if not self.fit_box.isVisibleTo(self) or not chosen or not stim:
+            return
+        b = chosen[0]
+        y, line = page.recorded(b, stim), page.trace(b, stim)
+        if y is None:
+            return
+        t = np.arange(len(y)) / page.blocks[b]["sample_rate"]
+        faint = QtGui.QColor(self._fg())
+        faint.setAlpha(110)
+        self.fit_rec.setPen(pg.mkPen(faint, width=1))
+        self.fit_line.setPen(pg.mkPen("#e0524f", width=1.5))
+        self.resid_line.setPen(pg.mkPen(self._fg(), width=1))
+        self.fit_rec.setData(t, np.asarray(y, float))
+        self.fit_line.setData(t, line)
+        self.resid_line.setData(t, y - line)
+        unit = page.unit_of(stim)
+        rms = float(np.sqrt(np.nanmean((y - line) ** 2)))
+        self.fit_plot.getPlotItem().setTitle(f"Stimulus fit: {fit}, block {b + 1} (red, over the recording)",
+                                             color=self._fg())
+        self.resid_plot.getPlotItem().setTitle(f"What the fit left out (RMS {with_unit(rms, unit)})", color=self._fg())
+        label_axis(self.fit_plot.getPlotItem(), "left", stim, unit)
+        label_axis(self.resid_plot.getPlotItem(), "left", "", unit)
+        for pw in (self.fit_plot, self.resid_plot):
+            pw.getPlotItem().enableAutoRange()
+
+    # -- stimulus cycles -------------------------------------------------------------------------
+    def repeat_setting(self) -> tuple[float, float | None]:
+        """What you said of the repeats: (length s, 0 to find it; start s, or None)."""
+        return self.cycle_len.value() / 1000, self._cycle_start
+
+    def _repeat_typed(self) -> None:
+        self._cycle_start = None
+        self._repeats_changed()
+
+    def _repeats_changed(self) -> None:
+        if self.page._looks["stim_fit"] in ("Repeat average", "Harmonics"):
+            self.page.groups_changed()              # those fits follow the repeats
+        self.redraw()
+
+    def _listen_for_mark(self) -> None:
+        for pw in self._plots:
+            pw.getPlotItem().vb.on_drag_select = self._marked if self.btn_mark.isChecked() else None
+
+    def _marked(self, x0: float, x1: float, finished: bool) -> None:
+        if finished and x1 > x0:
+            self.cycle_len.blockSignals(True)
+            self.cycle_len.setValue((x1 - x0) * 1000)
+            self.cycle_len.blockSignals(False)
+            self._cycle_start = x0
+            self.btn_mark.setChecked(False)
+            self._repeats_changed()
+
+    def _repeats(self, b: int) -> A.Repeats:
+        """The repeats in block b, worked out once for each way of finding them."""
+        page, stim = self.page, self.cycle_stim.currentText()
+        y = page.trace(b, stim) if stim else None
+        if y is None:
+            return A.Repeats(np.empty((0, 2)))
+        hand = self.repeat_setting()
+        return self.main.store.memo(page._paths[b], ("repeats", stim, page.gain_of(stim), page._looks["stim_fit"], hand),
+                                    lambda: A.find_repeats(y, page.blocks[b]["sample_rate"], *hand))
+
+    def _cycle_sets(self) -> tuple[dict[int, np.ndarray], list[tuple[str, QtGui.QColor, list[int]]]]:
+        """Each chosen block's cycles, and what to draw of them: (block -> cycles, [(name,
+        colour, its blocks)]), the same pages and trials as the other charts."""
+        page = self.page
+        cycles = {}
+        for b in page.raw.chosen_or_none():
+            found = self._repeats(b).bounds[self.cycle_skip.value():]
+            if len(found):
+                cycles[b] = found
+        averaged, trials = page.plan(list(cycles))
+        colors = page.trial_colors(trials)
+        sets = [(name, QtGui.QColor(page.group_color(g)), blocks) for g, name, blocks in averaged]
+        return cycles, sets + [(f"Block {k + 1}", QtGui.QColor(colors[k].rgb()), [k]) for k in trials]
+
+    @staticmethod
+    def _draw_cycles(p: pg.PlotItem, X: np.ndarray, Y: np.ndarray, number: np.ndarray, shades: list) -> None:
+        """Rows of X against Y, row r in shades[number[r]]. Rows of one shade are one item."""
+        same: dict[int, list[int]] = {}
+        for r, k in enumerate(number):
+            same.setdefault(shades[k].rgba(), []).append(r)
+        for rgba, rows in same.items():
+            gap = np.full((len(rows), 1), np.nan)
+            p.addItem(pg.PlotCurveItem(np.hstack((X[rows], gap)).ravel(), np.hstack((Y[rows], gap)).ravel(),
+                                       connect="finite", pen=pg.mkPen(QtGui.QColor.fromRgba(rgba), width=1)))
+
+    def redraw_cycles(self) -> None:
+        self._redraw_fit()
+        plots = (self.cycle_stim_plot, self.cycle_plot, self.cycle_raster, self.phase_hist, self.loop)
+        titles = ("Stimulus", "Response, each cycle", "Spikes by cycle", "Spikes per phase",
+                  "Response against stimulus")
+        for pw, title in zip(plots, titles):
+            pw.getPlotItem().clear()
+            pw.getPlotItem().setTitle(title, color=self._fg())
+        self.cycle_legend.clear()
+        self.phase_legend.clear()
+        if not any(self.charts.is_on(n) for n in _CYCLE_CHARTS):
+            return
+        page = self.page
+        stim, resp = self.cycle_stim.currentText(), self.cycle_resp.currentText()
+        cycles, sets = self._cycle_sets()
+        if not cycles:
+            self.cycle_stim_plot.getPlotItem().setTitle(
+                f"Stimulus: no repeats on {stim}. For a one-off stimulus, use the stimulus-triggered rate",
+                color=self._fg())
+            return
+        sp, rp, ra, hp, lp = (pw.getPlotItem() for pw in plots)
+        x = np.arange(A.CYCLE_POINTS) * 360 / A.CYCLE_POINTS
+        spread = page.spread()
+        times = self._events_of_unit()
+        size = page.raw.point_size.value()
+        edges = np.linspace(0, 360, round(360 / self.phase_bin.value()) + 1)
+        row = total = spikes = 0
+        locks = []
+        for name, color, blocks in sets:
+            S = np.vstack([A.cycle_rows(page.trace(b, stim), cycles[b]) for b in blocks])
+            number = np.concatenate([np.arange(len(cycles[b])) for b in blocks])
+            shades = cm.spread(self.cycle_map.currentText(), color, int(number.max()) + 1)
+            for c in shades:
+                c.setAlpha(min(c.alpha(), 150))
+            sp.plot(x, S.mean(0), pen=pg.mkPen(color, width=1.5))
+            traces = {b: page.trace(b, resp) for b in blocks}
+            have = [b for b in blocks if traces[b] is not None]
+            if have:
+                R = np.vstack([A.cycle_rows(traces[b], cycles[b]) for b in have])
+                rows = np.concatenate([np.full(len(cycles[b]), b in have) for b in blocks])
+                mean, sd, sem, _ = A.mean_spread(R)
+                label = f"{name} (n={len(R)})" if len(sets) > 1 else None
+                if self.cycle_each.isChecked():
+                    self._draw_cycles(rp, np.broadcast_to(x, R.shape), R, number[rows], shades)
+                    self._draw_cycles(lp, np.hstack((S[rows], S[rows][:, :1])), np.hstack((R, R[:, :1])),
+                                      number[rows], shades)
+                if spread:
+                    s_ = np.nan_to_num(sd if spread == "sd" else sem)
+                    hi, lo = rp.plot(x, mean + s_, pen=pg.mkPen(None)), rp.plot(x, mean - s_, pen=pg.mkPen(None))
+                    fill = QtGui.QColor(color)
+                    fill.setAlpha(50)
+                    rp.addItem(pg.FillBetweenItem(hi, lo, brush=pg.mkBrush(fill)))
+                rp.plot(x, mean, pen=pg.mkPen(color, width=2.4), name=label)
+                loop_x = S[rows].mean(0)
+                lp.plot(np.r_[loop_x, loop_x[0]], np.r_[mean, mean[0]], pen=pg.mkPen(color, width=2.4))
+            total += len(S)
+            if times is None:
+                continue
+            phases = []
+            ev = page.events
+            for b in blocks:
+                for u in sorted(page.raw.shown_units()):   # in the units' colours, as on Spike Sorting
+                    k, deg = A.spike_phases(ev.t[(ev.block == b) & (ev.unit == u)], cycles[b],
+                                            page.blocks[b]["sample_rate"])
+                    ra.addItem(pg.ScatterPlotItem(deg, row + k + 1, size=size, pen=None,
+                                                  brush=pg.mkBrush(page.raw.color_of(u))))
+                    phases.append(deg)
+                row += len(cycles[b])
+            phases = np.concatenate(phases) if phases else np.empty(0)
+            spikes += len(phases)
+            strength, at = A.vector_strength(phases)
+            locks.append((strength, at))
+            fill = QtGui.QColor(color)
+            fill.setAlpha(90)
+            hp.plot(edges, np.histogram(phases, edges)[0] / len(S), stepMode="center", pen=pg.mkPen(color, width=1.5),
+                    name=f"{name}: {strength:.2f} at {at:.0f}°" if len(sets) > 1 else None,
+                    **({"fillLevel": 0, "brush": pg.mkBrush(fill)} if len(sets) == 1 else {}))
+        lengths = np.concatenate([np.diff(c, axis=1).ravel() for c in cycles.values()])
+        hz = page.blocks[next(iter(cycles))]["sample_rate"] / np.median(lengths)
+        found = [self._repeats(b) for b in cycles]
+        how = {"shape": "by shape", "crossing": "by rises", "hand": "from your repeat"}.get(found[0].method, "")
+        left = sum(r.left_out for r in found)
+        sp.setTitle(f"Stimulus ({total} cycles {how}, about {hz:.3g} Hz" + (f", {left} left out)" if left else ")"),
+                    color=self._fg())
+        label_axis(sp, "left", stim, page.unit_of(stim))
+        label_axis(rp, "left", resp, page.unit_of(resp))
+        label_axis(lp, "left", resp, page.unit_of(resp))
+        label_axis(lp, "bottom", stim, page.unit_of(stim))
+        if times is None:
+            for p, title in ((ra, "Spikes by cycle"), (hp, "Spikes per phase")):
+                p.setTitle(f"{title}: find action potentials first", color=self._fg())
+        elif spikes and len(sets) == 1:
+            hp.setTitle(f"Spikes per phase ({spikes} spikes, vector strength {locks[0][0]:.2f} at "
+                        f"{locks[0][1]:.0f}°)", color=self._fg())
+        elif spikes:
+            hp.setTitle(f"Spikes per phase ({spikes} spikes; vector strength by group)", color=self._fg())
+        ra.vb.bounds[1] = (0.5, row + 0.5) if row else None
+        if row:
+            ra.setYRange(0.5, row + 0.5, padding=0)
+        for p in (sp, rp, hp):
+            p.enableAutoRange(axis="y")
+        lp.enableAutoRange()
+
     # -- looks -----------------------------------------------------------------------------------
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
-        for pw in [self.psth, self.sta] + self._plots:
+        for pw in [self.psth, self.sta, self.loop, self.cycle_stim_plot, self.cycle_plot, self.cycle_raster,
+                   self.phase_hist, self.fit_plot, self.resid_plot] + self._plots:
             style_plot(pw, th)
         if getattr(self, "_multi", None) is not None and self.layout_mode.currentData() == "overlaid":
             self._multi.recolor()
+        self._show_scale_bars()

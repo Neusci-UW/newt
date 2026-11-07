@@ -120,8 +120,6 @@ The top picks for a teaching lab, roughly in order:
 
 Notes to act on later; nothing here has been changed yet.
 
-- **Stimulator: charts rescale when a setting changes them.** Ticking Biphasic on the Acquisition
-  Stimulator page doesn't rescale the chart's x axis. In general, whenever a parameter changes
-  the scale of the data, the charts should update their scaling automatically.
-- **Spike Sorting: stimulus matches its response.** A stimulus trace should always be the same
-  color as its response trace, whether that's a page color, a trial color or a color map.
+- **Stimulus: save its settings with each block.** Blocks keep only approximate notes of what was
+  sent. Saving the stimulus's settings would let Argus line up the known waveform with a recording,
+  fitting just its timing and size, as the first way of finding repeats and as another stimulus fit.

@@ -54,7 +54,18 @@ class BlocksPanel(QtWidgets.QWidget):
         lay.addWidget(self.btn_reset)
         self.settings = QtWidgets.QFormLayout()  # what a page adds with add_setting
         self.settings.setContentsMargins(0, 0, 0, 0)
-        lay.addLayout(self.settings)
+        if for_analysis:      # all showing when there's room; scrolls on a small laptop
+            holder = QtWidgets.QWidget()
+            holder.setLayout(self.settings)
+            scroll = QtWidgets.QScrollArea()
+            scroll.setWidget(holder)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setMinimumHeight(100)
+            lay.addWidget(scroll)
+        else:
+            lay.addLayout(self.settings)
         lay.addSpacing(6)
         self.title = QtWidgets.QLabel("<b>Blocks</b>")
         lay.addWidget(self.title)

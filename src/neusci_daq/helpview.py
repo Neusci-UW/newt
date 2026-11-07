@@ -153,6 +153,45 @@ def _comparison_picture() -> QtGui.QPixmap:
     return d.done()
 
 
+def _cycles_picture() -> QtGui.QPixmap:
+    d = _Pen([("Find the cycles", "Each rise through the middle"), ("Cut each one", "Stretched to 0–360°"),
+              ("Overlay", "By phase, not time")])
+    rng = np.random.default_rng(6)
+    w, ph = d.w, PANEL_H
+    n = 400
+    x = d.xs[0] + 6 + np.arange(n) / n * (w - 12)
+    a = np.arange(n) / n * 4 * 2 * np.pi
+    d.line(x, ph / 2 - np.sin(a) * 45, d.fg, 1.3)
+    for k in range(5):
+        at = min(n - 1, k * n // 4)
+        d.dashed(x[at], 8, x[at], ph - 8, U1)
+    t = np.linspace(0, 2 * np.pi, 120)
+    for k, gain in enumerate((1.0, 0.8, 0.65)):
+        x = d.xs[1] + 8 + k * (w - 16) / 3 + t / (2 * np.pi) * ((w - 16) / 3 - 6)
+        d.line(x, ph / 2 - (gain * np.sin(t - 0.6) + rng.normal(0, 0.03, len(t))) * 40, ACCENT, 1.2)
+    x = d.xs[2] + 8 + t / (2 * np.pi) * (w - 16)
+    for gain in (1.0, 0.8, 0.65):
+        d.line(x, ph / 2 - (gain * np.sin(t - 0.6) + rng.normal(0, 0.03, len(t))) * 50, ACCENT, 1, 150)
+    d.line(x, ph / 2 - 0.82 * np.sin(t - 0.6) * 50, d.fg, 2)
+    return d.done()
+
+
+def _waveforms_picture() -> QtGui.QPixmap:
+    d = _Pen([("Take a spike", "From Spike Sorting"), ("Find its slope", "dV/dt at each moment"),
+              ("Plot one on the other", "Time drops out, a loop is left")])
+    w, ph = d.w, PANEL_H
+    t = np.linspace(-1, 3, 300)
+    v = -np.exp(-(t / 0.3) ** 2) + 0.4 * np.exp(-((t - 0.8) / 0.6) ** 2)
+    dv = np.gradient(v, t)
+    for k, y, color in ((0, v, d.fg), (1, dv / np.abs(dv).max(), ACCENT)):
+        x = d.xs[k] + 8 + (t - t[0]) / np.ptp(t) * (w - 16)
+        d.line(x, ph / 2 - y * 55, color, 1.6)
+    mid = d.xs[2] + w / 2
+    d.line(mid + (v + 0.3) * (w - 40) / 1.5, ph / 2 - dv / np.abs(dv).max() * 55, U1, 1.8)
+    d.dashed(d.xs[2] + 8, ph / 2, d.xs[2] + w - 8, ph / 2, d.muted, QtCore.Qt.PenStyle.DotLine)
+    return d.done()
+
+
 def _datapad_picture() -> QtGui.QPixmap:
     d = _Pen([("Pick a window", "When, in each block"), ("Measure", "One number per column"),
               ("Compare", "Table, scatter or fit")])
@@ -212,23 +251,60 @@ TOPICS = {
         ),
     },
     "comparison": {
-        "title": "How Comparison works",
+        "title": "How Response works",
         "picture": _comparison_picture,
-        "text": "The top shows the highlighted block's channels on one time axis, as voltage or its rate of change. "
-                "The bottom lines up the chosen blocks on a <b>trigger</b> and averages them: what's random "
+        "text": "The traces show the chosen blocks' channels on one time axis, as voltage or its rate of change, "
+                "the same way as Spike Sorting: a picked page's average, or picked blocks' trials. "
+                "Below, the chosen blocks line up on a <b>trigger</b> and are averaged: what's random "
                 "cancels and what follows the trigger stays. The <b>stimulus-triggered rate</b> asks how spiking "
                 "changes after a stimulus, and the <b>spike-triggered average</b> asks what a channel does around "
                 "each spike.",
-        "warning": "Both averages need the events from Spike Sorting, so find action potentials there first.",
+        "warning": "Both averages need the events from Spike Sorting, so find action potentials there first. "
+                   "They use the units ticked there.",
         "glossary": (
             ("dV/dt, d²V/dt²", "How fast the voltage changes, and how fast that changes."),
             ("Smooth for d/dt", "Averages the trace first, since differentiating amplifies noise."),
-            ("Spike rate", "Spikes per second through the block, each spike smoothed into a bump."),
             ("Trigger", "The moment each trace is lined up on: time 0."),
             ("Bin", "The width of each bar in the stimulus-triggered rate."),
             ("Before / after", "How much to show on each side of the trigger."),
-            ("Spikes of", "Which unit's spikes to use, or all of them."),
             ("Spread", "SD shows how much trials vary; SEM how sure the average is."),
+        ),
+    },
+    "cycles": {
+        "title": "How Stimulus cycles work",
+        "picture": _cycles_picture,
+        "text": "With a repeating stimulus, Argus cuts the chosen blocks into single <b>cycles</b> and overlays them "
+                "by stimulus <b>phase</b> instead of time. It finds them by matching the stimulus's shape against "
+                "itself, then by its rises through its middle level; orange marks show the cuts on its trace. Or give "
+                "the <b>repeat length</b>, or mark one on the traces. Picked pages show their average and picked "
+                "blocks their own, with every cycle behind it coloured from first to last.",
+        "warning": "A fixed delay lands at a different phase at each frequency: 5 ms is 18° at 10 Hz but 90° at 50 Hz. "
+                   "Cycles are stretched to line up, so compare timing between frequencies with care.",
+        "glossary": (
+            ("Cycle", "One repeat of the stimulus, from one rise through its middle to the next."),
+            ("Phase", "How far through a cycle: 0° at the rise, 180° halfway, 360° at the next rise."),
+            ("Repeat length", "How long one repeat is. 0 lets Argus find it."),
+            ("Left out", "Repeats too unlike the rest to use, counted in the Stimulus title."),
+            ("Skip first", "Leaves out the first cycles of each block, while the response settles."),
+            ("Spikes per phase", "A histogram of when in the cycle spikes happen, per cycle."),
+            ("Vector strength", "How tightly spikes lock to one phase: 1 is exact, near 0 is none."),
+            ("Response against stimulus", "A loop: open if the response lags, a line if it doesn't."),
+        ),
+    },
+    "waveforms": {
+        "title": "How Waveforms works",
+        "picture": _waveforms_picture,
+        "text": "This shows the shape of the <b>action potentials</b> found on Spike Sorting. The <b>phase plot</b> "
+                "puts V against <b>dV/dt</b>, so each spike becomes a loop: time drops out, and differences in how "
+                "fast a spike rises and falls stand out. Thick lines are each unit's average.",
+        "warning": "With an extracellular recording this is the shape of the recorded signal, not the membrane "
+                   "voltage. Find action potentials on Spike Sorting first.",
+        "glossary": (
+            ("dV/dt", "How fast the voltage changes, at each moment of the spike."),
+            ("Phase plot", "V against dV/dt: the spike as a loop, with no time axis."),
+            ("Smooth for dV/dt", "Averages the spike first, since differentiating amplifies noise."),
+            ("Each spike", "Draws single spikes behind the average, up to 150 of each unit."),
+            ("Unit", "A group of spikes with the same shape, likely from one cell."),
         ),
     },
     "datapad": {

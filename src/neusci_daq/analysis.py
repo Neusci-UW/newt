@@ -25,6 +25,7 @@ import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy import optimize, signal
 
 from .units import _same_kind, parse_quantity, unit_factor
 
@@ -474,6 +475,9 @@ def _sig(x: float, n: int = 2) -> float:
 
 
 TRAIN_GAP_MS = 100.0               # pulses closer than this are one stimulus (a train)
+CYCLE_POINTS = 360                 # each stimulus cycle, stretched to one point per degree
+MIN_MATCH = 0.7                    # how alike a repeat and the template must be (correlation)
+FITS = ("Off", "Piecewise linear", "Smooth", "Sine", "Repeat average", "Harmonics")
 
 
 def pulse_signature(y: np.ndarray, fs: float) -> tuple | None:
@@ -634,6 +638,265 @@ def train_starts(times_s: np.ndarray, gap_ms: float = TRAIN_GAP_MS) -> np.ndarra
         return t
     keep = np.r_[True, np.diff(t) * 1000 >= gap_ms]
     return t[keep]
+
+
+def cycle_bounds(y: np.ndarray) -> np.ndarray:
+    """Where each full cycle of a repeating stimulus starts and ends: (n, 2), in samples
+    (a fraction when it falls between two). A cycle starts where the channel rises through
+    its middle level, and it has to swing well past the middle both ways, so noise on the
+    way through doesn't start another. Cycles under half or over twice the usual length
+    (the gap between two bursts) are left out, and so are the unfinished ones at the ends."""
+    none = np.empty((0, 2))
+    y = np.asarray(y, float)
+    if y.size < 4 or not np.isfinite(y).any():
+        return none
+    lo, hi = np.nanpercentile(y, [2, 98])
+    mid, swing = (hi + lo) / 2, (hi - lo) / 4
+    if swing <= 0:
+        return none
+    side = np.where(y > mid + swing, 1, np.where(y < mid - swing, -1, 0))
+    at = np.flatnonzero(side)
+    if not at.size:
+        return none
+    s = side[at]
+    up = at[1:][(s[:-1] == -1) & (s[1:] == 1)]
+    if s[0] == 1 and y[0] <= mid:                   # it starts at the middle, on its way up
+        up = np.r_[at[0], up]
+    if len(up) < 2:
+        return none
+    below = np.flatnonzero(y <= mid)
+    k = below[np.searchsorted(below, up) - 1]       # the last sample at or under the middle
+    starts = k + (mid - y[k]) / (y[k + 1] - y[k])
+    length = np.diff(starts)
+    usual = np.median(length)
+    # noise crosses too, but a stimulus's cycles are fast enough to see and each like the last
+    if usual < 8 or np.median(np.abs(np.diff(length))) > 0.2 * usual:
+        return none
+    keep = (length > usual / 2) & (length < usual * 2)
+    return np.column_stack((starts[:-1], starts[1:]))[keep]
+
+
+@dataclass
+class Repeats:
+    """The repeats of a stimulus in one block."""
+    bounds: np.ndarray           # (n, 2): where each starts and ends, in samples
+    method: str = ""             # how they were found: "shape", "crossing", "hand", or "" for none
+    left_out: int = 0            # candidates too unlike the template to use
+
+
+def repeat_length(y: np.ndarray) -> int | None:
+    """How often a trace repeats itself, in samples, from its autocorrelation: the shortest
+    lag with a peak nearly as high as the best. None if nothing repeats."""
+    d = np.asarray(y, float)
+    d = np.nan_to_num(d - np.nanmean(d))
+    n = len(d)
+    if n < 16 or not d.any():
+        return None
+    f = np.fft.rfft(d, 1 << int(np.ceil(np.log2(2 * n))))
+    ac = np.fft.irfft(np.abs(f) ** 2)[:n // 2]
+    ac = ac / ac[0] * n / (n - np.arange(len(ac)))  # later lags have fewer samples to compare
+    past = np.flatnonzero(ac < 0.2)
+    if not len(past):
+        return None
+    peaks = signal.find_peaks(ac[past[0]:], height=0.4, prominence=0.1)[0] + past[0]
+    if not len(peaks):
+        return None
+    k = int(peaks[ac[peaks] >= 0.9 * ac[peaks].max()][0])
+    return k if k >= 8 else None
+
+
+def first_rise(y: np.ndarray) -> int | None:
+    """Where a stimulus first rises through the middle of its range, well clear of any
+    noise at rest: the first repeat starts here."""
+    y = np.asarray(y, float)
+    lo, hi = np.nanmin(y), np.nanmax(y)
+    mid = (lo + hi) / 2
+    if hi <= lo:
+        return None
+    start = 0
+    if y[0] > mid:                                  # it starts high: wait for it to come down
+        low = np.flatnonzero(y < mid)
+        if not len(low):
+            return None
+        start = int(low[0])
+    high = np.flatnonzero(y[start:] > mid + (hi - lo) / 4)
+    if not len(high):
+        return None
+    at = start + int(high[0])
+    below = np.flatnonzero(y[:at] <= mid)
+    return int(below[-1]) if len(below) else 0
+
+
+def match_repeats(y: np.ndarray, start: int, n: int) -> tuple[np.ndarray, int]:
+    """Slide the n samples at `start` along the trace as a template. Returns (bounds of each
+    good match, how many candidates were too unlike it to use). Every repeat is n long, so
+    none is stretched."""
+    y = np.nan_to_num(np.asarray(y, float), nan=float(np.nanmedian(y)))
+    t = y[start:start + n]
+    if len(t) < n or n < 8:
+        return np.empty((0, 2)), 0
+    t = t - t.mean()
+    energy = float(np.sum(t ** 2))
+    if energy <= 0:
+        return np.empty((0, 2)), 0
+    s1 = np.convolve(y, np.ones(n), "valid") if n < 64 else signal.fftconvolve(y, np.ones(n), "valid")
+    s2 = signal.fftconvolve(y ** 2, np.ones(n), "valid")
+    var = s2 - s1 ** 2 / n
+    # a floor on the window's size, or a flat stretch would match anything
+    score = signal.fftconvolve(y, t[::-1], "valid") / np.sqrt(np.maximum(var, 0.05 * energy) * energy)
+    peaks = signal.find_peaks(score, height=0.3, distance=max(1, int(0.75 * n)))[0]
+    good = peaks[score[peaks] >= MIN_MATCH]
+    at = good.astype(float)
+    inside = (good > 0) & (good < len(score) - 1)   # between samples: a parabola through the peak
+    a, b, c = score[good[inside] - 1], score[good[inside]], score[good[inside] + 1]
+    bend = a - 2 * b + c
+    at[inside] += np.where(bend != 0, 0.5 * (a - c) / np.where(bend != 0, bend, 1), 0)
+    at = at[at + n <= len(y) - 1]
+    return np.column_stack((at, at + n)), int(len(peaks) - len(good))
+
+
+def find_repeats(y: np.ndarray, fs: float, length_s: float = 0.0, start_s: float | None = None) -> Repeats:
+    """The repeats of a stimulus, by the most reliable way that works. With a length, you
+    said how long one is (and maybe where): that's the template. Otherwise its shape is
+    matched, which suits any shape however many times it rises, then the rises through its
+    middle level are used, which also follow a changing frequency. No repeats: none found."""
+    y = np.asarray(y, float)
+    none = np.empty((0, 2))
+    if y.size < 16 or not np.isfinite(y).any():
+        return Repeats(none)
+    if length_s > 0:
+        n = int(round(length_s * fs))
+        start = int(round(start_s * fs)) if start_s is not None else first_rise(y)
+        bounds, left = match_repeats(y, start, n) if start is not None else (none, 0)
+        return Repeats(bounds, "hand" if len(bounds) else "", left)
+    n, start = repeat_length(y), first_rise(y)
+    if n is not None and start is not None:
+        bounds, left = match_repeats(y, start, n)
+        if len(bounds) >= 2:
+            return Repeats(bounds, "shape", left)
+    bounds = cycle_bounds(y)
+    return Repeats(bounds, "crossing" if len(bounds) else "")
+
+
+def _piecewise(y: np.ndarray) -> np.ndarray:
+    """Straight lines through a trace: split wherever it strays further from a line than
+    its noise explains, then fit each piece by least squares. Pieces needn't join, so a
+    step stays a step."""
+    steps = np.abs(np.diff(y))
+    noise = float(np.median(steps)) / 0.6745 / np.sqrt(2)
+    grain = float(np.median(steps[steps > 0])) if (steps > 0).any() else 0.0   # the recording's resolution
+    tol = max(5 * noise, grain)
+    if tol <= 0:
+        return y.copy()
+    calm = signal.medfilt(y, 5)                     # a lone noisy sample shouldn't start a piece
+    cuts, todo = [0, len(y) - 1], [(0, len(y) - 1)]
+    while todo:
+        a, b = todo.pop()
+        if b - a < 4:
+            continue
+        line = np.linspace(calm[a], calm[b], b - a + 1)
+        k = int(np.argmax(np.abs(calm[a:b + 1] - line)))
+        if abs(calm[a + k] - line[k]) > tol and 0 < k < b - a:
+            cuts.append(a + k)
+            todo += [(a, a + k), (a + k, b)]
+    out = y.copy()
+    cuts = sorted(cuts)
+    for a, b in zip(cuts[:-1], cuts[1:]):
+        x = np.arange(a, b + 1 if b == cuts[-1] else b)
+        if len(x) >= 2:
+            out[x] = np.polyval(np.polyfit(x - a, y[x], 1), x - a)
+    return out
+
+
+def _sine(y: np.ndarray, fs: float) -> np.ndarray:
+    """A sine through each unbroken run of full cycles, so a pause between bursts stays a
+    pause; the rest of the trace stays as it is."""
+    bounds = cycle_bounds(y)
+    out = y.copy()
+    if not len(bounds):
+        return out
+
+    def wave(t, amp, f, phase, offset):
+        return amp * np.sin(2 * np.pi * f * t + phase) + offset
+    for run in np.split(bounds, np.flatnonzero(bounds[1:, 0] > bounds[:-1, 1]) + 1):
+        a, b = int(run[0, 0]), int(np.ceil(run[-1, 1]))
+        t = np.arange(a, b) / fs
+        hz = fs / float(np.median(np.diff(run, axis=1)))
+        guess = (np.ptp(y[a:b]) / 2, hz, -2 * np.pi * hz * run[0, 0] / fs, float(np.mean(y[a:b])))
+        try:
+            best = optimize.curve_fit(wave, t, y[a:b], p0=guess)[0]
+        except RuntimeError:
+            best = guess
+        out[a:b] = wave(t, *best)
+    return out
+
+
+def _repeat_average(y: np.ndarray, fs: float, harmonics: int | None, length_s: float, start_s: float | None):
+    """Every repeat replaced by the average of them all, or with `harmonics`, by that
+    average's first few harmonics. The rest of the trace stays as it is."""
+    bounds = find_repeats(y, fs, length_s, start_s).bounds
+    if len(bounds) < 2:
+        return y.copy()
+    n = int(round(float(np.median(np.diff(bounds, axis=1)))))
+    mean = cycle_rows(y, bounds, n).mean(0)
+    if harmonics is not None:
+        spectrum = np.fft.rfft(mean)
+        spectrum[harmonics + 1:] = 0
+        mean = np.fft.irfft(spectrum, n)
+    out = y.copy()
+    for a, b in bounds:
+        k = np.arange(int(np.ceil(a)), min(int(np.ceil(b)), len(y)))
+        out[k] = np.interp((k - a) / (b - a) * n, np.arange(n + 1), np.r_[mean, mean[0]])
+    return out
+
+
+def fit_stimulus(y: np.ndarray, fs: float, kind: str, length_s: float = 0.0, start_s: float | None = None,
+                 smooth_ms: float = 1.0, harmonics: int = 8) -> np.ndarray:
+    """A recorded stimulus without its sampling noise and coarse voltage steps, by the fit
+    that suits its shape (one of FITS): straight pieces for pulses, steps, ramps and custom
+    shapes; smoothing that doesn't shift timing; a sine; or the average of its repeats."""
+    y = np.asarray(y, float)
+    y = np.nan_to_num(y, nan=float(np.nanmedian(y))) if np.isfinite(y).any() else y
+    if y.size < 16 or kind == "Off":
+        return y
+    if kind == "Piecewise linear":
+        return _piecewise(y)
+    if kind == "Smooth":
+        window = max(5, int(round(smooth_ms / 1000 * fs)) | 1)
+        return signal.savgol_filter(y, min(window, (len(y) - 1) | 1), 2)
+    if kind == "Sine":
+        return _sine(y, fs)
+    return _repeat_average(y, fs, harmonics if kind == "Harmonics" else None, length_s, start_s)
+
+
+def cycle_rows(y: np.ndarray, bounds: np.ndarray, n: int = CYCLE_POINTS) -> np.ndarray:
+    """A channel cut into cycles: one row per cycle, stretched to n points from 0° up to
+    (but not including) 360°, so cycles of different lengths line up by phase."""
+    if not len(bounds):
+        return np.empty((0, n))
+    where = bounds[:, :1] + (bounds[:, 1:] - bounds[:, :1]) * (np.arange(n) / n)
+    return np.interp(where.ravel(), np.arange(len(y)), np.asarray(y, float)).reshape(where.shape)
+
+
+def spike_phases(times_s: np.ndarray, bounds: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
+    """Which cycle each spike fell in, and where in it (degrees). Spikes outside every
+    cycle are left out. Returns (cycle numbers from 0, phases)."""
+    at = np.asarray(times_s, float) * fs
+    if not len(bounds) or not at.size:
+        return np.empty(0, int), np.empty(0)
+    k = np.searchsorted(bounds[:, 0], at, side="right") - 1
+    inside = (k >= 0) & (at < bounds[np.maximum(k, 0), 1])
+    k, at = k[inside], at[inside]
+    return k, 360 * (at - bounds[k, 0]) / (bounds[k, 1] - bounds[k, 0])
+
+
+def vector_strength(phases: np.ndarray) -> tuple[float, float]:
+    """How tightly spikes lock to one phase: (1 if all at the same phase, near 0 if spread
+    evenly round the cycle; the phase they gather at, in degrees)."""
+    if not len(phases):
+        return 0.0, 0.0
+    z = np.mean(np.exp(1j * np.radians(phases)))
+    return float(abs(z)), float(np.degrees(np.angle(z)) % 360)
 
 
 def note_times(comments: list[tuple[float, str]]) -> np.ndarray:

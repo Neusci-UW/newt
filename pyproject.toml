@@ -12,6 +12,7 @@ dependencies = ["numpy", "scipy", "pyqtgraph>=0.13", "PyQt6", "h5py"]
 nidaqmx = ["nidaqmx>=1.0"]
 multichannelio = ["PyDAQmx"]
 audio = ["sounddevice>=0.4"]
+web = ["PyQt6-WebEngine"]   # the Membrane potential tab
 dev = ["pytest", "neuscitk", "scikit-learn", "matplotlib"]
 
 [project.scripts]
@@ -21,4 +22,4 @@ neusci-daq = "neusci_daq.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-neusci_daq = ["icons/*.png", "icons/*.ico", "icons/*.svg"]
+neusci_daq = ["icons/*.png", "icons/*.ico", "icons/*.svg", "web/*.html", "web/vendor/mathjax/*.js"]

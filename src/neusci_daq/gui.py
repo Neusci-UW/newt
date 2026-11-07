@@ -66,6 +66,7 @@ from .blockspanel import BACK as BACK_ITEM, LIVE as LIVE_ITEM, BlocksPanel
 from .blockstore import BlockStore
 from .ringbuffer import RingBuffer
 from .simpage import SimPage
+from .membranepage import MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .trialspage import TrialsPage
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
@@ -413,6 +414,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
         # What the fake recording contains: only with the simulated backend.
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
+        # Ions crossing a membrane, Nernst and GHK: a teaching page, always available.
+        self.membrane_page = MembranePage(self)
         placeholder = lambda title, text: self._placeholder(title, text)
         # Record, Stimulator and Trials are sub-pages of Acquisition. Either half of
         # a split can show any page, two of Acquisition's included.
@@ -422,11 +425,12 @@ class MainWindow(QtWidgets.QMainWindow):
             ("trials", "Protocols", self.trials_page),
             ("analysis", "Analysis", self.analysis_page),
             ("datapad", "DataPad", self.analysis_page.pad_page),
-        ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else []), groups=[
+        ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else [])
+          + [("membrane", "Membrane potential", self.membrane_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
             ("analysis", "Analysis", ["analysis"]),
             ("datapad", "DataPad", ["datapad"]),
-            ("sim", "Simulation", ["sim"]),
+            ("sim", "Simulation", ["sim", "membrane"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -939,6 +943,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.trials_page.apply_theme(mode)
         if getattr(self, "sim_page", None):
             self.sim_page.apply_theme(mode)
+        if getattr(self, "membrane_page", None):
+            self.membrane_page.apply_theme(mode)
         if hasattr(self, "analysis_page"):
             self.analysis_page.apply_theme(mode)
         self._update_theme_button()

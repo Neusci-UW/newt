@@ -1,0 +1,1290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Membrane Potential, Ion by Ion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script>window.MathJax = { tex: { inlineMath: [['\\(', '\\)']] }, svg: { fontCache: 'global' } };</script>
+<!-- MathJax: a local copy next to this page if there is one (for offline use), otherwise the online copy -->
+<script async src="vendor/mathjax/tex-svg.js" onerror="var s=document.createElement('script');s.async=true;s.src='https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js';s.onerror=function(){document.documentElement.classList.add('no-mathjax')};document.head.appendChild(s);"></script>
+<style>
+/* Layout: lab-instrument page. Simulation, charge profile and trace on the left; readouts and controls on the right; stacks on narrow screens. */
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --ink:#1c2220; --muted:#5b6662; --line:#d6dcd8; --accent:#0d6b7c;
+  --k:#6b3fb8; --na:#d07a1f; --cl:#23845a; --a:#9aa29e;
+  --pos:#d1373f; --neg:#2861c8;
+  --cyto:#edf0f6; --bath:#e8f2ef; --mem:#cdbd92; --memdark:#a8946a;
+  --font-display:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-body:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+    --k:#a88cf2; --na:#f0a350; --cl:#5bc98b; --a:#69726e;
+    --pos:#f0646b; --neg:#6b9cf2;
+    --cyto:#161d27; --bath:#13211d; --mem:#6c6046; --memdark:#8d7d58;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+  --k:#a88cf2; --na:#f0a350; --cl:#5bc98b; --a:#69726e;
+  --pos:#f0646b; --neg:#6b9cf2;
+  --cyto:#161d27; --bath:#13211d; --mem:#6c6046; --memdark:#8d7d58;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.5;padding:24px 20px 48px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header h1{font-family:var(--font-display);font-weight:600;font-size:26px;letter-spacing:-0.01em;margin:0 0 6px;text-wrap:balance}
+header p{margin:0;color:var(--muted);max-width:76ch}
+.top{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+.side{display:flex;flex-direction:column;gap:16px}
+@media (max-width:1100px){.top{grid-template-columns:1fr}}
+.row3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.ctrls{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:start}
+@media (max-width:820px){.row3{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.stage{display:flex;flex-direction:column;gap:12px}
+canvas{display:block;width:100%;height:auto;border-radius:6px}
+#sim{cursor:grab;touch-action:none}
+#sim.dragging{cursor:grabbing}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.toolbar .spacer{flex:1}
+.runbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.runbar input[type=range]{flex:1 1 220px;min-width:160px;max-width:420px}
+.runbar output{font-family:var(--font-mono);font-size:13px;min-width:96px;font-variant-numeric:tabular-nums}
+.runlab{font-size:14px;font-weight:600}
+.runhint{font-size:12.5px;color:var(--muted);flex:1 1 220px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.dot.k{background:var(--k)}.dot.na{background:var(--na)}.dot.cl{background:var(--cl)}.dot.a{background:var(--a);width:12px;height:12px}
+.dot.pump{background:var(--accent);border-radius:3px}
+.dot.pos{background:var(--pos);border-radius:2px}.dot.neg{background:var(--neg);border-radius:2px}
+.sect-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.caption{font-size:13px;color:var(--muted);margin:0;max-width:90ch}
+table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:500;color:var(--muted);font-size:12.5px}
+td .sub{color:var(--muted);font-size:12px;margin-left:6px}
+td.mono{font-family:var(--font-mono)}
+.tablewrap{overflow-x:auto}
+.panel{display:flex;flex-direction:column;gap:16px}
+.vbox{display:flex;flex-direction:column;gap:2px}
+.vnum{font-family:var(--font-mono);font-size:40px;font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums}
+.vrow{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.vrow b{color:var(--ink);font-family:var(--font-mono);font-weight:500;white-space:nowrap}
+.status{display:inline-flex;align-self:flex-start;align-items:center;gap:6px;font-size:12.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-top:6px}
+.status.live{border-color:var(--na);color:var(--na)}
+.status::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.capbar{display:flex;height:22px;border-radius:5px;overflow:hidden;border:1px solid var(--line);margin:8px 0 4px}
+.capbar span{display:block;height:100%;transition:width .3s}
+.capbar .in{background:color-mix(in srgb, var(--neg) 45%, var(--surface))}
+.capbar .mem{background:var(--mem)}
+.capbar .out{background:color-mix(in srgb, var(--pos) 45%, var(--surface))}
+.caplegend{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.caplegend b{display:block;color:var(--ink);font-family:var(--font-mono);font-weight:500;font-size:13px}
+fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+legend{padding:0;margin-bottom:8px}
+.row{display:grid;grid-template-columns:96px minmax(0,1fr) 92px;align-items:center;gap:10px;font-size:14px}
+.row label{display:inline-flex;align-items:center;gap:7px}
+.row output{font-family:var(--font-mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.row .hint{grid-column:2 / 4;font-size:12px;color:var(--muted);margin-top:-6px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.check{display:flex;align-items:center;gap:8px;font-size:14px}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{font:inherit;font-size:14px;cursor:pointer;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:500}
+button.wide{width:100%}
+button.fire{border-color:var(--na)}
+button.fire:hover{background:color-mix(in srgb, var(--na) 14%, var(--surface))}
+.chip{font-size:13px;padding:5px 10px;border-radius:999px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+table.conc{font-size:13.5px}
+table.conc th,table.conc td{padding:4px 6px}
+table.conc input{width:84px;font:inherit;font-family:var(--font-mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);text-align:right}
+.ghk{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:28px;align-items:start}
+@media (max-width:1000px){.ghk{grid-template-columns:1fr}}
+.ghk h2{font-size:20px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+.ghk h3{font-size:15px;font-weight:600;margin:18px 0 4px}
+.deriv{max-width:72ch}
+.mj-fail{display:none}
+.no-mathjax .mj-fail{display:block;color:var(--pos)}
+.deriv p{margin:6px 0}
+.deriv .eq{overflow-x:auto;margin:8px 0;padding:4px 0}
+.defs{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px;margin:8px 0}
+.defs dt{font-family:var(--font-mono)}
+.defs dd{margin:0;color:var(--muted)}
+.calc{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px}
+.calc .grid{display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:6px 8px;align-items:center;font-size:13.5px}
+.calc .grid .h{color:var(--muted);font-size:12px;font-weight:500;text-align:right}
+.calc input{width:100%;font:inherit;font-family:var(--font-mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);text-align:right}
+.calc .out{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.calc .big{font-family:var(--font-mono);font-size:34px;font-weight:500;font-variant-numeric:tabular-nums}
+.calc .es{display:flex;gap:16px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.calc .es b{font-family:var(--font-mono);font-weight:500}
+
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.notes h2{font-size:16px;font-weight:600;margin:0 0 8px}
+.notes ul{margin:0;padding-left:18px}
+.notes li{margin-bottom:6px;max-width:68ch}
+.notes li::marker{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Membrane potential, ion by ion</h1>
+  <p>Each dot is an ion doing a random walk. Ions cross only through channels selective for them, and every ion feels the electric field made by all the others. Nothing here is told the Nernst or GHK equation, yet the voltage settles onto those values, and the excess charge gathers in thin layers on the two faces of the membrane, like charge on a capacitor.</p>
+</header>
+
+<div class="top">
+<section class="card stage">
+    <div class="toolbar">
+      <span class="sect-title">View</span>
+      <button class="chip" id="zFit">Fit view (1×)</button>
+      <button class="chip" id="zLong">Longest patch (10×)</button>
+      <button class="chip" id="zMem">Zoom to membrane</button>
+      <button class="chip" id="zIn" aria-label="Zoom in">+</button>
+      <button class="chip" id="zOut" aria-label="Zoom out">−</button>
+      <span class="spacer"></span>
+      <span id="zoomLabel">1.0×</span>
+      <span>· scroll or double-click to zoom, drag to pan</span></div>
+    <div class="toolbar"><span id="patchInfo"></span><span>· zoom out to simulate a longer stretch of membrane with more ions (steadier graphs); zoom in for a short, noisier stretch</span>
+    </div>
+    <canvas id="sim" aria-label="Particle simulation of ions on both sides of a membrane"></canvas>
+    <div class="runbar">
+      <button id="play" class="primary">Pause</button>
+      <button id="stepBtn">Step</button>
+      <button id="reset">Reset ions</button>
+      <label for="speed" class="runlab">Speed</label>
+      <input type="range" id="speed" min="0" max="100" value="87">
+      <output id="speedo" for="speed"></output>
+      <span class="runhint">slide left for slow motion: below 1 step per frame, ions glide between steps</span>
+    </div>
+    <div class="legend">
+      <span><i class="dot k"></i>K⁺</span>
+      <span><i class="dot na"></i>Na⁺</span>
+      <span><i class="dot cl"></i>Cl⁻</span>
+      <span><i class="dot a"></i>A⁻ impermeant anions</span>
+      <span><i class="dot pump"></i>Na⁺/K⁺ pump</span>
+      <span><i class="dot neg"></i><i class="dot pos"></i>charge density: each ion's charge spread as a Gaussian and summed</span>
+    </div>
+    <p class="caption">Every channel is a leak channel: always open, with a selectivity filter at its outer mouth. The sliders set how many of each there are. Rings mark ions that just crossed.</p>
+  </section>
+  <aside class="side">
+    <div class="card panel">
+      
+      
+      <fieldset>
+        <legend class="sect-title">Presets</legend>
+        <div class="btns">
+          <button class="chip" data-preset="k">K⁺ only</button>
+          <button class="chip" data-preset="rest">Resting neuron</button>
+          <button class="chip" data-preset="na">Na⁺ only</button>
+          <button class="chip" data-preset="cl">Cl⁻ only</button>
+          <button class="chip" data-preset="none">All closed</button>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend class="sect-title">Leak channels per 1000 px of membrane</legend>
+        <div class="row"><label for="pK"><i class="dot k"></i>K⁺</label><input type="range" id="pK" min="0" max="25" step="1" value="18"><output id="pKo" for="pK"></output></div>
+        <div class="row"><label for="pNa"><i class="dot na"></i>Na⁺</label><input type="range" id="pNa" min="0" max="25" step="1" value="1"><output id="pNao" for="pNa"></output></div>
+        <div class="row"><label for="pCl"><i class="dot cl"></i>Cl⁻</label><input type="range" id="pCl" min="0" max="25" step="1" value="6"><output id="pClo" for="pCl"></output></div>
+        <p class="caption" id="leakCounts"></p>
+        <p class="caption">Leak channels are always open, so each ion's permeability is just its number of channels.</p>
+      </fieldset>
+    </div>
+    <div class="card panel">
+      <fieldset>
+        <legend class="sect-title">Model</legend>
+        <div class="row"><label>Ion count</label>
+          <div class="btns" style="grid-column:2 / 4">
+            <button class="chip" data-density="1">Many</button>
+            <button class="chip" data-density="0.5">Fewer</button>
+            <button class="chip" data-density="0.25">Few</button>
+          </div>
+          <span class="hint">Changing this resets the ions</span></div>
+        <div class="row"><label for="qmv">Membrane C</label><input type="range" id="qmv" min="3" max="40" step="1" value="11"><output id="qmvo" for="qmv"></output>
+          <span class="hint">capacitance per 100 px of membrane</span></div>
+        <div class="row"><label for="lambda">Layer width</label><input type="range" id="lambda" min="10" max="60" step="5" value="40"><output id="lambdao" for="lambda"></output>
+          <span class="hint">Debye screening length</span></div>
+        <label class="check" for="tint"><input type="checkbox" id="tint" checked>Show charge density map</label>
+        <div class="row"><label for="blur">Charge blur σ</label><input type="range" id="blur" min="6" max="40" step="2" value="20"><output id="bluro" for="blur"></output>
+          <span class="hint">on-screen width of each ion's Gaussian; scales with zoom</span></div>
+        <div class="row"><label for="dtau">Map averaging</label><input type="range" id="dtau" min="0" max="100" value="88"><output id="dtauo" for="dtau"></output>
+          <span class="hint">0 = instantaneous charge; higher averages over more steps</span></div>
+        <label class="check" for="chargeColor"><input type="checkbox" id="chargeColor">Color ions by charge sign (red +, blue −)</label>
+      </fieldset>
+    </div>
+  </aside>
+  </div>
+
+  <div class="row3">
+    <section class="card stage">
+      <p class="sect-title">Charge and potential across the membrane</p>
+      <canvas id="profile" aria-label="Net charge per column and electric potential across the simulation"></canvas>
+      <p class="caption">Bars: net charge in each 16 px column, averaged over recent steps. Line: electric potential, extracellular side at 0 mV. The shaded band is the part of the box in view.</p>
+    </section>
+    <section class="card stage">
+      <p class="sect-title">Membrane potential, intracellular relative to extracellular</p>
+      <canvas id="trace" aria-label="Voltage trace with Nernst and GHK reference lines"></canvas>
+      <p class="caption">Each point averages 100 steps. Dashed lines are Nernst potentials; dotted is the GHK prediction.</p>
+    </section>
+  </div>
+
+  <div class="ctrls">
+        <div class="card panel">
+      <fieldset>
+        <legend class="sect-title">Concentrations, reservoirs, pump</legend>
+        <label class="check" for="clampIn"><input type="checkbox" id="clampIn" checked>Hold intracellular concentrations fixed</label>
+        <label class="check" for="clamp"><input type="checkbox" id="clamp" checked>Hold extracellular concentrations fixed</label>
+        <p class="caption">With both held, each side acts as an infinite reservoir: crossing ions only charge the layers at the membrane. Untick to watch a finite cell's gradients run down.</p>
+        <table class="conc" aria-label="Ion concentrations in mM">
+          <thead><tr><th>mM</th><th>Inside</th><th>Outside</th></tr></thead>
+          <tbody>
+            <tr><td><i class="dot k"></i> K⁺</td><td><input type="number" id="cKi" min="0.5" max="300" step="0.5" value="140"></td><td><input type="number" id="cKo" min="0.5" max="300" step="0.5" value="5"></td></tr>
+            <tr><td><i class="dot na"></i> Na⁺</td><td><input type="number" id="cNai" min="0.5" max="300" step="0.5" value="14"></td><td><input type="number" id="cNao" min="0.5" max="300" step="0.5" value="143.5"></td></tr>
+            <tr><td><i class="dot cl"></i> Cl⁻</td><td><input type="number" id="cCli" min="0.5" max="300" step="0.5" value="10.5"></td><td><input type="number" id="cClo" min="0.5" max="300" step="0.5" value="148.5"></td></tr>
+            <tr><td><i class="dot a"></i> A⁻</td><td class="mono" id="aIn">—</td><td class="mono" id="aOut">—</td></tr>
+          </tbody>
+        </table>
+        <p class="caption">A⁻ is an impermeant anion that fills in to keep each side neutral, so Cl⁻ can't exceed K⁺ + Na⁺ on either side. Held reservoirs drift to new values over a few thousand steps; Apply now resets the ions at once.</p>
+        <div class="btns"><button id="concApply">Apply now</button><button id="concDefaults">Physiological defaults</button></div>
+        <label class="check" for="pump"><input type="checkbox" id="pump">Na⁺/K⁺ pump (3 Na⁺ out, 2 K⁺ in)</label>
+        <div class="row"><label for="pumpRate">Pump rate</label><input type="range" id="pumpRate" min="0" max="10" step="0.5" value="0.5"><output id="pumpRateo" for="pumpRate"></output>
+          <span class="hint">max cycles per 1000 steps; restores gradients in a finite cell</span></div>
+      </fieldset>
+      </div>
+  </div>
+
+  <section class="card">
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Ion</th><th>Inside</th><th>Outside</th><th>Nernst E</th><th>Permeability</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <p class="caption">Counts are whole compartments. mM and Nernst values are the reservoir concentrations when they are held fixed, otherwise the bulk away from the charge layers.</p>
+  </section>
+
+  <section class="card ghk" id="ghk-equation">
+    <div class="deriv">
+      <h2>The Goldman–Hodgkin–Katz equation</h2>
+      <p class="caption mj-fail">The equation renderer (MathJax) could not load, so equations appear as TeX source. Without internet, add a local copy (see tools/fetch_mathjax.py in Argus).</p>
+      <p>The GHK voltage equation gives the membrane potential at which several permeant ions together carry zero net current. It reduces to the Nernst equation when only one ion can cross.</p>
+      <div class="eq">\[ V_m \;=\; \frac{RT}{F}\,\ln\!\left(\frac{P_\mathrm{K}[\mathrm{K}^+]_o + P_\mathrm{Na}[\mathrm{Na}^+]_o + P_\mathrm{Cl}[\mathrm{Cl}^-]_i}{P_\mathrm{K}[\mathrm{K}^+]_i + P_\mathrm{Na}[\mathrm{Na}^+]_i + P_\mathrm{Cl}[\mathrm{Cl}^-]_o}\right) \]</div>
+
+      <h3>Definitions</h3>
+      <dl class="defs">
+        <dt>\(V_m\)</dt><dd>membrane potential, \(\phi_{\text{in}} - \phi_{\text{out}}\)</dd>
+        <dt>\(R, T, F\)</dt><dd>gas constant, absolute temperature, Faraday constant; \(RT/F \approx 25.7\) mV at 25 °C</dd>
+        <dt>\(z_s\)</dt><dd>valence of ion \(s\) (+1 for K⁺ and Na⁺, −1 for Cl⁻)</dd>
+        <dt>\(c_s(x)\)</dt><dd>concentration of ion \(s\) at depth \(x\) in the membrane, \(0 \le x \le d\), inside face at \(x=0\)</dd>
+        <dt>\([S]_i, [S]_o\)</dt><dd>bulk concentrations inside and outside</dd>
+        <dt>\(D_s,\ \beta_s,\ d\)</dt><dd>diffusion coefficient in the membrane, membrane/water partition coefficient, membrane thickness</dd>
+        <dt>\(P_s\)</dt><dd>permeability, \(P_s = D_s\beta_s/d\) (units of velocity); only the ratios between ions matter for \(V_m\)</dd>
+        <dt>\(J_s\)</dt><dd>flux of ion \(s\), positive outward (mol per area per time)</dd>
+        <dt>\(u_s\)</dt><dd>reduced voltage, \(u_s = z_s F V_m / RT\)</dd>
+      </dl>
+
+      <h3>Assumptions</h3>
+      <p>(1) Steady state, with each ion crossing independently. (2) The electric field is constant through the membrane, so \(\phi\) falls linearly from \(V_m\) at the inside face to 0 at the outside face. (3) The concentration just inside each face is the bulk concentration times \(\beta_s\).</p>
+
+      <h3>1. Nernst–Planck flux</h3>
+      <p>Each ion moves by diffusion down its concentration gradient plus drift in the electric field:</p>
+      <div class="eq">\[ J_s = -D_s\left(\frac{dc_s}{dx} + \frac{z_s F}{RT}\,c_s\,\frac{d\phi}{dx}\right) \]</div>
+
+      <h3>2. Apply the constant field</h3>
+      <p>With \(\phi(0)=V_m\) and \(\phi(d)=0\), the slope is \(d\phi/dx = -V_m/d\), so</p>
+      <div class="eq">\[ J_s = -D_s\left(\frac{dc_s}{dx} - \frac{u_s}{d}\,c_s\right) \]</div>
+
+      <h3>3. Integrate across the membrane</h3>
+      <p>At steady state \(J_s\) is the same at every \(x\). Multiply by the integrating factor \(e^{-u_s x/d}\):</p>
+      <div class="eq">\[ \frac{d}{dx}\!\left(c_s\,e^{-u_s x/d}\right) = -\frac{J_s}{D_s}\,e^{-u_s x/d} \]</div>
+      <p>Integrate from \(x=0\) to \(x=d\), using the boundary values \(c_s(0)=\beta_s[S]_i\) and \(c_s(d)=\beta_s[S]_o\):</p>
+      <div class="eq">\[ \beta_s[S]_o\,e^{-u_s} - \beta_s[S]_i = \frac{J_s\,d}{D_s\,u_s}\left(e^{-u_s}-1\right) \]</div>
+      <p>Solving for the flux gives the GHK flux equation:</p>
+      <div class="eq">\[ J_s = P_s\,u_s\,\frac{[S]_i - [S]_o\,e^{-u_s}}{1 - e^{-u_s}} \]</div>
+
+      <h3>4. Set the net current to zero</h3>
+      <p>The electric current is \(I = F\sum_s z_s J_s\). Write \(v = FV_m/RT\). For cations \(u_s = v\); for anions \(u_s = -v\), and rearranging the anion term with \(1-e^{v} = -e^{v}(1-e^{-v})\) gives</p>
+      <div class="eq">\[ z_s J_s = \begin{cases} P_s\,v\,\dfrac{[S]_i - [S]_o e^{-v}}{1-e^{-v}} & \text{cations} \\[2.2ex] P_s\,v\,\dfrac{[S]_o - [S]_i e^{-v}}{1-e^{-v}} & \text{anions} \end{cases} \]</div>
+      <p>Setting \(\sum_s z_s J_s = 0\) and cancelling the common factor \(v/(1-e^{-v})\):</p>
+      <div class="eq">\[ \sum_{\text{cat}} P_s[S]_i + \sum_{\text{an}} P_s[S]_o \;=\; e^{-v}\Big(\sum_{\text{cat}} P_s[S]_o + \sum_{\text{an}} P_s[S]_i\Big) \]</div>
+      <p>Solving for \(v\) and multiplying by \(RT/F\) gives the GHK voltage equation above. Anion concentrations appear with inside and outside swapped because their charge is negative.</p>
+
+      <h3>5. One permeant ion gives Nernst</h3>
+      <p>If only K⁺ crosses, the other terms vanish and \(V_m = \frac{RT}{F}\ln\frac{[\mathrm{K}^+]_o}{[\mathrm{K}^+]_i} = E_\mathrm{K}\). With several ions, \(V_m\) is a permeability-weighted compromise between their Nernst potentials, pulled toward the most permeant ion.</p>
+
+      <h3>How the simulation maps onto this</h3>
+      <p>Inside each channel the potential falls linearly across the membrane, which is assumption 2. Permeability is proportional to the number of channels for that ion, since every channel is always open. The simulation never uses the formula to move ions; it uses the formula only to draw the GHK reference line.</p>
+    </div>
+
+    <div class="calc card">
+      <span class="sect-title">GHK calculator</span>
+      <div class="grid">
+        <span></span><span class="h">P (relative)</span><span class="h">[ ]ᵢ mM</span><span class="h">[ ]ₒ mM</span>
+        <label for="gPK"><i class="dot k"></i> K⁺</label><input type="number" id="gPK" step="0.01" min="0" value="1"><input type="number" id="gKi" step="0.5" min="0.01" value="140" aria-label="K inside"><input type="number" id="gKo" step="0.5" min="0.01" value="5" aria-label="K outside">
+        <label for="gPNa"><i class="dot na"></i> Na⁺</label><input type="number" id="gPNa" step="0.01" min="0" value="0.04"><input type="number" id="gNai" step="0.5" min="0.01" value="14" aria-label="Na inside"><input type="number" id="gNao" step="0.5" min="0.01" value="143.5" aria-label="Na outside">
+        <label for="gPCl"><i class="dot cl"></i> Cl⁻</label><input type="number" id="gPCl" step="0.01" min="0" value="0.45"><input type="number" id="gCli" step="0.5" min="0.01" value="10.5" aria-label="Cl inside"><input type="number" id="gClo" step="0.5" min="0.01" value="148.5" aria-label="Cl outside">
+        <label for="gT">T (°C)</label><input type="number" id="gT" step="1" value="25"><span class="h" style="grid-column:3 / 5;text-align:left" id="gRTF"></span>
+      </div>
+      <div class="out"><span class="big" id="gV">—</span><span class="caption">V<sub>m</sub> from GHK</span></div>
+      <div class="es"><span>E<sub>K</sub> <b id="gEK">—</b></span><span>E<sub>Na</sub> <b id="gENa">—</b></span><span>E<sub>Cl</sub> <b id="gECl">—</b></span></div>
+      <canvas id="gChart" aria-label="GHK potential versus outside potassium concentration"></canvas>
+      <p class="caption">V<sub>m</sub> against outside K⁺ on a log scale, with the other values as entered. E<sub>K</sub> (dashed) is a straight line of slope 59 mV per decade at 25 °C; V<sub>m</sub> follows it at high [K⁺]ₒ and peels away at low [K⁺]ₒ where Na⁺ and Cl⁻ matter more.</p>
+      <div class="btns">
+        <button id="gFromSim">Copy from simulation</button>
+        <button id="gToSim">Send to simulation</button>
+        <button id="gDefaults">Squid axon defaults</button>
+      </div>
+    </div>
+  </section>
+
+<section class="notes card">
+  <div>
+    <h2>What the model does</h2>
+    <ul>
+      <li>Every ion takes random Brownian steps, smaller inside channels than in the bulk solutions (the step size changes smoothly near the membrane, with the drift correction that keeps equilibrium exact). On top of that it drifts in the local electric field, which comes from all charges to its left (a 1D Poisson solve each step, with the bath electrode at the right wall as ground).</li>
+      <li>The membrane has a much lower dielectric constant than water, so the same charge makes a much steeper field inside it. That is why most of the voltage drops across the membrane.</li>
+      <li>Excess charge is pulled toward the membrane by its partner on the other side and spread out by diffusion. The balance gives the diffuse layers whose width is the Debye length.</li>
+      <li>With one permeable ion, the voltage between the two bulk solutions stops at that ion's Nernst potential. With several, it settles near the GHK value.</li>
+      <li>The simulated patch wraps top to bottom, as a piece of a much longer membrane, and its length follows the zoom. Capacitance is set per length of membrane, so the voltage keeps its meaning as the patch grows or shrinks; a longer patch averages over more ions, so the graphs are steadier.</li>
+    </ul>
+  </div>
+  <div>
+    <h2>What it simplifies</h2>
+    <ul>
+      <li>Fields only vary across the membrane (left to right). Ions do not collide, and there is no field along the membrane.</li>
+      <li>By default both sides are infinite reservoirs: the far bulk on each side is held at fixed concentrations, the standard simplification for a real cell, where charging the membrane moves only about 1 ion in 100,000. Untick the reservoir boxes to see what happens when a few mV per ion does deplete a finite cell.</li><li>Real diffuse layers are about 1 nm thick. Here they are tens of pixels, so you can see them.</li>
+      <li>All channels are leak channels, always open. There are no voltage-gated channels or action potentials here; each ion's permeability is its number of channels.</li>
+      <li>It is 2D. Ions crowd slightly at busy channel mouths and the charge layers carry a few mV, so GHK is a close but not exact match when several ions are permeant.</li>
+    </ul>
+  </div>
+</section>
+</div>
+
+<script>
+(() => {
+  // ---------- geometry & constants ----------
+  const W = 1600, CW = 1600, CH = 900, MX = W / 2, MW = 8, PH = 18; // world width; canvas size
+  const SLOT = 36, H_REF = 100;   // channel spacing (room for the cartoon channels); capacitance is quoted per 100 px of membrane
+  let H = Math.round(CH / SLOT) * SLOT; // simulated membrane length (periodic in y); follows the zoom
+  const XIN = MX - MW, XOUT = MX + MW;
+  const KT = 25.7;                          // RT/F, mV
+  const Z = [1, 1, -1, -1];                 // K, Na, Cl, A
+  const DIFF = [1.0, 1.0, 1.0, 0.4];      // relative diffusion by species (A⁻ slower)
+  // Ions diffuse 10× faster in the bulk solutions than inside channels, so channel mouths stay close to bulk
+  // concentrations (a short, well-mixed unstirred layer). D rises smoothly over D_RAMP px from the membrane.
+  const D_PORE = 1.0, D_BULK = 10.0, D_RAMP = 50;
+  const Dx = new Float32Array(W + 1), dDx = new Float32Array(W + 1);
+  const NAMES = ['K⁺', 'Na⁺', 'Cl⁻', 'A⁻'];
+  const DEF_IN = [140, 14, 10.5], DEF_OUT = [5, 143.5, 148.5]; // mM: K, Na, Cl (A⁻ fills in for neutrality)
+  const MAXN = 50000;
+  const RES_GAP = 220;                                  // reservoirs start just beyond the charge layers
+  const CLAMP_IN = XIN - RES_GAP, CLAMP_X = XOUT + RES_GAP; // reservoir regions: everything farther from the membrane
+  const REF_IN = CLAMP_IN + 10, REF_OUT = CLAMP_X - 10; // V is measured between the edges of the two reservoirs
+  for (let i = 0; i <= W; i++) {
+    const dist = i < MX ? XIN - i : i - XOUT;
+    if (dist < 0) { Dx[i] = D_PORE; dDx[i] = 0; }
+    else if (dist >= D_RAMP) { Dx[i] = D_BULK; dDx[i] = 0; }
+    else { Dx[i] = D_PORE + (D_BULK - D_PORE) * dist / D_RAMP; dDx[i] = (i < MX ? -1 : 1) * (D_BULK - D_PORE) / D_RAMP; }
+  }
+  const BIN = 16, NB = W / BIN;
+  const NAV_DM = 6;
+
+  const px = new Float32Array(MAXN), py = new Float32Array(MAXN), ox = new Float32Array(MAXN), oy = new Float32Array(MAXN);
+  const sp = new Uint8Array(MAXN), pore = new Int16Array(MAXN), side = new Int8Array(MAXN);
+  let N = 0;
+
+  // ---------- channels ----------
+  // All channels are leak channels (always open). Each ion's permeability is its number of channels:
+  // the sliders set channels per 1000 px of membrane, spread evenly down the membrane between pumps.
+  const LEAK_PER = 1000;
+  let pores = [], pumps = [], slotPore = [], nLeak = [0,0,0], nNav = 0, nKv = 0, leakFull = false;
+  const isPumpSlot = i => i % 24 === 12;
+  function buildChannels() {
+    pores = []; pumps = []; slotPore = [];
+    const n = Math.round(H / SLOT);
+    const free = []; for (let i = 0; i < n; i++) if (!isPumpSlot(i)) free.push(i);
+    const want = [0, 1, 2].map(s => perm[s] * H / LEAK_PER);
+    let cnt = want.map(Math.round);
+    leakFull = false;
+    const tot = cnt[0] + cnt[1] + cnt[2];
+    if (tot > free.length) { const k = free.length / tot; cnt = want.map(w => Math.floor(w * k)); leakFull = true; }
+    const items = [];
+    for (let s = 0; s < 3; s++) for (let j = 0; j < cnt[s]; j++) items.push({ s, f: (j + 0.5) / cnt[s] });
+    items.sort((a, b) => a.f - b.f || a.s - b.s);
+    const assign = new Array(n).fill(-1);
+    items.forEach((it, k) => { assign[free[Math.floor((k + 0.5) * free.length / items.length)]] = it.s; });
+    for (let i = 0; i < n; i++) {
+      const yc = (i + 0.5) * SLOT;
+      if (isPumpSlot(i)) { pumps.push({ y: yc, flash: 0 }); slotPore.push(-1); continue; }
+      if (assign[i] < 0) { slotPore.push(-1); continue; }
+      slotPore.push(pores.length);
+      pores.push({ y0: yc - PH/2, y1: yc + PH/2, yc, s: assign[i], kind: 'leak', dm: 1, slot: i });
+    }
+    nLeak = [0,0,0]; pores.forEach(p => nLeak[p.s]++);
+  }
+  // after a layout change: ions inside a channel that is gone (or is now another ion's) step out to the nearer face
+  function remapPores(oldSlot) {
+    for (let i = 0; i < N; i++) {
+      if (pore[i] < 0 && oldSlot[i] < 0) continue;
+      const sl = oldSlot[i], k = sl >= 0 ? slotPore[sl] : -1;
+      if (k !== undefined && k >= 0 && pores[k].s === sp[i]) pore[i] = k;
+      else if (pore[i] >= 0 || (px[i] > XIN && px[i] < XOUT)) { pore[i] = -1; px[i] = ox[i] = px[i] < MX ? XIN - 0.5 : XOUT + 0.5; }
+    }
+  }
+  function relayoutChannels() {
+    const oldSlot = new Int16Array(N);
+    for (let i = 0; i < N; i++) oldSlot[i] = pore[i] >= 0 ? pores[pore[i]].slot : -1;
+    buildChannels(); remapPores(oldSlot);
+    const el = document.getElementById('leakCounts');
+    if (el) el.textContent = `This patch has ${nLeak[0]} K⁺, ${nLeak[1]} Na⁺ and ${nLeak[2]} Cl⁻ leak channels` + (leakFull ? ' (membrane full: scaled down, ratios kept)' : '') + '.';
+  }
+
+  // ---------- state ----------
+  let density = 0.5, stepLimited = 0;
+  let V = 0, vAvg = 0, qin = 0, steps = 0, running = true, stepAcc = 0;
+  let perm = [18, 1, 6], effPerm = perm.slice();   // leak channels per 1000 px of membrane
+  buildChannels();
+  let navOpen = false, kvOpen = false;
+  let concIn = DEF_IN.slice(), concOut = DEF_OUT.slice();
+  let clampOn = true, clampInOn = true, pumpOn = false, pumpRate = 0.5, pumpAcc = 0;
+  let qmv = 11, lambda = 40, vSum = 0, speed = 60, tintOn = true, chargeColor = false, densTau = 1500;
+  let apStart = -1;   // no action potentials in this simulation
+  const cIn = [0,0,0,0], cOut = [0,0,0,0];
+  const crossings = [];
+  const trace = []; const TRACE_LEN = 500, SAMPLE = 100; let sampleAcc = 0;
+
+  // field arrays (1 px resolution)
+  const hist = new Float32Array(W + 1), E = new Float32Array(W + 1), Esm = new Float32Array(W + 1), kap = new Float32Array(W + 1);
+  const rhoSm = new Float32Array(NB);
+  let dIn = 0, dMem = 0, dOut = 0;
+  let cTot = 1.9;
+  let qClampIn = 0; // net charge the cytoplasm reservoir clamp has added; neutralized by an equal background charge (neutral salt exchange)
+
+  const accept = p => 1;   // leak channels are always open
+  const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
+
+  function setKappa() {
+    const kMem = qmv / (KT * 2 * MW) * (H_REF / H);   // qmv = mV per ion per 100 px of membrane
+    const kWat = 1 / (lambda * lambda * cTot);
+    for (let i = 0; i <= W; i++) kap[i] = (i >= XIN && i < XOUT) ? kMem : kWat;
+  }
+  const aConc = c => Math.max(0, c[0] + c[1] - c[2]);         // impermeant anion for electroneutrality
+  const MM_PER_RHO = 92500;                                     // mM per (ion / px²) at density 1
+  const perPx2 = c => c * density / MM_PER_RHO;
+  const toMM = (count, width) => count / (width * H) * MM_PER_RHO / density;
+  const inCount = s => perPx2(s < 3 ? concIn[s] : aConc(concIn)) * XIN * H;            // ions in whole intracellular compartment
+  const bathCount = s => perPx2(s < 3 ? concOut[s] : aConc(concOut)) * (W - XOUT) * H; // ions in whole extracellular compartment
+  const clampTarget = s => bathCount(s) * (W - CLAMP_X) / (W - XOUT);
+
+  function addParticle(s, x, y) {
+    if (N >= MAXN) return;
+    px[N] = ox[N] = x; py[N] = oy[N] = y; sp[N] = s; pore[N] = -1; side[N] = x < MX ? -1 : 1; N++;
+  }
+  function removeAt(i) {
+    N--; px[i] = px[N]; py[i] = py[N]; ox[i] = ox[N]; oy[i] = oy[N]; sp[i] = sp[N]; pore[i] = pore[N]; side[i] = side[N];
+  }
+  function reset() {
+    N = 0;
+    const inN = [0, 1, 2].map(s => Math.round(inCount(s))); inN.push(Math.max(0, inN[0] + inN[1] - inN[2]));
+    inN.forEach((n, s) => { for (let k = 0; k < n; k++) addParticle(s, 2 + Math.random() * (XIN - 4), 2 + Math.random() * (H - 4)); });
+    const outN = [0, 1, 2].map(s => Math.round(bathCount(s))); outN.push(Math.max(0, outN[0] + outN[1] - outN[2])); // electroneutral
+    outN.forEach((n, s) => { for (let k = 0; k < n; k++) addParticle(s, XOUT + 2 + Math.random() * (W - XOUT - 4), 2 + Math.random() * (H - 4)); });
+    cTot = inN.reduce((a, b) => a + b, 0) / XIN;
+    setKappa();
+    V = vAvg = vSum = 0; qClampIn = 0; steps = 0; stepAcc = 0; sampleAcc = 0; pumpAcc = 0; apStart = -1;
+    crossings.length = 0; trace.length = 0; rhoSm.fill(0); Esm.fill(0); dens.fill(0);
+    binAndField(); countSides();
+    if (typeof updatePatchInfo === 'function') updatePatchInfo();
+  }
+  function countSides() {
+    cIn.fill(0); cOut.fill(0); qin = 0;
+    for (let i = 0; i < N; i++) { const s = sp[i]; if (px[i] < MX) { cIn[s]++; qin += Z[s]; } else cOut[s]++; }
+  }
+  function binAndField() {
+    hist.fill(0);
+    for (let i = 0; i < N; i++) { let b = px[i] | 0; if (b > W) b = W; hist[b] += Z[sp[i]]; }
+    computeField();
+  }
+  function computeField() {
+    let qc = 0;
+    for (let i = 0; i <= W; i++) { E[i] = kap[i] * (qc + 0.5 * hist[i]); qc += hist[i]; }
+    let a = 0, b = 0, c = 0;
+    for (let i = REF_IN; i < XIN; i++) a += E[i];
+    for (let i = XIN; i < XOUT; i++) b += E[i];
+    for (let i = XOUT; i < REF_OUT; i++) c += E[i];
+    V = KT * (a + b + c);
+  }
+  function smoothProfiles(alpha) {
+    for (let bI = 0; bI < NB; bI++) {
+      let r = 0; const o = bI * BIN;
+      for (let k = 0; k < BIN; k++) r += hist[o + k];
+      rhoSm[bI] += (r - rhoSm[bI]) * alpha;
+    }
+    for (let i = 0; i <= W; i++) Esm[i] += (E[i] - Esm[i]) * alpha;
+  }
+
+  function findPore(s, y) {
+    const k = slotPore[(y / SLOT) | 0];
+    if (k === undefined || k < 0) return -1;
+    const p = pores[k];
+    return (p.s === s && y >= p.y0 && y <= p.y1) ? k : -1;
+  }
+  function updateGates() {
+    effPerm[0] = perm[0]; effPerm[1] = perm[1]; effPerm[2] = perm[2];
+  }
+
+
+  // ---------- one Brownian step ----------
+  function step() {
+    updateGates();
+    let q = 0;
+    cIn.fill(0); cOut.fill(0); hist.fill(0);
+    for (let i = 0; i < N; i++) {
+      const s = sp[i], p = pore[i];
+      const pr = p >= 0 ? pores[p] : null;
+      const dm = pr ? pr.dm : 1;
+      let xi0 = px[i] | 0; if (xi0 > W) xi0 = W; if (xi0 < 0) xi0 = 0;
+      const Dl = pr ? D_PORE * dm : Dx[xi0] * DIFF[s];
+      const sg = Math.sqrt(2 * Dl);
+      const x = px[i];
+      let xi = x | 0; if (xi > W) xi = W;
+      // Itô drift: D·z·E (minus the ion's own sheet field) plus dD/dx, which keeps Boltzmann equilibrium exact where D varies
+      let nx = x + sg * g() + Dl * Z[s] * (E[xi] - 0.5 * kap[xi] * Z[s]) + (pr ? 0 : dDx[xi] * DIFF[s]);
+      let ny = py[i] + sg * g();
+      if (pr) {
+        if (ny < pr.y0) ny = 2 * pr.y0 - ny; else if (ny > pr.y1) ny = 2 * pr.y1 - ny;
+        if (nx <= XIN || nx >= XOUT) {
+          pore[i] = -1;
+          const ns = nx <= XIN ? -1 : 1;
+          if (ns !== side[i]) { side[i] = ns; if (crossings.length < 200) crossings.push({ x: nx, y: ny, s, age: 0 }); }
+        }
+      } else if (s === 3) {
+        if (x <= XIN && nx > XIN) nx = 2 * XIN - nx; else if (x >= XOUT && nx < XOUT) nx = 2 * XOUT - nx;
+      } else if (x <= XIN && nx > XIN) {
+        const k = findPore(s, ny);
+        if (k >= 0 && Math.random() < accept(pores[k])) pore[i] = k; else nx = 2 * XIN - nx;
+      } else if (x >= XOUT && nx < XOUT) {
+        const k = findPore(s, ny);
+        if (k >= 0 && Math.random() < accept(pores[k])) pore[i] = k; else nx = 2 * XOUT - nx;
+      }
+      if (nx < 0) nx = -nx; else if (nx > W) nx = 2 * W - nx;
+      if (pore[i] < 0) { if (ny < 0) ny += H; else if (ny >= H) ny -= H; }  // periodic membrane
+      px[i] = nx; py[i] = ny;
+      let b = nx | 0; if (b > W) b = W; hist[b] += Z[s];
+      if (nx < MX) { q += Z[s]; cIn[s]++; } else cOut[s]++;
+    }
+    qin = q;
+    steps++;
+    if ((clampOn || clampInOn) && steps % 25 === 0) clampBath();
+    if (pumpOn && pumpRate > 0) {
+      const nain = cIn[1], km = Math.max(1, perPx2(14) * XIN * H);
+      pumpAcc += (pumpRate / 1000) * (nain / (nain + km));
+      while (pumpAcc >= 1) { pumpAcc -= 1; pumpCycle(); }
+    }
+    computeField();
+    smoothProfiles(0.0005);
+    sampleAcc++; vSum += V;
+    if (sampleAcc >= SAMPLE) { const vm = vSum / SAMPLE; sampleAcc = 0; vSum = 0; trace.push(vm); if (trace.length > TRACE_LEN) trace.shift(); vAvg += (vm - vAvg) * 0.05; }
+  }
+
+  // Reservoir clamps: hold far-bulk composition fixed on each side using only charge-neutral moves
+  // (swap K+<->Na+ or Cl-<->A-, or add/remove a cation-anion pair). Total charge is conserved, like a real
+  // electroneutral reservoir, so the charge that crossed the membrane stays in the layers at the membrane.
+  function clampRegion(xa, xb, targets, anions) {
+    const idx = [[],[],[],[]];
+    for (let i = 0; i < N; i++) if (pore[i] < 0 && px[i] > xa && px[i] < xb) idx[sp[i]].push(i);
+    const d = [0,0,0,0];
+    for (let s = 0; s < targets.length; s++) d[s] = Math.round(targets[s]) - idx[s].length;
+    const cats = [0, 1], rm = [];
+    const newPos = () => [xa + 1 + Math.random() * (xb - xa - 2), 2 + Math.random() * (H - 4)];
+    const argmax = l => l.reduce((a, b) => d[b] > d[a] ? b : a), argmin = l => l.reduce((a, b) => d[b] < d[a] ? b : a);
+    let changed = false;
+    for (let it = 0; it < 300; it++) {
+      const cHi = argmax(cats), cLo = argmin(cats), aHi = argmax(anions), aLo = argmin(anions);
+      if (d[cHi] > 0 && d[cLo] < 0 && idx[cLo].length) { const i = idx[cLo].pop(); sp[i] = cHi; idx[cHi].push(i); d[cHi]--; d[cLo]++; }
+      else if (d[aHi] > 0 && d[aLo] < 0 && idx[aLo].length) { const i = idx[aLo].pop(); sp[i] = aHi; idx[aHi].push(i); d[aHi]--; d[aLo]++; }
+      else if (d[cHi] > 0 && d[aHi] > 0) { addParticle(cHi, ...newPos()); addParticle(aHi, ...newPos()); d[cHi]--; d[aHi]--; }
+      else if (d[cLo] < 0 && d[aLo] < 0 && idx[cLo].length && idx[aLo].length) { rm.push(idx[cLo].pop(), idx[aLo].pop()); d[cLo]++; d[aLo]++; }
+      else break;
+      changed = true;
+    }
+    rm.sort((a, b) => b - a).forEach(removeAt);
+    return changed;
+  }
+  // Keep the whole system exactly electroneutral. Crossings, pumps and reservoir moves all conserve charge;
+  // resizing the patch can leave a few stray charges, which are removed from the far reservoirs here.
+  function neutralize() {
+    let q = 0; for (let i = 0; i < N; i++) q += Z[sp[i]];
+    if (q === 0) return false;
+    const want = q > 0 ? [1, 0] : [2, 3], cand = [];
+    for (let i = 0; i < N; i++) if (pore[i] < 0 && (px[i] < CLAMP_IN || px[i] > CLAMP_X) && want.includes(sp[i])) cand.push(i);
+    for (let k = cand.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [cand[k], cand[j]] = [cand[j], cand[k]]; }
+    cand.slice(0, Math.abs(q)).sort((a, b) => b - a).forEach(removeAt);
+    return true;
+  }
+  function clampBath() {
+    let changed = neutralize();
+    if (clampOn) changed = clampRegion(CLAMP_X, W, [0, 1, 2, 3].map(clampTarget), [2, 3]) || changed;
+    if (clampInOn) changed = clampRegion(0, CLAMP_IN, [0, 1, 2, 3].map(s => inCount(s) * CLAMP_IN / XIN), [2, 3]) || changed;
+    if (changed) binAndField();
+  }
+
+  function pickNear(s, wantInside, y0) {
+    for (let t = 0; t < 400; t++) {
+      const i = Math.floor(Math.random() * N);
+      if (sp[i] !== s || pore[i] >= 0) continue;
+      const x = px[i];
+      const ok = wantInside ? (x < XIN && x > XIN - 140) : (x > XOUT && x < XOUT + 140);
+      if (ok && Math.abs(py[i] - y0) < 120) return i;
+    }
+    for (let t = 0; t < 400; t++) {
+      const i = Math.floor(Math.random() * N);
+      if (sp[i] === s && pore[i] < 0 && (wantInside ? px[i] < XIN : px[i] > XOUT)) return i;
+    }
+    return -1;
+  }
+  function pumpCycle() {
+    const pm = pumps[Math.floor(Math.random() * pumps.length)];
+    const na = [], k = [];
+    for (let n = 0; n < 3; n++) { const i = pickNear(1, true, pm.y); if (i < 0 || na.includes(i)) return; na.push(i); }
+    for (let n = 0; n < 2; n++) { const i = pickNear(0, false, pm.y); if (i < 0 || k.includes(i)) return; k.push(i); }
+    na.forEach(i => { px[i] = ox[i] = XOUT + 1 + Math.random() * 6; py[i] = oy[i] = pm.y + (Math.random() - 0.5) * PH; side[i] = 1; });
+    k.forEach(i => { px[i] = ox[i] = XIN - 1 - Math.random() * 6; py[i] = oy[i] = pm.y + (Math.random() - 0.5) * PH; side[i] = -1; });
+    qin -= 1; cIn[1] -= 3; cOut[1] += 3; cIn[0] += 2; cOut[0] -= 2;
+    pm.flash = 1;
+    binAndField();
+  }
+
+  // ---------- readouts ----------
+  const bulk = { in: [0,0,0,0], out: [0,0,0,0] };
+  function measureBulk() {
+    const edge = Math.max(100, 3 * lambda);
+    const a0 = 20, a1 = XIN - edge, b0 = XOUT + edge, b1 = W - 40;
+    const ci = [0,0,0,0], co = [0,0,0,0];
+    for (let i = 0; i < N; i++) { if (pore[i] >= 0) continue; const x = px[i];
+      if (x > a0 && x < a1) ci[sp[i]]++; else if (x > b0 && x < b1) co[sp[i]]++; }
+    for (let s = 0; s < 4; s++) { bulk.in[s] = ci[s] * XIN / (a1 - a0); bulk.out[s] = co[s] * (W - XOUT) / (b1 - b0); }
+    // reservoirs held: use their exact concentrations
+    if (clampInOn) for (let s = 0; s < 4; s++) bulk.in[s] = inCount(s);
+    if (clampOn) for (let s = 0; s < 4; s++) bulk.out[s] = bathCount(s);
+  }
+  const nernst = s => (KT / Z[s]) * Math.log(Math.max(bulk.out[s], 0.3) / Math.max(bulk.in[s], 0.3));
+  function ghk() {
+    const pK = nLeak[0], pNa = nLeak[1], pCl = nLeak[2];   // permeability = number of channels
+    const num = pK * bulk.out[0] + pNa * bulk.out[1] + pCl * bulk.in[2];
+    const den = pK * bulk.in[0] + pNa * bulk.in[1] + pCl * bulk.out[2];
+    if (num <= 0 || den <= 0) return null;
+    return KT * Math.log(num / den);
+  }
+  function layerDrops() {
+    let a = 0, b = 0, c = 0;
+    for (let i = REF_IN; i < XIN; i++) a += Esm[i];
+    for (let i = XIN; i < XOUT; i++) b += Esm[i];
+    for (let i = XOUT; i < REF_OUT; i++) c += Esm[i];
+    dIn = KT * a; dMem = KT * b; dOut = KT * c;
+  }
+
+  // ---------- drawing setup ----------
+  const sim = document.getElementById('sim'), prof = document.getElementById('profile'), trc = document.getElementById('trace');
+  const PW = 640, PRH = 480, TW = 640, TH = 480;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  sim.width = CW * dpr; sim.height = CH * dpr; prof.width = PW * dpr; prof.height = PRH * dpr; trc.width = TW * dpr; trc.height = TH * dpr;
+  const ctx = sim.getContext('2d'), pctx = prof.getContext('2d'), tctx = trc.getContext('2d');
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0); tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    ['bg','surface','ink','muted','line','accent','k','na','cl','a','pos','neg','cyto','bath','mem','memdark'].forEach(n => C[n] = cs.getPropertyValue('--' + n).trim());
+    C.sp = [C.k, C.na, C.cl, C.a];
+    const mixc = (a, b, t) => { const p = rgb(a), q = rgb(b); return `rgb(${p.map((v, i) => Math.round(v * t + q[i] * (1 - t))).join(',')})`; };
+    C.tint = C.sp.map(c => mixc(c, C.surface, 0.24));      // channel body fill
+    C.lipid = mixc(C.mem, C.surface, 0.45);                  // bilayer core
+  }
+  function rgb(hex) { const h = hex.replace('#', ''); const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readColors);
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
+
+  readColors();
+
+  // ---------- view / zoom ----------
+  // The simulated membrane patch is periodic in y and its length follows the zoom: zoom out -> longer patch, more ions.
+  // z < 1: the display stays at 1× but the simulated membrane is 1/z times longer than the view (scroll along it).
+  const view = { z: 1, cx: W / 2, cy: H / 2 };
+  const dz = () => Math.max(1, view.z);           // display scale
+  const viewH = () => CH / view.z;                // simulated membrane length requested
+  let resizeTimer = 0;
+  function clampView() {
+    view.z = Math.max(0.1, Math.min(8, view.z));
+    const hw = CW / (2 * dz());
+    view.cx = Math.max(hw, Math.min(W - hw, view.cx));
+    const zl = document.getElementById('zoomLabel');
+    zl.textContent = view.z >= 1 ? view.z.toFixed(1) + '×' : view.z.toFixed(2) + '× (patch ' + (1 / view.z).toFixed(1) + '× the view; drag up/down to scroll)';
+    clearTimeout(resizeTimer); resizeTimer = setTimeout(() => setDomainHeight(viewH()), 250);
+  }
+  const cyNow = () => view.cy;
+  const toWorld = (lx, ly) => ({ x: view.cx + (lx - CW / 2) / dz(), y: cyNow() + (ly - CH / 2) / dz() });
+  const toScreen = (x, y) => ({ x: (x - view.cx) * dz() + CW / 2, y: (y - cyNow()) * dz() + CH / 2 });
+  function localPos(e) { const r = sim.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * CW, y: (e.clientY - r.top) / r.height * CH }; }
+  function zoomAt(lx, ly, f) {
+    const w = toWorld(lx, ly);
+    view.z *= f; clampView();
+    view.cx = w.x - (lx - CW / 2) / dz(); clampView();
+  }
+  sim.addEventListener('wheel', e => { e.preventDefault(); const p = localPos(e); zoomAt(p.x, p.y, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, { passive: false });
+  sim.addEventListener('dblclick', e => { const p = localPos(e); zoomAt(p.x, p.y, e.shiftKey ? 0.5 : 2); });
+  let drag = null;
+  sim.addEventListener('pointerdown', e => { drag = { p: localPos(e), cx: view.cx, cy: view.cy }; sim.setPointerCapture(e.pointerId); sim.classList.add('dragging'); });
+  sim.addEventListener('pointermove', e => { if (!drag) return; const p = localPos(e);
+    view.cx = drag.cx - (p.x - drag.p.x) / dz(); const hw = CW / (2 * dz()); view.cx = Math.max(hw, Math.min(W - hw, view.cx));
+    view.cy = ((drag.cy - (p.y - drag.p.y) / dz()) % H + H) % H; });
+  const endDrag = () => { drag = null; sim.classList.remove('dragging'); };
+  sim.addEventListener('pointerup', endDrag); sim.addEventListener('pointercancel', endDrag);
+  document.getElementById('zFit').addEventListener('click', () => { view.z = 1; view.cx = W / 2; clampView(); });
+  document.getElementById('zLong').addEventListener('click', () => { view.z = 0.1; view.cx = W / 2; clampView(); });
+  document.getElementById('zMem').addEventListener('click', () => { view.z = 4; view.cx = MX; clampView(); });
+  document.getElementById('zIn').addEventListener('click', () => zoomAt(CW / 2, CH / 2, 1.5));
+  document.getElementById('zOut').addEventListener('click', () => zoomAt(CW / 2, CH / 2, 1 / 1.5));
+
+  // Resize the periodic patch: shrinking drops the strip beyond the new edge; growing tiles copies of the
+  // current patch, so concentrations, charge layers and charge per length all carry over.
+  function setDomainHeight(req) {
+    const n = Math.max(5, Math.min(Math.round(10 * CH / SLOT), Math.round(req / SLOT)));
+    const Hn = n * SLOT; if (Math.abs(Hn - H) < 1) return;
+    const Ho = H, oldSlot = new Int16Array(N);
+    for (let i = 0; i < N; i++) oldSlot[i] = pore[i] >= 0 ? pores[pore[i]].slot : -1;
+    if (Hn < Ho) {
+      for (let i = N - 1; i >= 0; i--) if (py[i] >= Hn || (oldSlot[i] >= n)) { oldSlot[i] = oldSlot[N - 1]; removeAt(i); }
+    } else {
+      const N0 = N;
+      for (let i = 0; i < N0; i++) {
+        if (pore[i] >= 0) continue;
+        for (let k = 1; py[i] + k * Ho < Hn; k++) {
+          if (N >= MAXN) break;
+          px[N] = ox[N] = px[i]; py[N] = oy[N] = py[i] + k * Ho; sp[N] = sp[i]; pore[N] = -1; side[N] = side[i]; N++;
+        }
+      }
+    }
+    H = Hn;
+    neutralize();
+    buildChannels();
+    remapPores(oldSlot);
+    relayoutChannels();
+    for (let b = 0; b < NB; b++) rhoSm[b] *= Hn / Ho;
+    let ni = 0; for (let i = 0; i < N; i++) if (px[i] < MX) ni++;
+    cTot = ni / XIN; setKappa();
+    allocDensity(true);
+    binAndField(); countSides();
+    if (view.z >= 1) view.cy = H / 2; else view.cy = ((view.cy % H) + H) % H;
+    updatePatchInfo();
+  }
+  function updatePatchInfo() {
+    const el = document.getElementById('patchInfo');
+    if (el) el.textContent = `Simulated patch: ${Math.round(H).toLocaleString()} px of membrane, ${N.toLocaleString()} ions` + (stepLimited ? ` · running ${stepLimited} steps/frame to stay smooth` : '');
+  }
+
+  // ---------- 2D Gaussian charge density ----------
+  let CG = 8, GX = 0, GY = 0, qgrid, tmpg, dens = new Float32Array(1), dImg;
+  const dCanvas = document.createElement('canvas'), dctx = dCanvas.getContext('2d');
+  let blurSigma = 16, kern = null, kR = 0, dScale = 0.02;
+  function allocDensity(keep) {
+    const old = dens, oGX = GX, oGY = GY, oCG = CG;
+    CG = Math.max(2, Math.min(8, Math.round(sigEff() / 2)));
+    while ((W / CG) * (H / CG) > 60000) CG *= 2;
+    GX = Math.round(W / CG); GY = Math.max(1, Math.round(H / CG));
+    qgrid = new Float32Array(GX * GY); tmpg = new Float32Array(GX * GY); dens = new Float32Array(GX * GY);
+    if (keep && oGX && oCG === CG) for (let y = 0; y < GY; y++) for (let x = 0; x < GX; x++) dens[y * GX + x] = old[(y % oGY) * oGX + x];
+    dCanvas.width = GX; dCanvas.height = GY; dImg = dctx.createImageData(GX, GY);
+    makeKernel();
+  }
+  const sigEff = () => Math.max(2, blurSigma / dz());   // σ shrinks with zoom so it stays constant on screen
+  function makeKernel() {
+    const sc = sigEff() / CG; kR = Math.ceil(3 * sc); kern = new Float32Array(2 * kR + 1); let sum = 0;
+    for (let k = -kR; k <= kR; k++) { const v = Math.exp(-(k * k) / (2 * sc * sc)); kern[k + kR] = v; sum += v; }
+    for (let k = 0; k < kern.length; k++) kern[k] /= sum;
+  }
+  allocDensity(false);
+  function updateDensity(alpha) {
+    qgrid.fill(0);
+    for (let i = 0; i < N; i++) {
+      let gx = (px[i] / CG) | 0, gy = (py[i] / H * GY) | 0;
+      if (gx >= GX) gx = GX - 1; if (gy >= GY) gy = GY - 1; if (gy < 0) gy = 0;
+      qgrid[gy * GX + gx] += Z[sp[i]];
+    }
+    // separable Gaussian blur with reflecting edges
+    for (let y = 0; y < GY; y++) { const o = y * GX;
+      for (let x = 0; x < GX; x++) { let a = 0;
+        for (let k = -kR; k <= kR; k++) { let xx = x + k; if (xx < 0) xx = -xx - 1; else if (xx >= GX) xx = 2 * GX - xx - 1; a += qgrid[o + xx] * kern[k + kR]; }
+        tmpg[o + x] = a; } }
+    let mx = 0;
+    for (let x = 0; x < GX; x++)
+      for (let y = 0; y < GY; y++) { let a = 0;
+        for (let k = -kR; k <= kR; k++) { let yy = (y + k) % GY; if (yy < 0) yy += GY; a += tmpg[yy * GX + x] * kern[k + kR]; }
+        const j = y * GX + x; dens[j] += (a - dens[j]) * alpha; const m = Math.abs(dens[j]); if (m > mx) mx = m; }
+    dScale += (Math.max(mx * 0.75, 0.004) - dScale) * 0.05;
+    paintDensity();
+  }
+  function paintDensity() {
+    const P = rgb(C.pos), Nn = rgb(C.neg), d = dImg.data;
+    for (let j = 0; j < GX * GY; j++) {
+      const v = dens[j] / dScale, a = Math.min(1, Math.abs(v)), c = v > 0 ? P : Nn, o = j * 4;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = Math.round(Math.pow(a, 1.2) * 150);
+    }
+    dctx.putImageData(dImg, 0, 0);
+  }
+
+  const PORE_LABEL = { leak: ['K⁺ leak', 'Na⁺ leak', 'Cl⁻ leak'] };
+
+  function drawSim(frac) {
+    const z = dz(), cy = cyNow();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, CW, CH);
+    const tx = CW / 2 - view.cx * z, ty0 = CH / 2 - cy * z;
+    const x0 = view.cx - CW / (2 * z), x1 = view.cx + CW / (2 * z), y0 = cy - CH / (2 * z), y1 = cy + CH / (2 * z);
+    const k0 = Math.floor(y0 / H), k1 = Math.floor((y1 - 1e-6) / H);
+    const lerp = frac < 1;
+    const rB = density < 0.4 ? 1.25 : density < 0.75 ? 1.1 : 0.85;
+    const showSigns = z >= 3;
+    for (let k = k0; k <= k1; k++) {          // the patch is periodic: tile it to fill the view
+      const off = k * H;
+      ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * tx, dpr * (ty0 + off * z));
+      const ly0 = y0 - off, ly1 = y1 - off;   // view range in this tile's coordinates
+      ctx.fillStyle = C.cyto; ctx.fillRect(0, 0, MX, H);
+      ctx.fillStyle = C.bath; ctx.fillRect(MX, 0, W - MX, H);
+      if (tintOn) { ctx.imageSmoothingEnabled = true; ctx.drawImage(dCanvas, 0, 0, W, H); }
+      // membrane
+      // lipid bilayer: head groups on both faces, tails pointing into the core
+      ctx.fillStyle = C.lipid; ctx.fillRect(XIN, 0, XOUT - XIN, H);
+      ctx.strokeStyle = C.memdark; ctx.lineWidth = 0.7; ctx.lineCap = 'round';
+      const yA = Math.max(3, Math.floor(ly0 / 6) * 6 + 3), yB = Math.min(H, ly1 + 6);
+      ctx.beginPath();
+      for (let y = yA; y < yB; y += 6) {
+        ctx.moveTo(XIN + 3, y - 1); ctx.lineTo(MX - 1, y - 1.3); ctx.moveTo(XIN + 3, y + 1); ctx.lineTo(MX - 1, y + 1.3);
+        ctx.moveTo(XOUT - 3, y - 1); ctx.lineTo(MX + 1, y - 1.3); ctx.moveTo(XOUT - 3, y + 1); ctx.lineTo(MX + 1, y + 1.3);
+      }
+      ctx.stroke();
+      ctx.fillStyle = C.mem;
+      for (let y = yA; y < yB; y += 6) { ctx.beginPath(); ctx.arc(XIN + 2.2, y, 2.3, 0, 6.283); ctx.arc(XOUT - 2.2, y, 2.3, 0, 6.283); ctx.fill(); }
+      // leak channels, textbook cartoon: body spanning the bilayer, open lumen, selectivity filter at the extracellular mouth
+      const BW = 8, BH = SLOT * 0.74;   // body overhang, body height
+      pores.forEach(p => {
+        if (p.yc + BH < ly0 || p.yc - BH > ly1) return;
+        const col = C.sp[p.s];
+        const bx = XIN - BW, bw = XOUT - XIN + 2 * BW, by = p.yc - BH / 2;
+        ctx.fillStyle = C.tint[p.s]; ctx.strokeStyle = col; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.roundRect(bx, by, bw, BH, BH * 0.32); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = C.surface; ctx.fillRect(bx, p.y0, bw, p.y1 - p.y0);
+        // selectivity filter: teeth narrowing the extracellular mouth
+        const fx = XOUT + 2, th = (p.y1 - p.y0) * 0.26;
+        ctx.fillStyle = col; ctx.beginPath();
+        ctx.moveTo(fx - 5, p.y0); ctx.lineTo(fx, p.y0 + th); ctx.lineTo(fx + 5, p.y0);
+        ctx.moveTo(fx - 5, p.y1); ctx.lineTo(fx, p.y1 - th); ctx.lineTo(fx + 5, p.y1);
+        ctx.fill();
+        // ion badge when zoomed in
+        if (z >= 1.8) {
+          const cx = XOUT + BW + 7.5, cy = by + 4.5;
+          ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, 6.283); ctx.fill();
+          ctx.fillStyle = '#ffffff'; ctx.font = '700 5.6px "IBM Plex Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(['K⁺', 'Na⁺', 'Cl⁻'][p.s], cx, cy + 0.3);
+          ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+        }
+      });
+      pumps.forEach(pm => {
+        if (pm.y + PH < ly0 || pm.y - PH > ly1) return;
+        ctx.globalAlpha = pumpOn ? 0.55 + 0.45 * pm.flash : 0.25;
+        ctx.fillStyle = C.accent;
+        ctx.beginPath(); ctx.roundRect(XIN - 8, pm.y - SLOT * 0.4, XOUT - XIN + 16, SLOT * 0.8, SLOT * 0.26); ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+      // ions: hard spheres, interpolated in slow motion
+      if (showSigns) { ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; }
+      for (let s = 3; s >= 0; s--) {
+        const rad = (s === 3 ? 3.6 : 2.8) * rB;
+        const sign = Z[s] > 0 ? '+' : '−';
+        const vis = [];
+        ctx.fillStyle = chargeColor ? (Z[s] > 0 ? C.pos : C.neg) : C.sp[s];
+        ctx.strokeStyle = C.surface; ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        for (let i = 0; i < N; i++) {
+          if (sp[i] !== s) continue;
+          const x = lerp ? ox[i] + (px[i] - ox[i]) * frac : px[i];
+          let y = py[i];
+          if (lerp) { let dy = py[i] - oy[i]; if (dy > H / 2) dy -= H; else if (dy < -H / 2) dy += H; y = oy[i] + dy * frac; }
+          if (x < x0 - rad || x > x1 + rad || y < ly0 - rad || y > ly1 + rad) continue;
+          ctx.moveTo(x + rad, y); ctx.arc(x, y, rad, 0, 6.283);
+          if (showSigns) vis.push(x, y);
+        }
+        ctx.fill(); ctx.stroke();
+        if (showSigns && vis.length) {
+          ctx.font = `700 ${(1.7 * rad).toFixed(2)}px "IBM Plex Mono", monospace`; ctx.fillStyle = C.surface;
+          for (let q = 0; q < vis.length; q += 2) ctx.fillText(sign, vis[q], vis[q + 1] + rad * 0.06);
+        }
+      }
+      ctx.textBaseline = 'alphabetic';
+      for (const c of crossings) {
+        ctx.globalAlpha = 1 - c.age / 40; ctx.strokeStyle = C.sp[c.s]; ctx.lineWidth = 1.5 / Math.sqrt(z);
+        ctx.beginPath(); ctx.arc(c.x, c.y, 4 + c.age * 0.35, 0, 6.283); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    pumps.forEach(pm => pm.flash *= 0.9);
+    for (let k = crossings.length - 1; k >= 0; k--) { if (++crossings[k].age > 40) crossings.splice(k, 1); }
+    // screen-space labels
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = '600 13px "IBM Plex Sans", sans-serif';
+    const tag = (t, x, y, align, color) => { const w = ctx.measureText(t).width + 12; const bx = align === 'left' ? x - 6 : align === 'right' ? x - w + 6 : x - w / 2;
+      ctx.globalAlpha = 0.88; ctx.fillStyle = C.surface; ctx.beginPath(); ctx.roundRect(bx, y - 15, w, 22, 4); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = color || C.muted; ctx.textAlign = align; ctx.fillText(t, x, y); };
+    const mL = toScreen(XIN, 0).x, mR = toScreen(XOUT, 0).x;
+    // region labels: large, high-contrast plates
+    const region = (t, x, align) => {
+      ctx.font = '700 26px "IBM Plex Sans", sans-serif';
+      const w = ctx.measureText(t).width + 28, h = 42, y0 = 14;
+      const bx = align === 'left' ? x : x - w;
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.roundRect(bx, y0, w, h, 7); ctx.fill();
+      ctx.fillStyle = C.surface; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(t, bx + w / 2, y0 + h / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
+    };
+    if (mL > 290) region('INTRACELLULAR', 16, 'left');
+    if (mR < CW - 290) region('EXTRACELLULAR', CW - 16, 'right');
+    ctx.font = '600 13px "IBM Plex Sans", sans-serif';
+    if (z >= 2.5) {
+      ctx.font = '500 13px "IBM Plex Sans", sans-serif';
+      for (let k = k0; k <= k1; k++) {
+        const off = k * H;
+        pores.forEach(p => {
+          const q = toScreen(XOUT + 22, p.yc + off); if (q.y < 36 || q.y > CH - 8 || q.x > CW - 90) return;
+          tag(PORE_LABEL.leak[p.s], q.x + 10, q.y + 4, 'left', C.sp[p.s]);
+        });
+        pumps.forEach(pm => { const q = toScreen(XOUT + 22, pm.y + off); if (q.y < 36 || q.y > CH - 8 || q.x > CW - 90) return; tag('Na⁺/K⁺ pump', q.x + 14, q.y + 4, 'left', C.accent); });
+      }
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // ---------- charge profile ----------
+  let rScale = 6;
+  const PT = 34, PB = 34, PL = 50, PR = 58;
+  const psx = x => PL + x / W * (PW - PL - PR);
+  function drawProfile() {
+    const c = pctx, h = PRH - PT - PB, y0 = PT + h / 2;
+    c.fillStyle = C.surface; c.fillRect(0, 0, PW, PRH);
+    // view window
+    const vx0 = view.cx - CW / (2 * dz()), vx1 = view.cx + CW / (2 * dz());
+    if (dz() > 1.01) { c.fillStyle = C.accent; c.globalAlpha = 0.08; c.fillRect(psx(vx0), PT, psx(vx1) - psx(vx0), h); c.globalAlpha = 0.5; c.strokeStyle = C.accent; c.lineWidth = 1; c.strokeRect(psx(vx0) + 0.5, PT + 0.5, psx(vx1) - psx(vx0) - 1, h - 1); c.globalAlpha = 1; }
+    c.fillStyle = C.mem; c.globalAlpha = 0.7; c.fillRect(psx(XIN), PT, Math.max(3, psx(XOUT) - psx(XIN)), h); c.globalAlpha = 1;
+    // frame + zero line
+    c.strokeStyle = C.line; c.lineWidth = 1; c.strokeRect(PL + 0.5, PT + 0.5, PW - PL - PR - 1, h - 1);
+    c.beginPath(); c.moveTo(PL, y0); c.lineTo(PW - PR, y0); c.stroke();
+    // bars
+    let mx = 0; for (let b = 0; b < NB; b++) mx = Math.max(mx, Math.abs(rhoSm[b]));
+    rScale += (Math.max(4, mx * 1.15) - rScale) * 0.05;
+    for (let b = 0; b < NB; b++) {
+      const r = rhoSm[b], bh = r / rScale * (h / 2), xa = psx(b * BIN), xb = psx((b + 1) * BIN);
+      c.fillStyle = r > 0 ? C.pos : C.neg;
+      c.fillRect(xa + 0.75, r > 0 ? y0 - bh : y0, xb - xa - 1.5, Math.abs(bh));
+    }
+    // potential (bath = 0)
+    const phi = new Float32Array(W + 1); let acc = 0;
+    for (let i = W; i >= 0; i--) { acc += Esm[i]; phi[i] = KT * acc; }
+    const base = phi[REF_OUT];
+    const PMIN = -120, PMAX = 60, py = v => PT + (PMAX - Math.max(PMIN, Math.min(PMAX, v))) / (PMAX - PMIN) * h;
+    c.setLineDash([2, 4]); c.strokeStyle = C.line;
+    for (const v of [-100, -50, 50]) { c.beginPath(); c.moveTo(PL, py(v)); c.lineTo(PW - PR, py(v)); c.stroke(); }
+    c.setLineDash([]);
+    c.strokeStyle = C.ink; c.lineWidth = 2.2; c.lineJoin = 'round'; c.beginPath();
+    for (let i = 0; i <= W; i += 2) { const x = psx(i), y = py(phi[i] - base); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.stroke();
+    // axes
+    c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle';
+    c.fillStyle = C.neg; c.textAlign = 'right';
+    c.fillStyle = C.pos; c.fillText('+' + rScale.toFixed(0) + ' e', PL - 6, PT + 6);
+    c.fillStyle = C.muted; c.fillText('0 e', PL - 6, y0);
+    c.fillStyle = C.neg; c.fillText('−' + rScale.toFixed(0) + ' e', PL - 6, PT + h - 6);
+    c.fillStyle = C.muted; c.textAlign = 'left';
+    for (const v of [PMAX, 0, -50, -100]) c.fillText((v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v) + ' mV', PW - PR + 6, py(v));
+    c.font = '600 11px "IBM Plex Sans", sans-serif'; c.fillStyle = C.muted;
+    c.textAlign = 'left'; c.fillText('NET CHARGE (bars)', PL, 16);
+    c.textAlign = 'right'; c.fillText('POTENTIAL φ (line)', PW - PR, 16);
+    c.font = '500 11.5px "IBM Plex Sans", sans-serif';
+    c.textAlign = 'left'; c.fillText('intracellular', PL, PRH - 14);
+    c.textAlign = 'center'; c.fillText('membrane', psx(MX), PRH - 14);
+    c.textAlign = 'right'; c.fillText('extracellular', PW - PR, PRH - 14);
+    c.textBaseline = 'alphabetic';
+  }
+
+  // ---------- voltage trace ----------
+  const VMIN = -110, VMAX = 80, L = 58, R = 74, T = 14, B = 26;
+  const ty = v => T + (VMAX - Math.max(VMIN, Math.min(VMAX, v))) / (VMAX - VMIN) * (TH - T - B);
+  function drawTrace(ref) {
+    tctx.fillStyle = C.surface; tctx.fillRect(0, 0, TW, TH);
+    tctx.font = '11px "IBM Plex Mono", monospace'; tctx.textBaseline = 'middle';
+    for (let v = -100; v <= 50; v += 50) {
+      const y = ty(v);
+      tctx.strokeStyle = C.line; tctx.lineWidth = v === 0 ? 1.2 : 0.8; tctx.setLineDash([]);
+      tctx.beginPath(); tctx.moveTo(L, y); tctx.lineTo(TW - R, y); tctx.stroke();
+      tctx.fillStyle = C.muted; tctx.textAlign = 'right'; tctx.fillText(v + ' mV', L - 6, y);
+    }
+    tctx.textAlign = 'left'; tctx.fillText('last ' + (TRACE_LEN * SAMPLE).toLocaleString() + ' steps', L, TH - 7);
+    const labels = [];
+    ref.forEach(r => {
+      if (r.v == null || !isFinite(r.v)) return;
+      const y = ty(r.v);
+      tctx.strokeStyle = r.c; tctx.lineWidth = r.w || 1.2; tctx.setLineDash(r.dash); tctx.globalAlpha = r.alpha;
+      tctx.beginPath(); tctx.moveTo(L, y); tctx.lineTo(TW - R, y); tctx.stroke();
+      tctx.globalAlpha = 1;
+      labels.push({ y, text: r.label + ' ' + r.v.toFixed(0), c: r.c, alpha: r.alpha });
+    });
+    tctx.setLineDash([]);
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i-1].y < 13) labels[i].y = labels[i-1].y + 13;
+    labels.forEach(l => { tctx.globalAlpha = Math.max(l.alpha, 0.6); tctx.fillStyle = l.c; tctx.textAlign = 'left'; tctx.fillText(l.text, TW - R + 6, Math.min(l.y, TH - 6)); });
+    tctx.globalAlpha = 1;
+    if (trace.length > 1) {
+      const dx = (TW - R - L) / (TRACE_LEN - 1), x0 = L + (TRACE_LEN - trace.length) * dx;
+      tctx.strokeStyle = C.ink; tctx.lineWidth = 2; tctx.lineJoin = 'round'; tctx.beginPath();
+      trace.forEach((v, i) => { const x = x0 + i * dx, y = ty(v); i ? tctx.lineTo(x, y) : tctx.moveTo(x, y); });
+      tctx.stroke();
+      tctx.fillStyle = C.ink; tctx.beginPath(); tctx.arc(x0 + (trace.length - 1) * dx, ty(trace[trace.length - 1]), 3.5, 0, 6.283); tctx.fill();
+    }
+    tctx.textBaseline = 'alphabetic';
+  }
+
+  // ---------- UI ----------
+  const $ = id => document.getElementById(id);
+  const DUMMY = { textContent: '', style: {}, classList: { add() {}, remove() {} } };
+  const tbody = $('tbody');
+  const fmtSigned = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) + ' mV';
+  const fmtQ = q => (q > 0 ? '+' : q < 0 ? '−' : '') + Math.abs(Math.round(q)) + ' e';
+  function updateTable() {
+    let html = '';
+    for (let s = 0; s < 4; s++) {
+      const E_ = s < 3 ? fmtSigned(nernst(s)) : '—';
+      const P = s < 3 ? nLeak[s] + ' channels' : 'none';
+      html += `<tr><td><i class="dot ${['k','na','cl','a'][s]}"></i> ${NAMES[s]}</td>` +
+        `<td class="mono">${cIn[s]}<span class="sub">${toMM(bulk.in[s], XIN).toFixed(0)} mM</span></td>` +
+        `<td class="mono">${cOut[s]}<span class="sub">${toMM(bulk.out[s], W - XOUT).toFixed(0)} mM</span></td>` +
+        `<td class="mono">${E_}</td><td class="mono">${P}</td></tr>`;
+    }
+    tbody.innerHTML = html;
+  }
+  function updateReadouts() {
+    // readout elements are optional (the page may be laid out without them)
+    const $o = id => document.getElementById(id) || DUMMY;
+    measureBulk(); layerDrops();
+    $o('vnum').textContent = fmtSigned(vAvg);
+    $o('vinst').textContent = fmtSigned(V);
+    const gv = ghk(); $o('ghk').textContent = gv == null ? '—' : fmtSigned(gv);
+    $o('steps').textContent = steps.toLocaleString();
+    $o('qin').textContent = fmtQ(qin);
+    const edge = Math.round(3 * lambda / BIN);
+    const bIn = Math.floor(XIN / BIN), bOut = Math.ceil(XOUT / BIN);
+    let qi = 0, qo = 0;
+    for (let b = Math.max(0, bIn - edge); b < bIn; b++) qi += rhoSm[b];
+    for (let b = bOut; b < Math.min(NB, bOut + edge); b++) qo += rhoSm[b];
+    $o('qlayers').textContent = fmtQ(qi) + ' / ' + fmtQ(qo);
+    $o('cmem').textContent = (H / (H_REF * qmv)).toFixed(2) + ' e/mV';
+    const vt = dIn + dMem + dOut;
+    $o('ctot').textContent = Math.abs(vt) > 3 ? Math.abs(qin / vt).toFixed(2) + ' e/mV' : '—';
+    const tot = Math.abs(dIn) + Math.abs(dMem) + Math.abs(dOut) || 1;
+    $o('barIn').style.width = (Math.abs(dIn) / tot * 100) + '%';
+    $o('barMem').style.width = (Math.abs(dMem) / tot * 100) + '%';
+    $o('barOut').style.width = (Math.abs(dOut) / tot * 100) + '%';
+    $o('dIn').textContent = fmtSigned(dIn); $o('dMem').textContent = fmtSigned(dMem); $o('dOut').textContent = fmtSigned(dOut);
+  }
+
+  const speedFromSlider = v => Math.pow(10, -1.7 + v * 0.04);
+  const fmtSpeed = s => s >= 1 ? Math.round(s) + ' steps/fr' : '1 step/' + Math.round(1 / s) + ' fr';
+  function bindRange(id, fmt, onv) {
+    const el = $(id), out = $(id + 'o');
+    const h = () => { const v = parseFloat(el.value); out.textContent = fmt(v); onv(v); };
+    el.addEventListener('input', h); h();
+  }
+  bindRange('speed', v => fmtSpeed(speedFromSlider(v)), v => speed = speedFromSlider(v));
+  bindRange('pK', v => String(v), v => { perm[0] = v; relayoutChannels(); });
+  bindRange('pNa', v => String(v), v => { perm[1] = v; relayoutChannels(); });
+  bindRange('pCl', v => String(v), v => { perm[2] = v; relayoutChannels(); });
+  // concentration inputs
+  const cIds = [['cKi', 'cKo'], ['cNai', 'cNao'], ['cCli', 'cClo']];
+  function syncConcUI() {
+    cIds.forEach(([a, b], s) => { $(a).value = +concIn[s].toFixed(2); $(b).value = +concOut[s].toFixed(2); });
+    $('aIn').textContent = aConc(concIn).toFixed(1); $('aOut').textContent = aConc(concOut).toFixed(1);
+  }
+  function readConc() {
+    cIds.forEach(([a, b], s) => {
+      const vi = parseFloat($(a).value), vo = parseFloat($(b).value);
+      if (isFinite(vi) && vi > 0) concIn[s] = Math.min(300, vi);
+      if (isFinite(vo) && vo > 0) concOut[s] = Math.min(300, vo);
+    });
+    concIn[2] = Math.min(concIn[2], concIn[0] + concIn[1]);
+    concOut[2] = Math.min(concOut[2], concOut[0] + concOut[1]);
+    syncConcUI();
+  }
+  cIds.flat().forEach(id => $(id).addEventListener('change', readConc));
+  $('concApply').addEventListener('click', () => { readConc(); reset(); refreshAll(); });
+  $('concDefaults').addEventListener('click', () => { concIn = DEF_IN.slice(); concOut = DEF_OUT.slice(); syncConcUI(); reset(); refreshAll(); });
+  syncConcUI();
+  bindRange('pumpRate', v => String(v), v => pumpRate = v);
+  bindRange('qmv', v => (1 / v).toFixed(3) + ' e/mV', v => { qmv = v; setKappa(); computeField(); });
+  bindRange('lambda', v => v + ' px', v => { lambda = v; setKappa(); computeField(); });
+  $('clamp').addEventListener('change', e => clampOn = e.target.checked);
+  $('clampIn').addEventListener('change', e => clampInOn = e.target.checked);
+  $('pump').addEventListener('change', e => pumpOn = e.target.checked);
+  $('tint').addEventListener('change', e => tintOn = e.target.checked);
+  bindRange('blur', v => v + ' px', v => { blurSigma = v; allocDensity(true); });
+  bindRange('dtau', v => { const t = Math.round(Math.pow(10, v / 100 * 3.7)); return t <= 1 ? 'none' : t.toLocaleString() + ' st'; }, v => { densTau = Math.max(1, Math.pow(10, v / 100 * 3.7)); });
+  $('chargeColor').addEventListener('change', e => chargeColor = e.target.checked);
+
+  const presets = { k: [20, 0, 0], rest: [18, 1, 6], na: [0, 20, 0], cl: [0, 0, 20], none: [0, 0, 0] };
+  document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
+    const p = presets[b.dataset.preset];
+    ['pK', 'pNa', 'pCl'].forEach((id, i) => { $(id).value = p[i]; $(id).dispatchEvent(new Event('input')); });
+  }));
+  const densBtns = document.querySelectorAll('[data-density]');
+  function setDensityUI() { densBtns.forEach(b => b.setAttribute('aria-pressed', String(parseFloat(b.dataset.density) === density))); }
+  densBtns.forEach(b => b.addEventListener('click', () => {
+    density = parseFloat(b.dataset.density);
+    const q = density >= 1 ? 8 : density >= 0.5 ? 11 : 17;
+    $('qmv').value = q; $('qmv').dispatchEvent(new Event('input'));
+    setDensityUI(); reset(); refreshAll();
+  }));
+  setDensityUI();
+
+  const playBtn = $('play');
+  const setRunning = r => { running = r; playBtn.textContent = r ? 'Pause' : 'Play'; };
+  playBtn.addEventListener('click', () => setRunning(!running));
+  $('stepBtn').addEventListener('click', () => { setRunning(false); ox.set(px.subarray(0, N)); oy.set(py.subarray(0, N)); step(); stepAcc = 0.999; refreshAll(); });
+  $('reset').addEventListener('click', () => { reset(); refreshAll(); });
+
+  function refs() {
+    return [
+      { v: nernst(0), c: C.k, dash: [6, 4], label: 'E K', alpha: nLeak[0] > 0 ? 1 : 0.35 },
+      { v: nernst(1), c: C.na, dash: [6, 4], label: 'E Na', alpha: nLeak[1] > 0 ? 1 : 0.35 },
+      { v: nernst(2), c: C.cl, dash: [6, 4], label: 'E Cl', alpha: nLeak[2] > 0 ? 1 : 0.35 },
+      { v: ghk(), c: C.accent, dash: [2, 3], w: 2, label: 'GHK', alpha: 1 },
+    ];
+  }
+  function refreshAll() { updateReadouts(); updateTable(); drawSim(1); drawProfile(); drawTrace(refs()); }
+
+  // ---------- GHK calculator ----------
+  const gIds = ['gPK', 'gPNa', 'gPCl', 'gKi', 'gKo', 'gNai', 'gNao', 'gCli', 'gClo', 'gT'];
+  const gc = $('gChart'), GW = 520, GH = 300;
+  gc.width = GW * dpr; gc.height = GH * dpr;
+  const gx = gc.getContext('2d'); gx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
+  const ghkV = (rtf, P, ci, co) => {
+    const n = P[0] * co[0] + P[1] * co[1] + P[2] * ci[2], d = P[0] * ci[0] + P[1] * ci[1] + P[2] * co[2];
+    return n > 0 && d > 0 ? rtf * Math.log(n / d) : NaN;
+  };
+  function calcGHK() {
+    const T = num('gT'), rtf = 8.314462 * (T + 273.15) / 96485.33 * 1000;
+    const P = [num('gPK'), num('gPNa'), num('gPCl')];
+    const ci = [num('gKi'), num('gNai'), num('gCli')], co = [num('gKo'), num('gNao'), num('gClo')];
+    const V_ = ghkV(rtf, P, ci, co);
+    const ek = rtf * Math.log(co[0] / ci[0]), ena = rtf * Math.log(co[1] / ci[1]), ecl = -rtf * Math.log(co[2] / ci[2]);
+    const f = v => isFinite(v) ? fmtSigned(v) : '—';
+    $('gV').textContent = f(V_); $('gEK').textContent = f(ek); $('gENa').textContent = f(ena); $('gECl').textContent = f(ecl);
+    $('gRTF').textContent = 'RT/F = ' + rtf.toFixed(2) + ' mV';
+    // chart: Vm vs [K]o (log)
+    const L_ = 52, R_ = 16, T_ = 14, B_ = 34, pw = GW - L_ - R_, ph = GH - T_ - B_;
+    const K0 = 1, K1 = 300, lx = k => L_ + Math.log(k / K0) / Math.log(K1 / K0) * pw;
+    const YMIN = -140, YMAX = 60, ly = v => T_ + (YMAX - Math.max(YMIN, Math.min(YMAX, v))) / (YMAX - YMIN) * ph;
+    gx.fillStyle = C.surface; gx.fillRect(0, 0, GW, GH);
+    gx.font = '11px "IBM Plex Mono", monospace'; gx.textBaseline = 'middle';
+    gx.strokeStyle = C.line; gx.lineWidth = 0.8;
+    for (let v = -120; v <= 40; v += 40) { gx.beginPath(); gx.moveTo(L_, ly(v)); gx.lineTo(GW - R_, ly(v)); gx.stroke(); gx.fillStyle = C.muted; gx.textAlign = 'right'; gx.fillText(v + ' mV', L_ - 6, ly(v)); }
+    gx.textAlign = 'center';
+    for (const k of [1, 3, 10, 30, 100, 300]) { gx.beginPath(); gx.moveTo(lx(k), T_); gx.lineTo(lx(k), T_ + ph); gx.stroke(); gx.fillStyle = C.muted; gx.fillText(String(k), lx(k), GH - B_ + 12); }
+    gx.fillText('[K⁺] outside, mM', L_ + pw / 2, GH - 8);
+    gx.save(); gx.beginPath(); gx.rect(L_, T_, pw, ph); gx.clip();
+    gx.strokeStyle = C.k; gx.setLineDash([6, 4]); gx.lineWidth = 1.5; gx.beginPath();
+    for (let j = 0; j <= 100; j++) { const k = K0 * Math.pow(K1 / K0, j / 100), v = rtf * Math.log(k / ci[0]); j ? gx.lineTo(lx(k), ly(v)) : gx.moveTo(lx(k), ly(v)); }
+    gx.stroke(); gx.setLineDash([]);
+    gx.strokeStyle = C.accent; gx.lineWidth = 2.4; gx.beginPath();
+    for (let j = 0; j <= 160; j++) { const k = K0 * Math.pow(K1 / K0, j / 160), v = ghkV(rtf, P, ci, [k, co[1], co[2]]); j ? gx.lineTo(lx(k), ly(v)) : gx.moveTo(lx(k), ly(v)); }
+    gx.stroke(); gx.restore();
+    if (isFinite(V_) && co[0] >= K0 && co[0] <= K1) { gx.fillStyle = C.ink; gx.beginPath(); gx.arc(lx(co[0]), ly(V_), 4.5, 0, 6.283); gx.fill(); }
+    gx.textAlign = 'left'; gx.font = '600 11px "IBM Plex Sans", sans-serif';
+    gx.fillStyle = C.accent; gx.fillText('GHK Vm', L_ + 8, T_ + 10);
+    gx.fillStyle = C.k; gx.fillText('E K', L_ + 70, T_ + 10);
+    gx.textBaseline = 'alphabetic';
+  }
+  gIds.forEach(id => $(id).addEventListener('input', calcGHK));
+  const setG = (id, v) => { $(id).value = +(+v).toFixed(4); };
+  $('gDefaults').addEventListener('click', () => {
+    [['gPK', 1], ['gPNa', 0.04], ['gPCl', 0.45], ['gKi', 400], ['gKo', 20], ['gNai', 50], ['gNao', 440], ['gCli', 52], ['gClo', 560], ['gT', 6.3]].forEach(([i, v]) => setG(i, v));
+    calcGHK();
+  });
+  $('gFromSim').addEventListener('click', () => {
+    updateGates();
+    const pK = nLeak[0], pNa = nLeak[1], pCl = nLeak[2];
+    const ref = pK > 0 ? pK : Math.max(pNa, pCl, 1);
+    setG('gPK', pK / ref); setG('gPNa', pNa / ref); setG('gPCl', pCl / ref);
+    ['gKi', 'gNai', 'gCli'].forEach((id, k) => setG(id, concIn[k])); ['gKo', 'gNao', 'gClo'].forEach((id, k) => setG(id, concOut[k]));
+    setG('gT', 25); calcGHK();
+  });
+  $('gToSim').addEventListener('click', () => {
+    concIn = [num('gKi'), num('gNai'), num('gCli')].map(v => Math.min(300, Math.max(0.5, v)));
+    concOut = [num('gKo'), num('gNao'), num('gClo')].map(v => Math.min(300, Math.max(0.5, v)));
+    concIn[2] = Math.min(concIn[2], concIn[0] + concIn[1]); concOut[2] = Math.min(concOut[2], concOut[0] + concOut[1]);
+    // permeability ratios -> leak channel densities, K⁺ at 18 per 1000 px (or the largest at 18)
+    const P = [num('gPK'), num('gPNa'), num('gPCl')], ref = P[0] > 0 ? P[0] : Math.max(P[1], P[2], 1e-9);
+    ['pK', 'pNa', 'pCl'].forEach((id, k) => { $(id).value = Math.min(25, Math.round(P[k] / ref * 18)); $(id).dispatchEvent(new Event('input')); });
+    syncConcUI(); reset(); refreshAll();
+    document.querySelector('.stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  calcGHK();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(calcGHK, 0));
+  new MutationObserver(() => setTimeout(calcGHK, 0)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // ---------- loop ----------
+  reset();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setRunning(false);
+  let frame = 0;
+  function loop() {
+    let frac = 1;
+    if (running) {
+      let ran = 0;
+      if (speed >= 1) {
+        const want = Math.round(speed), t0 = performance.now();
+        for (let k = 0; k < want; k++) { step(); ran++; if ((k & 3) === 3 && performance.now() - t0 > 22) break; }
+        const lim = ran < want ? ran : 0;
+        if ((lim > 0) !== (stepLimited > 0) || (lim && Math.abs(lim - stepLimited) > 3 && frame % 30 === 0)) { stepLimited = lim; updatePatchInfo(); }
+      }
+      else {
+        stepAcc += speed;
+        if (stepAcc >= 1) { stepAcc -= 1; ox.set(px.subarray(0, N)); oy.set(py.subarray(0, N)); step(); ran = 1; }
+        frac = stepAcc;
+      }
+      if (tintOn && ran) updateDensity(1 - Math.exp(-ran / densTau));
+    } else if (speed < 1) frac = stepAcc;
+    drawSim(frac);
+    drawProfile();
+    if (frame++ % 6 === 0) { updateReadouts(); updateTable(); }
+    drawTrace(refs());
+    requestAnimationFrame(loop);
+  }
+  refreshAll();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

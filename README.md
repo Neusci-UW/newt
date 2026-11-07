@@ -54,6 +54,12 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - Waveform charts: the action potentials as a phase plot of V against dV/dt, and against time.
 - **DataPad**: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per trial, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
 - **Simulation**: a network of up to 10 integrate-and-fire cells with tunable synapses, to practise without an animal.
+- **Membrane potential** (under Simulation): ions as particles crossing a membrane through selective
+  channels, so the Nernst and GHK potentials and the charge layers on the membrane emerge on their own.
+  Tunable concentrations and permeabilities, a scripted action potential, the GHK derivation and a
+  GHK calculator. Needs `pip install -e ".[web]"` to show inside the app; otherwise it opens in the
+  web browser. For computers without internet, run `python tools/fetch_mathjax.py` once so its
+  equations render offline.
 - **Files**: opens and saves LabChart `.mat` exports.
 - **USB audio and video** (`pip install -e ".[audio]"` for audio):
   - **Setup › Input device** switches to a USB audio interface, a SpikerBox-style device or a

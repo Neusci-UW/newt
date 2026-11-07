@@ -60,7 +60,7 @@ def to_labchart_mat(h5_paths: list[str | Path], out_path: str | Path) -> Path:
     total = sum(r["data"].size for r in recs)
     if total * 4 > _MAX_BYTES:
         raise ValueError(f"{total * 4 / 1e9:.2f} GB of data exceeds the 2 GB .mat limit. "
-                         "Export fewer blocks per file.")
+                         "Export fewer trials per file.")
 
     data = np.empty(total, dtype=np.float32)
     datastart = np.zeros((n_ch, n_blk))
@@ -115,7 +115,7 @@ def main(argv=None):
         print("usage: python -m neusci_daq.export OUT.mat REC1.h5 [REC2.h5 ...]")
         return 2
     path = to_labchart_mat(argv[1:], argv[0])
-    print(f"Wrote {path} ({len(argv) - 1} block(s))")
+    print(f"Wrote {path} ({len(argv) - 1} trial(s))")
     return 0
 
 

@@ -207,6 +207,12 @@ def apply(s: Stimulus, key: str, value: float) -> tuple[Stimulus, float]:
     return replace(s, **{key: float(value)}), 1.0
 
 
+def trial_stimulus(s: Stimulus, p: Protocol, a: float, b: float | None) -> Stimulus:
+    """The stimulus of one trial, for saving with the block (its overall size aside)."""
+    s = apply(s, p.a.key, a)[0]
+    return apply(s, p.b.key, b)[0] if p.b is not None and b is not None else s
+
+
 def make_wave(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float) -> tuple[np.ndarray, float]:
     """(waveform, delay in ms) for one trial. Raises ValueError."""
     s, scale_a = apply(s, p.a.key, a)
@@ -281,7 +287,7 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float) -> Check:
     nb = len(c.b_vals) if c.b_vals else 1
     c.n_trials = len(c.a_vals) * nb * p.repeats
     if c.n_trials > MAX_TRIALS:
-        c.errors.append(f"{c.n_trials} trials is too many (the most is {MAX_TRIALS}).")
+        c.errors.append(f"{c.n_trials} stimuli is too many (the most is {MAX_TRIALS}).")
         return c
     bad = []
     for b in (c.b_vals or [None]):
@@ -299,7 +305,7 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float) -> Check:
         return c
     need = c.longest_s + p.after_ms / 1000.0 + 0.1
     if p.gap_s < need:
-        c.errors.append(f"Trials {p.gap_s:g} s apart would overlap: the longest stimulus plus the "
+        c.errors.append(f"Stimuli {p.gap_s:g} s apart would overlap: the longest stimulus plus the "
                         f"{p.after_ms:g} ms after it needs at least {need:.2f} s.")
     c.duration_s = c.n_trials * p.gap_s
     if c.duration_s > LONG_PROTOCOL_S:

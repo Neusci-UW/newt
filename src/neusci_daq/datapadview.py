@@ -1,4 +1,4 @@
-"""The DataPad sub-tab of Analysis: a table of measurements, like LabChart's DataPad.
+"""DataPad, on the Analysis canvas: a table of measurements, like LabChart's DataPad.
 
 Pick columns (a channel and a measurement), a time window (typed, or dragged on the
 preview), and where the rows come from:
@@ -28,11 +28,11 @@ from .plotzoom import MultiAxis, TraceCurve, plot_widget
 from .stimwindow import UnitSpinBox
 from .units import best_prefix
 from .helpview import add_help
-from .viewkit import ChartToggles, View, label_axis, scroll_column, shrink_combos, style_plot, unit_color
+from .viewkit import View, label_axis, shrink_combos, style_plot, unit_color
 
-SOURCES = (("The highlighted block", "current"), ("Each chosen block", "blocks"),
+SOURCES = (("The highlighted trial", "current"), ("Each chosen trial", "blocks"),
            ("Each stimulus group's average trace", "avg"),
-           ("Each stimulus group: mean ± spread of its blocks", "stats"))
+           ("Each stimulus group: mean ± spread of its trials", "stats"))
 
 
 def fmt(v: float, unit: str) -> str:
@@ -54,12 +54,10 @@ class DataPadView(View):
         super().__init__(page)
         self.columns: list[tuple[str, str]] = []          # (channel, measurement key)
         self.rows: list[dict] = []                        # what's in the table, for export
-        outer = QtWidgets.QHBoxLayout(self)
-        outer.setContentsMargins(0, 8, 0, 0)
-        outer.setSpacing(12)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
 
-        side = QtWidgets.QWidget()
-        side.setMaximumWidth(380)
+        side = self.side = QtWidgets.QWidget()    # goes with the chart's settings
         left = QtWidgets.QVBoxLayout(side)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(10)
@@ -91,20 +89,20 @@ class DataPadView(View):
         v.addLayout(col_btns)
         left.addWidget(box)
 
-        box = QtWidgets.QGroupBox("Window: when, in each block")
+        box = QtWidgets.QGroupBox("Window: when, in each trial")
         f = QtWidgets.QFormLayout(box)
-        self.whole = QtWidgets.QCheckBox("The whole block")
-        self.whole.setToolTip("Measure the whole block instead of a window you drag on the plot")
+        self.whole = QtWidgets.QCheckBox("The whole trial")
+        self.whole.setToolTip("Measure the whole trial instead of a window you drag on the plot")
         self.whole.setChecked(True)
         self.t0 = UnitSpinBox(0, 1e5, "s", step=0.01)
         self.t1 = UnitSpinBox(0, 1e5, "s", step=0.01)
-        self.t0.setToolTip("From this time after the block's start (or drag the shaded region)")
-        self.t1.setToolTip("To this time after the block's start")
+        self.t0.setToolTip("From this time after the trial's start (or drag the shaded region)")
+        self.t1.setToolTip("To this time after the trial's start")
         f.addRow(self.whole)
         f.addRow("From", self.t0)
         f.addRow("To", self.t1)
         self.every = UnitSpinBox(0, 1e5, "s", step=0.01)
-        self.every.setToolTip("Measure the window again every this long, to the block's end: a row per "
+        self.every.setToolTip("Measure the window again every this long, to the trial's end: a row per "
                               "range (e.g. 0–50 ms, 100–150 ms, …). 0: once")
         f.addRow("Repeat every", self.every)
         left.addWidget(box)
@@ -114,14 +112,14 @@ class DataPadView(View):
         self.source = QtWidgets.QComboBox()
         for label, key in SOURCES:
             self.source.addItem(label, key)
-        self.source.setToolTip("Blocks are the ones picked in the Blocks panel and the Spike Sorting tab; the "
-                               "mean ± spread rows use Spread in the Blocks panel (SD or SEM; SD if None)")
+        self.source.setToolTip("Trials are the ones picked in the Trials panel; the "
+                               "mean ± spread rows use Spread in the Trials panel (SD or SEM; SD if None)")
         f.addRow("From", self.source)
         btns = QtWidgets.QHBoxLayout()
         self.btn_add_rows = QtWidgets.QPushButton("Add rows")
         self.btn_add_rows.setObjectName("start")
         self.btn_recompute = QtWidgets.QPushButton("Recompute")
-        self.btn_recompute.setToolTip("Measure every row again, each in its own blocks and window, with "
+        self.btn_recompute.setToolTip("Measure every row again, each in its own trials and window, with "
                                       "the columns, Spread, spikes and calculations as they are now")
         self.btn_clear = QtWidgets.QPushButton("Clear")
         btns.addWidget(self.btn_add_rows, 1)
@@ -136,13 +134,9 @@ class DataPadView(View):
         out.addWidget(self.btn_csv)
         out.addWidget(self.btn_copy)
         left.addLayout(out)
-        self.charts_slot = QtWidgets.QVBoxLayout()   # the Charts box, once the charts exist
-        left.addLayout(self.charts_slot)
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
         left.addWidget(self.message)
-        left.addStretch(1)
-        outer.addWidget(scroll_column(side))
 
         right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         top = QtWidgets.QWidget()
@@ -165,15 +159,15 @@ class DataPadView(View):
         self.traces: dict[str, TraceCurve] = {}
         self.preview = plot_widget()
         p = self.preview.getPlotItem()
-        p.setTitle("The highlighted block")
-        p.setLabel("bottom", "time in block", units="s")
+        p.setTitle("The highlighted trial")
+        p.setLabel("bottom", "time in trial", units="s")
         p.showGrid(x=True, y=True, alpha=0.2)
         self.legend = p.addLegend(offset=(10, 5))
         self.multi = MultiAxis(p)
         self.region = pg.LinearRegionItem((0.0, 0.1))
         self.region.setZValue(10)
         self.region.setToolTip("The window measured. Drag across the plot to pick one, or drag this or its "
-                               "edges; double-click for the whole block")
+                               "edges; double-click for the whole trial")
         p.addItem(self.region)
         self._dur = 0.0
         p.vb.on_drag_select = self._drag_select       # a plain drag picks the window
@@ -212,11 +206,6 @@ class DataPadView(View):
         shrink_combos(self.out_tabs)
         right.setSizes([300, 440])
         outer.addWidget(right, 1)
-        self.charts = ChartToggles(self.main.settings, "datapad", [
-            ("Preview", "The highlighted block, and the window measured", top),
-            ("Results", "The table, scatter plot and fit", self.out_tabs)])
-        self.charts_slot.addWidget(self.charts)
-        self.charts.apply()
 
         self.btn_add_col.clicked.connect(lambda: self.add_column(self.channel.currentText(),
                                                                  self.measurement.currentData()))
@@ -414,7 +403,7 @@ class DataPadView(View):
             p.getAxis("left").setTextPen(pg.mkPen(self._fg()))
         p.enableAutoRange(axis="y")                       # every trace fits the height
         self.multi.fit()
-        p.setTitle(f"Block {i + 1}: drag to pick a window (double-click: the whole block)", color=self._fg())
+        p.setTitle(f"Trial {i + 1}: drag to pick a window (double-click: the whole trial)", color=self._fg())
         self._dur = dur
         self.region.setBounds((0.0, dur))
         if self.t1.value() <= 0 or self.t0.value() >= dur:
@@ -459,7 +448,7 @@ class DataPadView(View):
                                 for a, b in self.windows(page.blocks[i]["duration_s"])]
         else:
             chosen = set(raw.chosen_or_none())
-            for label, blocks in page.groups or [("All chosen blocks", sorted(chosen))]:
+            for label, blocks in page.groups or [("All chosen trials", sorted(chosen))]:
                 blocks = [i for i in blocks if i in chosen and page.blocks[i] is not None]
                 if blocks:
                     shortest = min(page.blocks[i]["duration_s"] for i in blocks)
@@ -470,7 +459,7 @@ class DataPadView(View):
         self._show_table()
         note = self._spike_note()
         self._show_message(f"Added {len(new)} row(s).{note}" if new else
-                           f"No blocks to measure: choose some on the Spike Sorting tab.{note}", error=not new)
+                           f"No trials to measure: choose some in the Trials panel.{note}", error=not new)
         return len(new)
 
     def recompute(self) -> int:
@@ -485,20 +474,20 @@ class DataPadView(View):
         self.rows = [self._make_row(r["recipe"]) for r in keep]
         self._show_table()
         gone = len(keep) < n_rows
-        self._show_message(f"Recomputed {len(self.rows)} row(s)." + (" Some blocks are gone; their rows "
+        self._show_message(f"Recomputed {len(self.rows)} row(s)." + (" Some trials are gone; their rows "
                            "were dropped." if gone else "") + self._spike_note())
         return len(self.rows)
 
     def _spike_note(self) -> str:
         if any(k in D.SPIKE_KEYS for _, k in self.columns) and self.page.raw.events is None:
-            return " Spike columns need action potentials: find them on the Spike Sorting tab first."
+            return " Spike columns need action potentials: press Find action potentials first."
         return ""
 
     def _make_row(self, rc: dict) -> dict:
         """One table row from its recipe."""
         page = self.page
         a, b = rc["a"], rc["b"]
-        span = "whole block" if a is None else f"{a:.4g}–{b:.4g} s"
+        span = "whole trial" if a is None else f"{a:.4g}–{b:.4g} s"
         spikes = any(k in D.SPIKE_KEYS for _, k in self.columns)
         blocks = rc["blocks"]
         row = {"window": span, "t0": a or 0.0, "n": len(blocks), "spread": {}, "recipe": rc,
@@ -506,7 +495,7 @@ class DataPadView(View):
         if rc["kind"] == "block":
             i = blocks[0]
             g = page.group_of(i)
-            row.update(row=page._paths[i].stem if i < len(page._paths) else f"block {i + 1}",
+            row.update(row=page._paths[i].stem if i < len(page._paths) else f"trial {i + 1}",
                        group=page.groups[g][0] if g is not None else "",
                        values=self._measure_block(i, spikes, a, b))
         elif rc["kind"] == "stats":
@@ -574,7 +563,7 @@ class DataPadView(View):
     # -- scatter ------------------------------------------------------------------------------------
     def _fill_axes(self) -> None:
         """X and Y choices: the row number, the block, the window's start, and every column."""
-        choices = [("Row", "row"), ("Block number", "block"), ("Window start (s)", "t0")] + \
+        choices = [("Row", "row"), ("Trial number", "block"), ("Window start (s)", "t0")] + \
             [(self._col_title(c), c) for c in self.columns]
         for w, default in ((self.sx, "row"), (self.sy, self.columns[0] if self.columns else "row")):
             keep = w.currentData()
@@ -603,7 +592,7 @@ class DataPadView(View):
             return np.arange(1.0, len(self.rows) + 1), np.full(len(self.rows), nan), "Row", ""
         if key == "block":
             v = [r["block"] + 1 if r.get("block") is not None else nan for r in self.rows]
-            return np.array(v, float), np.full(len(v), nan), "Block", ""
+            return np.array(v, float), np.full(len(v), nan), "Trial", ""
         if key == "t0":
             return np.array([r.get("t0", 0.0) for r in self.rows], float), np.full(len(self.rows), nan), \
                 "Window start", "s"

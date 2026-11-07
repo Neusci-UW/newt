@@ -17,6 +17,31 @@ LIVE, BACK = "live", "back"
 ROLE = QtCore.Qt.ItemDataRole.UserRole
 
 
+class GroupTree(QtWidgets.QTreeWidget):
+    """A tree whose top-level rows can be dragged to another place. Only those: dragging across
+    the rows inside them still selects them."""
+    moved = QtCore.Signal(str, int)              # a page's name, the row it goes to
+
+    def dragMoveEvent(self, ev):
+        ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        at = ev.position().toPoint()
+        over = self.itemAt(at)
+        item = self.currentItem()
+        data = item.data(0, ROLE) if item is not None else None
+        ev.setDropAction(QtCore.Qt.DropAction.CopyAction)       # the rows are rebuilt: nothing to remove
+        ev.accept()
+        if over is None or not (isinstance(data, tuple) and data[0] == "page"):
+            return
+        while over.parent() is not None:
+            over = over.parent()
+        row = self.indexOfTopLevelItem(over)
+        if at.y() > self.visualItemRect(over).center().y():
+            row += 1
+        self.moved.emit(data[1], row)
+
+
 class BlocksPanel(QtWidgets.QWidget):
     activated = QtCore.Signal(object)           # LIVE, BACK or ("block", i)
     selection = QtCore.Signal(list)              # the block indices selected (a page: all its blocks)
@@ -26,6 +51,9 @@ class BlocksPanel(QtWidgets.QWidget):
     reset_requested = QtCore.Signal()
     color_requested = QtCore.Signal(str)         # a page's name: pick its colour
     color_cleared = QtCore.Signal(str)           # a page's name: back to the default colour
+    hide_changed = QtCore.Signal(object, bool)   # ("page", name) or ("block", i), and whether it's hidden
+    group_moved = QtCore.Signal(str, int)        # a page's name, the row it goes to
+    sort_picked = QtCore.Signal(str)             # "frequency", "amplitude" or "" for your order
 
     def __init__(self, for_analysis: bool = False):
         super().__init__()
@@ -39,42 +67,53 @@ class BlocksPanel(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
+        # On Analysis what's above the blocks opens in a window of its own (self.extras).
+        self.extras = QtWidgets.QWidget()
+        top = QtWidgets.QVBoxLayout(self.extras) if for_analysis else lay
         # The stimulus channel (also on the Analysis tab): it sorts the blocks into pages.
-        lay.addWidget(QtWidgets.QLabel("Stimulus channel"))
+        top.addWidget(QtWidgets.QLabel("Stimulus channel"))
         self.stim_ch = QtWidgets.QComboBox()
-        self._stim_tip = ("The channel that recorded the stimulus, set any time: blocks with the same "
-                          "stimulus go on one page. With None, the notes of each stimulus are used. "
+        self._stim_tip = ("The channel that recorded the stimulus, set any time: trials with the same "
+                          "stimulus go on one group. With None, the notes of each stimulus are used. "
                           "Remembered for this session (and the same setting as on Analysis)")
         self.stim_ch.activated.connect(lambda *_: self.stim_channel_picked.emit(self.stim_ch.currentData() or ""))
-        lay.addWidget(self.stim_ch)
-        self.btn_reset = QtWidgets.QPushButton("Reset pages")
-        self.btn_reset.setToolTip("Forget the page names and moved blocks, and sort the blocks into "
-                                  "pages again from the stimulus channel")
+        top.addWidget(self.stim_ch)
+        self.btn_reset = QtWidgets.QPushButton("Reset groups")
+        self.btn_reset.setToolTip("Forget the group names and moved trials, and sort the trials into "
+                                  "groups again from the stimulus channel")
         self.btn_reset.clicked.connect(lambda: self.later(self.reset_requested.emit))
-        lay.addWidget(self.btn_reset)
+        top.addWidget(self.btn_reset)
         self.settings = QtWidgets.QFormLayout()  # what a page adds with add_setting
         self.settings.setContentsMargins(0, 0, 0, 0)
-        if for_analysis:      # all showing when there's room; scrolls on a small laptop
-            holder = QtWidgets.QWidget()
-            holder.setLayout(self.settings)
-            scroll = QtWidgets.QScrollArea()
-            scroll.setWidget(holder)
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroll.setMinimumHeight(100)
-            lay.addWidget(scroll)
-        else:
-            lay.addLayout(self.settings)
+        top.addLayout(self.settings)
         lay.addSpacing(6)
-        self.title = QtWidgets.QLabel("<b>Blocks</b>")
+        self.title = QtWidgets.QLabel("<b>Trials</b>")
         lay.addWidget(self.title)
-        self.tree = QtWidgets.QTreeWidget()
+        self.sort_box = QtWidgets.QComboBox()
+        for label, key in (("Your order", ""), ("Frequency", "frequency"), ("Amplitude", "amplitude")):
+            self.sort_box.addItem(label, key)
+        self.sort_box.setToolTip("The order of the groups. Dragging a group by its ⠿ goes back to your order")
+        self.sort_box.activated.connect(lambda *_: self.later(lambda: self.sort_picked.emit(self.sort_box.currentData())))
+        sort = QtWidgets.QHBoxLayout()
+        sort.addWidget(QtWidgets.QLabel("Sort by"))
+        sort.addWidget(self.sort_box, 1)
+        if for_analysis:
+            lay.addLayout(sort)
+        else:
+            self.sort_box.hide()
+        self.tree = GroupTree()
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(12)
         self.tree.setMinimumHeight(60)           # its settings above still fit a small laptop screen
         # Cmd/Shift-click several blocks (or pick a page) to overlay them
         self.tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        if for_analysis:
+            self.tree.setDragEnabled(True)
+            self.tree.setAcceptDrops(True)
+            self.tree.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragDrop)
+            self.tree.setDefaultDropAction(QtCore.Qt.DropAction.CopyAction)
+            self.tree.itemChanged.connect(self._ticked)
+            self.tree.moved.connect(lambda name, row: self.later(lambda: self.group_moved.emit(name, row)))
         self.tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
         self.tree.itemClicked.connect(lambda item, *_: self.later(lambda d=item.data(0, ROLE): self.activated.emit(d)))
@@ -82,10 +121,25 @@ class BlocksPanel(QtWidgets.QWidget):
         self.tree.itemSelectionChanged.connect(
             lambda: self.later(lambda picked=self.selected_blocks(): self.selection.emit(picked)))
         lay.addWidget(self.tree, 1)
-        self.btn_all = QtWidgets.QPushButton("Analyze all blocks")
-        self.btn_all.setToolTip("Clear the selection: every block is analyzed")
+        self.btn_select = QtWidgets.QPushButton("Select all")
+        self.btn_select.setToolTip("Tick every group and trial")
+        self.btn_deselect = QtWidgets.QPushButton("Deselect all")
+        self.btn_deselect.setToolTip("Untick every group and trial")
+        ticks = QtWidgets.QHBoxLayout()
+        ticks.addWidget(self.btn_select)
+        ticks.addWidget(self.btn_deselect)
+        if for_analysis:
+            lay.addLayout(ticks)
+        else:
+            self.btn_select.hide()
+            self.btn_deselect.hide()
+        self.btn_all = QtWidgets.QPushButton("Analyze all trials")
+        self.btn_all.setToolTip("Clear the selection: every trial is analyzed")
         self.btn_all.setVisible(for_analysis)
         lay.addWidget(self.btn_all)
+        self._open: set[str] = set()              # the pages you've expanded
+        self.tree.itemExpanded.connect(lambda item: self._opened(item, True))
+        self.tree.itemCollapsed.connect(lambda item: self._opened(item, False))
         self._pages: list[tuple[str, list[int]]] = []
         self._home = lambda i: None
         self._queue: list = []
@@ -120,13 +174,15 @@ class BlocksPanel(QtWidgets.QWidget):
         self.stim_ch.setCurrentIndex(max(0, self.stim_ch.findData(current)))
         self.stim_ch.setEnabled(enabled)
         self.stim_ch.setToolTip(self._stim_tip if enabled else
-                                "Record a block first: the setting belongs to the session")
+                                "Record a trial first: the setting belongs to the session")
         self.stim_ch.blockSignals(False)
 
     def populate(self, top: str | None, pages: list[tuple[str, list[int]]], colors: list[str],
-                 labels: dict[int, tuple[str, str]], home, can_reset: bool, busy: bool) -> None:
+                 labels: dict[int, tuple], home, can_reset: bool, busy: bool,
+                 hidden_pages=(), hidden_blocks=()) -> None:
         """top: LIVE, BACK or None; pages: [(name, block indices)]; labels: block ->
-        (file stem, duration text); home(i): block i's stimulus page."""
+        (file stem, duration text, and maybe a note); home(i): block i's stimulus page;
+        hidden_pages, hidden_blocks: what's unticked, by page name and block index."""
         self._pages, self._home = pages, home
         tree = self.tree
         tree.blockSignals(True)
@@ -144,34 +200,60 @@ class BlocksPanel(QtWidgets.QWidget):
             tree.addTopLevelItem(item)
         n_blocks = 0
         for g, (name, blocks) in enumerate(pages):
-            head = bold(QtWidgets.QTreeWidgetItem([f"{name}  ({len(blocks)})"]))
+            head = bold(QtWidgets.QTreeWidgetItem([("⠿ " if self.for_analysis else "") + f"{name}  ({len(blocks)})"]))
             head.setData(0, ROLE, ("page", name))
-            head.setIcon(0, style.dot_icon(colors[g % len(colors)]))
-            head.setToolTip(0, "Click to see this page's average; double-click to rename it; right-click "
+            if name not in hidden_pages:
+                head.setIcon(0, style.dot_icon(colors[g % len(colors)]))
+            self._tick(head, name in hidden_pages, True)
+            head.setToolTip(0, "Click to see this group's average; double-click to rename it; right-click "
                                "to change its colour" if self.for_analysis else
-                            "Double-click to rename this page; its blocks take the new name")
+                            "Double-click to rename this group; its trials take the new name")
             tree.addTopLevelItem(head)
             for k, i in enumerate(blocks, 1):
-                stem, dur = labels.get(i, (f"block {i + 1}", "?"))
-                item = QtWidgets.QTreeWidgetItem([f"{name} {k}   ({stem})"])
+                stem, dur, *note = labels.get(i, (f"trial {i + 1}", "?"))
+                item = QtWidgets.QTreeWidgetItem([f"{name} {k}   ({stem})" + "".join(f"   {n}" for n in note)])
                 item.setData(0, ROLE, ("block", i))
-                item.setToolTip(0, f"{stem}, {dur}: click or drag across blocks to analyze just those; "
-                                   "Cmd/Shift-click to add more; right-click to move it to another page"
+                self._tick(item, i in hidden_blocks, False)
+                item.setToolTip(0, f"{stem}, {dur}: click or drag across trials to analyze just those; "
+                                   "Cmd/Shift-click to add more; right-click to move it to another group"
                                 if self.for_analysis else
                                 f"{stem}, {dur}: click to look at it; Cmd/Shift-click several to overlay "
-                                "them; right-click to move it to another page")
+                                "them; right-click to move it to another group")
                 head.addChild(item)
-            head.setExpanded(True)
+            head.setExpanded(name in self._open)
             n_blocks += len(blocks)
-        self.title.setText(f"<b>Blocks</b> ({n_blocks})" + (f" on {len(pages)} pages" if len(pages) > 1 else ""))
+        self.title.setText(f"<b>Trials</b> ({n_blocks})" + (f" in {len(pages)} Groups" if len(pages) > 1 else ""))
         self.btn_reset.setEnabled(can_reset)
         tree.blockSignals(False)
         tree.setEnabled(not busy)
-        tree.setToolTip("Pick a page to see its average, or click or drag across blocks to see those trials"
+        tree.setToolTip("Pick a group to see its average, or click or drag across trials to see those trials"
                         if self.for_analysis
-                        else "Stop recording to look at other blocks" if busy else
-                        "Click a block to look at it (this stops acquiring). Live goes back, and Record "
+                        else "Stop recording to look at other trials" if busy else
+                        "Click a trial to look at it (this stops acquiring). Live goes back, and Record "
                         "carries on adding to the same session")
+
+    def _opened(self, item: QtWidgets.QTreeWidgetItem, on: bool) -> None:
+        data = item.data(0, ROLE)
+        if isinstance(data, tuple) and data[0] == "page":
+            self._open = self._open | {data[1]} if on else self._open - {data[1]}
+
+    def _tick(self, item: QtWidgets.QTreeWidgetItem, hidden: bool, draggable: bool) -> None:
+        """Give an item its check box, in Analysis."""
+        F = QtCore.Qt.ItemFlag
+        if not self.for_analysis:
+            return
+        flags = item.flags() | F.ItemIsUserCheckable
+        item.setFlags(flags | F.ItemIsDragEnabled if draggable else flags & ~F.ItemIsDragEnabled)
+        item.setCheckState(0, QtCore.Qt.CheckState.Unchecked if hidden else QtCore.Qt.CheckState.Checked)
+        if hidden:
+            item.setForeground(0, self.palette().color(self.palette().ColorGroup.Disabled,
+                                                       self.palette().ColorRole.Text))
+
+    def _ticked(self, item: QtWidgets.QTreeWidgetItem, column: int) -> None:
+        data = item.data(0, ROLE)
+        hidden = item.checkState(0) != QtCore.Qt.CheckState.Checked
+        if isinstance(data, tuple):
+            self.later(lambda: self.hide_changed.emit(data, hidden))
 
     def items(self):
         """Every item, pages and blocks, top to bottom."""
@@ -240,20 +322,20 @@ class BlocksPanel(QtWidgets.QWidget):
             return
         menu = QtWidgets.QMenu(self)
         if data[0] == "page":
-            menu.addAction("Rename page…", lambda: self.later(lambda: self.rename_requested.emit(data[1])))
+            menu.addAction("Rename group…", lambda: self.later(lambda: self.rename_requested.emit(data[1])))
             menu.addAction("Colour…", lambda: self.later(lambda: self.color_requested.emit(data[1])))
             menu.addAction("Default colour", lambda: self.later(lambda: self.color_cleared.emit(data[1])))
         else:
             i = int(data[1])
             here = next((name for name, blocks in self._pages if i in blocks), None)
-            to = menu.addMenu("Move to page")
+            to = menu.addMenu("Move to group")
             for name, _ in self._pages:
                 if name != here:
                     to.addAction(name, lambda name=name: self.later(lambda: self.move_requested.emit(i, name)))
             to.addSeparator()
-            to.addAction("New page…", lambda: self.later(lambda: self.move_requested.emit(i, "")))
+            to.addAction("New group…", lambda: self.later(lambda: self.move_requested.emit(i, "")))
             home = self._home(i)
             if home is not None and home != here:
-                menu.addAction(f"Back to its stimulus page ({home})",
+                menu.addAction(f"Back to its stimulus group ({home})",
                                lambda: self.later(lambda: self.move_requested.emit(i, home)))
         menu.exec(self.tree.viewport().mapToGlobal(pos))

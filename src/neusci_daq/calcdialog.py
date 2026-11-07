@@ -11,7 +11,7 @@ _HELP = ("Formulas use the channel names, numbers, + − × ÷ (+ - * /), ** and
          "<b>envelope</b>(x, ms) · <b>derivative</b>(x) · <b>integral</b>(x) · abs, sqrt, exp, log, sin, cos, "
          "clip(x, lo, hi), max(a, b), min(a, b).<br>"
          "A name with spaces goes in quotes: lowpass(\"Channel 1\", 100). Recordings are never changed: "
-         "these are worked out for display and analysis. Recorded blocks are filtered without delay; "
+         "these are worked out for display and analysis. Recorded trials are filtered without delay; "
          "live, filters have the small delay any live filter has.")
 
 

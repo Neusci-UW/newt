@@ -500,3 +500,24 @@ def test_the_preview_fits_a_stimulus_that_changes_its_scale(app, win):
     vb.updateAutoRange()
     end = page.curve.getData()[0][-1]
     assert vb.viewRange()[0][1] >= end * 0.99
+
+
+def test_a_block_saves_the_stimulus_sent(app, win):
+    s = Stimulus(shape="sine", amplitude_v=1, freq_hz=20, duration_ms=200)
+    win.set_stimulus(s)
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    win.btn_rec.setChecked(True)
+    pump(app, 0.2)
+    assert win.fire_stimulus()
+    pump(app, 0.3)
+    win.btn_rec.setChecked(False)
+    pump(app, 0.1)
+    win.btn_run.setChecked(False)
+    block = session.read_block(session.list_blocks(win.session_dir)[-1])
+    saved = block["stimuli"][0]
+    assert saved["rate"] == win.cfg.stim_rate and 0 <= saved["t"] < block["duration_s"] + 0.1
+    assert Stimulus.from_dict(saved["settings"]) == s
+    assert s.repeat() == (0.05, 0.0, 4)
+    assert Stimulus(shape="pulse", count=3, interval_ms=100, delay_ms=20).repeat() == (0.1, 0.02, 3)
+    assert Stimulus(shape="step").repeat() == (0.0, 0.0, 0)

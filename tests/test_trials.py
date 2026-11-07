@@ -249,7 +249,7 @@ def _run_to_end(app, tp, limit=20):
 
 def test_trials_tab_replaces_the_placeholder(win):
     assert win.tabs.pages["trials"] is win.trials_page
-    assert win.tabs.panes[0].sub_bar.tabText(2) == "Trials"      # a sub-page of Acquisition
+    assert win.tabs.panes[0].sub_bar.tabText(2) == "Protocols"      # a sub-page of Acquisition
 
 
 def test_run_needs_a_recorded_stimulus_and_starts_acquiring_itself(app, win):
@@ -276,7 +276,7 @@ def test_a_full_protocol_lines_up_every_trial_and_saves_it(app, win, tmp_path):
     pump(app, 0.1)
     assert tp.run_protocol()
     pump(app, 0.4)
-    assert tp.running and win._tb_chip.isVisible() and win.stim_chip_text.text().startswith("Trial ")
+    assert tp.running and win._tb_chip.isVisible() and win.stim_chip_text.text().startswith("Stimulus ")
     assert not win.strips[0].name.isEnabled() or not win.btn_add_ch.isEnabled()   # channels locked
     _run_to_end(app, tp)
     assert not tp.running and len(tp.results) == 12
@@ -294,7 +294,7 @@ def test_a_full_protocol_lines_up_every_trial_and_saves_it(app, win, tmp_path):
         texts = [c["text"].decode() if isinstance(c["text"], bytes) else c["text"] for c in f["comments"][:]]
     assert saved["protocol"]["name"] == "sd" and len(saved["trials"]) == 12
     assert all(t["found"] and t["t"] > 0 for t in saved["trials"])
-    assert texts[0].startswith("Trial 1/12: a = ")
+    assert texts[0].startswith("Stimulus 1/12: a = ")
     out = tp.export_csv(tmp_path / "t.csv")
     rows = list(csv.reader(out.open()))
     assert rows[0][:4] == ["trial", "repeat", "a: Amplitude (V)", "b: Pulse width (ms)"] and len(rows) == 13

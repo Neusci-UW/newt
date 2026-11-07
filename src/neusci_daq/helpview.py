@@ -177,7 +177,7 @@ def _cycles_picture() -> QtGui.QPixmap:
 
 
 def _waveforms_picture() -> QtGui.QPixmap:
-    d = _Pen([("Take a spike", "From Spike Sorting"), ("Find its slope", "dV/dt at each moment"),
+    d = _Pen([("Take a spike", "One that was found"), ("Find its slope", "dV/dt at each moment"),
               ("Plot one on the other", "Time drops out, a loop is left")])
     w, ph = d.w, PANEL_H
     t = np.linspace(-1, 3, 300)
@@ -193,7 +193,7 @@ def _waveforms_picture() -> QtGui.QPixmap:
 
 
 def _datapad_picture() -> QtGui.QPixmap:
-    d = _Pen([("Pick a window", "When, in each block"), ("Measure", "One number per column"),
+    d = _Pen([("Pick a window", "When, in each trial"), ("Measure", "One number per column"),
               ("Compare", "Table, scatter or fit")])
     rng = np.random.default_rng(5)
     w, ph = d.w, PANEL_H
@@ -212,7 +212,7 @@ def _datapad_picture() -> QtGui.QPixmap:
     f.setPixelSize(12)
     p.setFont(f)
     x0 = d.xs[1] + 16
-    for r, row in enumerate((("Block", "Peak"), ("1", "41 mV"), ("2", "37 mV"), ("3", "30 mV"), ("4", "26 mV"))):
+    for r, row in enumerate((("Trial", "Peak"), ("1", "41 mV"), ("2", "37 mV"), ("3", "30 mV"), ("4", "26 mV"))):
         p.setPen(d.fg if r else d.muted)
         for c, text in enumerate(row):
             p.drawText(QtCore.QPointF(x0 + c * (d.w - 32) * 0.5, 30 + r * 24), text)
@@ -253,14 +253,14 @@ TOPICS = {
     "comparison": {
         "title": "How Response works",
         "picture": _comparison_picture,
-        "text": "The traces show the chosen blocks' channels on one time axis, as voltage or its rate of change, "
-                "the same way as Spike Sorting: a picked page's average, or picked blocks' trials. "
-                "Below, the chosen blocks line up on a <b>trigger</b> and are averaged: what's random "
+        "text": "The traces show the chosen trials' channels on one time axis, as voltage or its rate of change, "
+                "the same way as the Trials chart: a picked group's average, or picked trials' trials. "
+                "On the triggered charts, the chosen trials line up on a <b>trigger</b> and are averaged: what's random "
                 "cancels and what follows the trigger stays. The <b>stimulus-triggered rate</b> asks how spiking "
                 "changes after a stimulus, and the <b>spike-triggered average</b> asks what a channel does around "
                 "each spike.",
-        "warning": "Both averages need the events from Spike Sorting, so find action potentials there first. "
-                   "They use the units ticked there.",
+        "warning": "Both averages need action potentials, so find them first. They use the units ticked, unless "
+                   "a chart has its own.",
         "glossary": (
             ("dV/dt, d²V/dt²", "How fast the voltage changes, and how fast that changes."),
             ("Smooth for d/dt", "Averages the trace first, since differentiating amplifies noise."),
@@ -273,11 +273,12 @@ TOPICS = {
     "cycles": {
         "title": "How Stimulus cycles work",
         "picture": _cycles_picture,
-        "text": "With a repeating stimulus, Argus cuts the chosen blocks into single <b>cycles</b> and overlays them "
-                "by stimulus <b>phase</b> instead of time. It finds them by matching the stimulus's shape against "
-                "itself, then by its rises through its middle level; orange marks show the cuts on its trace. Or give "
-                "the <b>repeat length</b>, or mark one on the traces. Picked pages show their average and picked "
-                "blocks their own, with every cycle behind it coloured from first to last.",
+        "text": "With a repeating stimulus, Argus cuts the chosen trials into single <b>cycles</b> and overlays them "
+                "by stimulus <b>phase</b> instead of time. If the trial saved what was sent, it lines that up with the "
+                "recording; otherwise it matches the stimulus's shape against itself, then uses its rises through its "
+                "middle level. Or give the <b>repeat length</b>, or mark one on the Traces or Stimulus chart. Picked "
+                "groups show their average and picked "
+                "trials their own, with every cycle behind it coloured from first to last.",
         "warning": "A fixed delay lands at a different phase at each frequency: 5 ms is 18° at 10 Hz but 90° at 50 Hz. "
                    "Cycles are stretched to line up, so compare timing between frequencies with care.",
         "glossary": (
@@ -285,7 +286,7 @@ TOPICS = {
             ("Phase", "How far through a cycle: 0° at the rise, 180° halfway, 360° at the next rise."),
             ("Repeat length", "How long one repeat is. 0 lets Argus find it."),
             ("Left out", "Repeats too unlike the rest to use, counted in the Stimulus title."),
-            ("Skip first", "Leaves out the first cycles of each block, while the response settles."),
+            ("Skip first", "Leaves out the first cycles of each trial, while the response settles."),
             ("Spikes per phase", "A histogram of when in the cycle spikes happen, per cycle."),
             ("Vector strength", "How tightly spikes lock to one phase: 1 is exact, near 0 is none."),
             ("Response against stimulus", "A loop: open if the response lags, a line if it doesn't."),
@@ -294,11 +295,11 @@ TOPICS = {
     "waveforms": {
         "title": "How Waveforms works",
         "picture": _waveforms_picture,
-        "text": "This shows the shape of the <b>action potentials</b> found on Spike Sorting. The <b>phase plot</b> "
+        "text": "This shows the shape of the <b>action potentials</b> found. The <b>phase plot</b> "
                 "puts V against <b>dV/dt</b>, so each spike becomes a loop: time drops out, and differences in how "
                 "fast a spike rises and falls stand out. Thick lines are each unit's average.",
         "warning": "With an extracellular recording this is the shape of the recorded signal, not the membrane "
-                   "voltage. Find action potentials on Spike Sorting first.",
+                   "voltage. Find action potentials first.",
         "glossary": (
             ("dV/dt", "How fast the voltage changes, at each moment of the spike."),
             ("Phase plot", "V against dV/dt: the spike as a loop, with no time axis."),
@@ -311,14 +312,14 @@ TOPICS = {
         "title": "How DataPad works",
         "picture": _datapad_picture,
         "text": "DataPad turns traces into numbers. Each <b>column</b> is a channel and something to measure on it, "
-                "the <b>window</b> says when in each block to measure, and each <b>row</b> is a block, or the "
+                "the <b>window</b> says when in each trial to measure, and each <b>row</b> is a trial, or the "
                 "average of several. Then read the table, or plot one column against another and <b>fit</b> a "
                 "curve to the points.",
         "warning": "",
         "glossary": (
             ("Column", "A channel and a measurement, such as the peak of Ch1."),
-            ("Row", "One block or average, measured in every column."),
-            ("Window", "The stretch of each block that's measured."),
+            ("Row", "One trial or average, measured in every column."),
+            ("Window", "The stretch of each trial that's measured."),
             ("Repeat every", "Measures the window again further along, adding a row each time."),
             ("Recompute", "Measures every row again with the settings as they are now."),
             ("Scatter", "One column against another, a point per row."),

@@ -238,7 +238,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_live = QtWidgets.QPushButton("Back to Live")
         self.btn_live.clicked.connect(self.back_to_live)
         self.btn_comments = QtWidgets.QPushButton("Comments (0)", checkable=True)
-        self.btn_comments.setToolTip("Show or hide this block's comments")
+        self.btn_comments.setToolTip("Show or hide this trial's comments")
         self.btn_comments.toggled.connect(self._toggle_comments)
 
         # Toolbar groups: shown per mode (live/review) and per visible tab.
@@ -306,6 +306,10 @@ class MainWindow(QtWidgets.QMainWindow):
         cl2.setSpacing(6)
         cl2.addWidget(self.split_group)
         cl2.addWidget(self.btn_theme)
+        self.logo = QtWidgets.QLabel()
+        self.logo.setPixmap(app_icon().pixmap(QtCore.QSize(26, 26)))
+        self.logo.setToolTip("Argus")
+        cl2.addWidget(self.logo)
         self._tb_corner = A(self.tab_corner)
         self._update_theme_button()
         sc = QtGui.QShortcut(QtGui.QKeySequence("C"), self)
@@ -415,11 +419,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs = TabArea([
             ("acq", "Record", central),
             ("stim", "Stimulator", self.stim_page),
-            ("trials", "Trials", self.trials_page),
+            ("trials", "Protocols", self.trials_page),
             ("analysis", "Analysis", self.analysis_page),
+            ("datapad", "DataPad", self.analysis_page.pad_page),
         ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else []), groups=[
             ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
             ("analysis", "Analysis", ["analysis"]),
+            ("datapad", "DataPad", ["datapad"]),
             ("sim", "Simulation", ["sim"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
@@ -482,7 +488,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_play = av.addAction("&Play the shown part", self.toggle_playback)
         self.act_play.setShortcut(QtGui.QKeySequence("Space"))
         self.act_play.setToolTip("Review: play the channel listened to (or the first) from the left of the "
-                                 "plots, with a cursor, and the block's video in step. Space stops it")
+                                 "plots, with a cursor, and the trial's video in step. Space stops it")
         self.output_menu = av.addMenu("&Output device")
         self.output_menu.aboutToShow.connect(self._fill_output_menu)
         av.addSeparator()
@@ -870,7 +876,7 @@ class MainWindow(QtWidgets.QMainWindow):
             h = QtWidgets.QHBoxLayout(row_w)
             h.setContentsMargins(0, 0, 0, 0)
             btn = ColorButton(color, lambda c, i=i: self.set_review_color(i, c),
-                              tooltip="Change this channel's colour in every block of this session")
+                              tooltip="Change this channel's colour in every trial of this session")
             self.review_color_btns.append(btn)
             h.addWidget(btn, 0)
             widths = {r.ch.name: r.ch.width for r in self.rows}
@@ -1006,7 +1012,7 @@ class MainWindow(QtWidgets.QMainWindow):
         on = self.repeating or busy or protocol
         if protocol:
             self.stim_chip_text.setText(self.trials_page.chip_text())
-            self.stim_chip.setToolTip("A trial protocol is running (Acquisition › Trials). Stop ends it.")
+            self.stim_chip.setToolTip("A protocol is running (Acquisition › Protocols). Stop ends it.")
         elif on:
             self.stim_chip_text.setText("Stimulating")      # the interval is in the tooltip
             self.stim_chip.setToolTip(f"Repeating every {self.stim_repeat_s:g} s" if self.repeating
@@ -1108,8 +1114,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Ask whether to recolour recorded blocks. Returns (recolour, remember for this session)."""
         B = QtWidgets.QMessageBox.StandardButton
         box = QtWidgets.QMessageBox(
-            QtWidgets.QMessageBox.Icon.Question, "Recolour recorded blocks?",
-            f"{n} block(s) already recorded in this session show {name} in another colour.\n\n"
+            QtWidgets.QMessageBox.Icon.Question, "Recolour recorded trials?",
+            f"{n} trial(s) already recorded in this session show {name} in another colour.\n\n"
             "Use the new colour for them too? (Only the display colour changes, not the data.)",
             B.Yes | B.No, self)
         box.setDefaultButton(B.Yes)
@@ -1121,10 +1127,10 @@ class MainWindow(QtWidgets.QMainWindow):
         failed = session.recolor_blocks(blocks, colors)
         names = ", ".join(colors)
         if failed:
-            self._channel_message(f"Couldn't update the colour in {len(failed)} block(s) "
+            self._channel_message(f"Couldn't update the colour in {len(failed)} trial(s) "
                                   f"(read-only or in use?): {', '.join(f.name for f in failed)}")
         else:
-            self.statusBar().showMessage(f"{names}: colour updated in {len(blocks)} recorded block(s)", 8000)
+            self.statusBar().showMessage(f"{names}: colour updated in {len(blocks)} recorded trial(s)", 8000)
 
     def set_review_color(self, index: int, color: str) -> None:
         """Recolour one channel in every block of the session being reviewed."""
@@ -1165,7 +1171,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.recorder.recording:
             return refuse(f"Stop recording before changing the {what}.")
         if hasattr(self, "trials_page") and self.trials_page.running:
-            return refuse(f"Stop the trial protocol before changing the {what}.")
+            return refuse(f"Stop the protocol before changing the {what}.")
         if self.mode != LIVE:
             return refuse(f"Go back to live mode to change the {what}.")
         rows = self._copy_rows() if rows is None else rows
@@ -1232,7 +1238,7 @@ class MainWindow(QtWidgets.QMainWindow):
         B = QtWidgets.QMessageBox.StandardButton
         r = QtWidgets.QMessageBox.question(
             self, f"{what.capitalize()} changed",
-            f"This session's blocks were recorded with the old {what}. All blocks in a session "
+            f"This session's trials were recorded with the old {what}. All trials in a session "
             f"must match, so changing the {what} starts a new session.\n\nContinue?",
             B.Ok | B.Cancel, B.Ok)
         return r == B.Ok
@@ -1389,8 +1395,8 @@ class MainWindow(QtWidgets.QMainWindow):
         B = QtWidgets.QMessageBox.StandardButton
         r = QtWidgets.QMessageBox.question(
             self, "Unsaved session",
-            f"This session ({len(self.blocks)} block(s)) hasn't been saved.\n\n"
-            f"Save it now? If you don't, its blocks stay in\n{self.session_dir}",
+            f"This session ({len(self.blocks)} trial(s)) hasn't been saved.\n\n"
+            f"Save it now? If you don't, its trials stay in\n{self.session_dir}",
             B.Save | B.Discard | B.Cancel, B.Save)
         return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
 
@@ -1402,7 +1408,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if choice == "save":
             return self.save()
         if choice == "discard":
-            self.statusBar().showMessage(f"Unsaved blocks left in {self.session_dir}", 10000)
+            self.statusBar().showMessage(f"Unsaved trials left in {self.session_dir}", 10000)
             return True
         return False
 
@@ -1444,7 +1450,7 @@ class MainWindow(QtWidgets.QMainWindow):
         box.setIcon(QtWidgets.QMessageBox.Icon.Question)
         box.setWindowTitle("Back to live")
         box.setText(f"You're looking at {path.name}. What should new recordings do?")
-        box.setInformativeText(f"Add to {path.name}: new blocks go after its {len(self.review_blocks)} block(s), "
+        box.setInformativeText(f"Add to {path.name}: new trials go after its {len(self.review_blocks)} trial(s), "
                                "in the same session.\nNew session: start an empty one; "
                                f"{path.name} is kept as it is.")
         add = box.addButton(f"Add to {path.name}", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
@@ -1472,7 +1478,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if path.resolve().parent == (Path(self.cfg.data_dir) / "imported").resolve():
             self.statusBar().showMessage(
                 f"Adding to {path.name}. It came from a .mat file, which isn't changed: use Save as… or "
-                "Export to write the new blocks to a .mat.", 15000)
+                "Export to write the new trials to a .mat.", 15000)
         return True
 
     def _ask_adopt_setup(self, path: Path, problems: list[str]) -> bool:
@@ -1536,7 +1542,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         src = self._export_folder()
         if not self._export_blocks():
-            QtWidgets.QMessageBox.information(self, "Nothing to save", "Record a block first.")
+            QtWidgets.QMessageBox.information(self, "Nothing to save", "Record a trial first.")
             return False
         name = src.name if (self.session_saved or self.mode == REVIEW) else \
             datetime.now().strftime("session_%Y%m%d_%H%M%S")
@@ -1580,7 +1586,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if problems:
             QtWidgets.QMessageBox.critical(
                 self, "Can't append to this session",
-                "New blocks wouldn't match the existing ones:\n\n• " + "\n• ".join(problems)
+                "New trials wouldn't match the existing ones:\n\n• " + "\n• ".join(problems)
                 + "\n\nUse New instead, or load the config this session was recorded with.")
             return
         if warnings:
@@ -1595,8 +1601,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _append_notes(self, path: Path) -> list[str]:
         """What happens on Append, including colours that will change."""
         notes = [
-            "New blocks must use the same channel names, inputs, units, sampling rate and "
-            "wiring as the blocks already in this session. (They do now; if you change any of "
+            "New trials must use the same channel names, inputs, units, sampling rate and "
+            "wiring as the trials already in this session. (They do now; if you change any of "
             "them after appending, a new session is started instead.)",
             "Channels are matched by name, so don't rename a channel while appending.",
         ]
@@ -1627,7 +1633,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def export_dialog(self):
         blocks, folder = self._export_blocks(), self._export_folder()
         if not blocks:
-            QtWidgets.QMessageBox.information(self, "Nothing to export", "Record a block or open a session first.")
+            QtWidgets.QMessageBox.information(self, "Nothing to export", "Record a trial or open a session first.")
             return
         default = folder / f"{folder.name}.mat"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export .mat", str(default),
@@ -1739,7 +1745,8 @@ class MainWindow(QtWidgets.QMainWindow):
         paths, folder = self._panel_paths(), self._panel_folder()
         auto = self.analysis_page.stimulus_groups_of(paths, folder) if paths else []
         d = pagesmod.load(folder)
-        return pagesmod.apply(auto, [p.stem for p in paths], d), auto, d
+        shown = pagesmod.apply(auto, [p.stem for p in paths], d)
+        return self.analysis_page.arranged(shown, paths, self.analysis_page.stimulus_source(paths, folder), d), auto, d
 
     def _fill_recorded(self) -> None:
         """Show the session in the Blocks panel: Live (or Back to Live), then its blocks
@@ -1830,11 +1837,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 plot.addItem(item)
                 item.set_traces(Y, fs)
                 self._overlay_items.append((plot, item))
-        self.statusBar().showMessage(f"Overlaying {len(self._overlay_sel)} blocks (Cmd/Shift-click in "
-                                     "Blocks to change; click one block to stop)", 8000)
+        self.statusBar().showMessage(f"Overlaying {len(self._overlay_sel)} trials (Cmd/Shift-click in "
+                                     "Trials to change; click one trial to stop)", 8000)
 
     def _rename_dialog(self, old: str) -> None:
-        new, ok = QtWidgets.QInputDialog.getText(self, "Rename page", "Name for this page:", text=old)
+        new, ok = QtWidgets.QInputDialog.getText(self, "Rename group", "Name for this group:", text=old)
         if ok:
             self.rename_page(old, new)
 
@@ -1860,14 +1867,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.analysis_page.source_changed()
 
     def _new_page_dialog(self, i: int) -> None:
-        name, ok = QtWidgets.QInputDialog.getText(self, "New page", "Name for the new page:")
+        name, ok = QtWidgets.QInputDialog.getText(self, "New group", "Name for the new group:")
         if ok and name.strip():
             self.move_block(i, name)
 
     def _reset_pages_dialog(self) -> None:
         if QtWidgets.QMessageBox.question(
-                self, "Reset pages", "Forget the page names you gave and the blocks you moved, and sort "
-                "the blocks into pages again from the stimulus channel?") == QtWidgets.QMessageBox.StandardButton.Yes:
+                self, "Reset groups", "Forget the group names you gave and the trials you moved, and sort "
+                "the trials into groups again from the stimulus channel?") == QtWidgets.QMessageBox.StandardButton.Yes:
             self.reset_pages()
 
     def reset_pages(self) -> None:
@@ -1918,7 +1925,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.block_combo.blockSignals(False)
         if remember:
             self._remember(path)
-        self.statusBar().showMessage(f"Opened {path.name} ({len(blocks)} block(s)) for review", 10000)
+        self.statusBar().showMessage(f"Opened {path.name} ({len(blocks)} trial(s)) for review", 10000)
         self._show_review_block(0)
         self._fill_recorded()
         self.analysis_page.source_changed()
@@ -1937,7 +1944,7 @@ class MainWindow(QtWidgets.QMainWindow):
         recent = [r for r in self.recent_sessions() if r != str(folder.resolve())]
         self.settings.setValue("recent_sessions", session.add_recent(recent, path))
         self._update_title()
-        msg = (f"Opened {path.name} ({len(self.review_blocks)} block(s)). The .mat itself isn't changed: "
+        msg = (f"Opened {path.name} ({len(self.review_blocks)} trial(s)). The .mat itself isn't changed: "
                f"comments and colours are kept in its imported copy, {folder}.")
         if notes:
             msg += " " + " ".join(notes)
@@ -1964,7 +1971,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember(path)
         self._update_title()
         self.statusBar().showMessage(
-            f"Appending to {path.name}: next block is {session.next_block_path(path).name}", 10000)
+            f"Appending to {path.name}: next trial is {session.next_block_path(path).name}", 10000)
         return path
 
     def export(self, out_path: str | Path | None = None) -> Path | None:
@@ -1988,7 +1995,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._live_comments_dirty = False
         else:
             self._review_mat_stale = False
-        self.statusBar().showMessage(f"Exported {len(blocks)} block(s) to {out}", 10000)
+        self.statusBar().showMessage(f"Exported {len(blocks)} trial(s) to {out}", 10000)
         return out
 
     def _export_blocks(self) -> list[Path]:
@@ -2046,7 +2053,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not session.is_session(path):
             self.settings.setValue("recent_sessions", [r for r in self.recent_sessions() if r != path])
             QtWidgets.QMessageBox.warning(self, "Session not found",
-                                          f"{path} no longer exists or has no blocks. "
+                                          f"{path} no longer exists or has no trials. "
                                           "It has been removed from the list.")
             return
         if self._leave_live():
@@ -2061,7 +2068,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             blk = self.store.read(self.review_blocks[index])
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Could not read block", repr(e))
+            QtWidgets.QMessageBox.critical(self, "Could not read trial", repr(e))
             return
         self.review_block = blk
         names = getattr(self, "_review_names", None)
@@ -2102,7 +2109,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def analysis_step(self, d: int) -> None:
         """← / →: Analysis's highlighted block, when Analysis is showing."""
-        if self.tabs.is_visible("analysis"):
+        if self.tabs.is_visible("analysis") or self.tabs.is_visible("datapad"):
             self.analysis_page.step(d)
 
     def step_block(self, d: int) -> None:
@@ -2468,17 +2475,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
         if self.trials_page.running:
-            self._stim_message("A trial protocol is running (Acquisition › Trials); stop it first.", error=True)
+            self._stim_message("A protocol is running (Acquisition › Protocols); stop it first.", error=True)
             return False
         try:
             wave = self.stimulus.waveform(self.cfg.stim_rate)
         except ValueError as e:
             self._stim_message(str(e), error=True)
             return False
-        return self.send_wave(wave, self.stimulus.describe(self.cfg.stim_units, self.cfg.stim_scale))
+        return self.send_wave(wave, self.stimulus.describe(self.cfg.stim_units, self.cfg.stim_scale), self.stimulus)
 
-    def send_wave(self, wave, desc: str) -> bool:
-        """Send `wave` (volts at the output rate) and note it as a comment while recording."""
+    def send_wave(self, wave, desc: str, stimulus: Stimulus | None = None) -> bool:
+        """Send `wave` (volts at the output rate), and note it as a comment and save the
+        `stimulus` it came from with the block while recording."""
         if self.stim_out is None:
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
@@ -2492,7 +2500,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._stim_message(str(e), error=True)
             return False
         if self.recorder.recording:
-            self._log_comment(f"Stim: {desc}" if not desc.startswith("Trial") else desc)
+            self._log_comment(f"Stim: {desc}" if not desc.startswith("Stimulus ") else desc)
+            if stimulus is not None:
+                self.recorder.add_stimulus(stimulus.to_dict(), self.cfg.stim_rate)
         self._stim_message(f"Stimulus sent on {self.cfg.stim_output}: {desc}")
         self._update_stim_chip()
         return True
@@ -2507,7 +2517,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_repeat(self, on: bool) -> None:
         if on and hasattr(self, "trials_page") and self.trials_page.running:
-            self._stim_message("A trial protocol is running (Acquisition › Trials); stop it first.", error=True)
+            self._stim_message("A protocol is running (Acquisition › Protocols); stop it first.", error=True)
             on = False
         if on and not self.repeating:
             self.repeating = True          # set first, so the chip shows "every N s"
@@ -2919,7 +2929,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Review: play the shown part of the block's listened-to channel (or the first)."""
         from . import audio
         if self.mode != REVIEW or not self.review_block or not self.plots:
-            self.statusBar().showMessage("Play works on a recorded block: open one, or click one in Blocks.", 6000)
+            self.statusBar().showMessage("Play works on a recorded trial: open one, or click one in Trials.", 6000)
             return False
         names = self._plot_names
         name = self._listen if self._listen in names else names[0]

@@ -178,6 +178,15 @@ class Stimulus:
         return notes
 
     # -- files ---------------------------------------------------------------
+    def repeat(self) -> tuple[float, float, int]:
+        """How it repeats: (one repeat in s, where the first starts in s, how many). No
+        repeats: all 0."""
+        if self.shape == "sine" and self.freq_hz > 0:
+            return 1 / self.freq_hz, self.delay_ms / 1000, int(self.duration_ms / 1000 * self.freq_hz)
+        if self.shape == "pulse" and self.count > 1:
+            return self.interval_ms / 1000, self.delay_ms / 1000, self.count
+        return 0.0, 0.0, 0
+
     def to_dict(self) -> dict:
         return asdict(self)
 

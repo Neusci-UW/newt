@@ -11,8 +11,12 @@ What you change is kept in the session folder, in pages.json:
   colors   {page's name: the colour you gave it}
   page_map the colour map across the pages (colormaps.PAGE_STYLES)
   trial_map how the trials of a page are drawn (colormaps.TRIAL_STYLES)
-  gains    {channel: the factor its data is multiplied by when read}
+  gains    {channel: the amplifier gain its data is divided by when read}
   stim_fit the fit applied to the stimulus channel when it's read (analysis.FITS)
+  hidden_groups, hidden_trials  the pages and block file stems left out of everything
+  shown_trials  blocks you ticked yourself: they stay in, even on a page left out
+  order    the pages in the order you dragged them
+  sort     "frequency" or "amplitude" to keep them sorted, "" for your order
 
 Gains and fits are applied as data is read: the recorded blocks are never changed.
 """
@@ -22,21 +26,25 @@ import json
 from pathlib import Path
 
 FILE = "pages.json"
-ALL = "Blocks"                    # the one page when there's nothing to group by
+ALL = "All trials"                # the one group when there's nothing to group by
 
 
 def load(folder: str | Path | None) -> dict:
-    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "gains": {}, "stim_fit": ""}
+    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "gains": {}, "stim_fit": "",
+           "hidden_groups": [], "hidden_trials": [], "shown_trials": [], "order": [], "sort": ""}
     if folder is None:
         return out
     try:
         d = json.loads((Path(folder) / FILE).read_text(encoding="utf-8"))
-        out["renamed"] = {str(k): str(v) for k, v in d.get("renamed", {}).items()}
+        out["renamed"] = {(ALL if k == "Blocks" else str(k)): str(v) for k, v in d.get("renamed", {}).items()}
         out["moved"] = {str(k): str(v) for k, v in d.get("moved", {}).items()}
         out["colors"] = {str(k): str(v) for k, v in d.get("colors", {}).items()}
         out["page_map"], out["trial_map"] = str(d.get("page_map", "")), str(d.get("trial_map", ""))
         out["gains"] = {str(k): float(v) for k, v in d.get("gains", {}).items()}
         out["stim_fit"] = str(d.get("stim_fit", ""))
+        for key in ("hidden_groups", "hidden_trials", "shown_trials", "order"):
+            out[key] = [str(x) for x in d.get(key, [])]
+        out["sort"] = str(d.get("sort", ""))
     except (OSError, ValueError, AttributeError, TypeError):
         pass
     return out
@@ -62,6 +70,16 @@ def apply(auto: list[tuple[str, list[int]]], stems: list[str], d: dict) -> list[
     return [(name, sorted(blocks)) for name, blocks in pages.items() if blocks]
 
 
+def arrange(shown: list[tuple[str, list[int]]], d: dict, measure) -> list[tuple[str, list[int]]]:
+    """The pages in the order asked for: sorted, if `sort` says so, with measure(blocks) giving
+    (frequency, amplitude); otherwise your order, and any you haven't placed after those."""
+    if d.get("sort") in ("frequency", "amplitude"):
+        k = 0 if d["sort"] == "frequency" else 1
+        return sorted(shown, key=lambda page: measure(page[1])[k])
+    order = {name: r for r, name in enumerate(d.get("order", []))}
+    return sorted(shown, key=lambda page: order.get(page[0], len(order)))
+
+
 def auto_page(auto: list[tuple[str, list[int]]], i: int, d: dict) -> str:
     """The name of block i's stimulus page (where it goes if it isn't moved)."""
     label = next((label for label, blocks in auto if i in blocks), ALL)
@@ -79,7 +97,9 @@ def rename(auto: list[tuple[str, list[int]]], d: dict, old: str, new: str) -> di
             renamed[label] = new
     moved = {stem: (new if page == old else page) for stem, page in d.get("moved", {}).items()}
     colors = {(new if page == old else page): c for page, c in d.get("colors", {}).items()}
-    return {**d, "renamed": renamed, "moved": moved, "colors": colors}
+    same = lambda names: [new if n == old else n for n in names]
+    return {**d, "renamed": renamed, "moved": moved, "colors": colors, "order": same(d.get("order", [])),
+            "hidden_groups": same(d.get("hidden_groups", []))}
 
 
 def move(auto: list[tuple[str, list[int]]], stems: list[str], d: dict, i: int, page: str) -> dict:

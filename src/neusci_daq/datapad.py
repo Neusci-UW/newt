@@ -20,14 +20,14 @@ MEASUREMENTS = {
     "area": ("Area", "{u}·s", "Integral of the trace over the window (from zero)"),
     "absarea": ("Absolute area", "{u}·s", "Integral of |trace|"),
     "slope": ("Slope", "{u}/s", "Straight-line fit"),
-    "tmax": ("Time of maximum", "s", "Time of the largest value, from the block's start"),
-    "tmin": ("Time of minimum", "s", "Time of the smallest value, from the block's start"),
+    "tmax": ("Time of maximum", "s", "Time of the largest value, from the trial's start"),
+    "tmin": ("Time of minimum", "s", "Time of the smallest value, from the trial's start"),
     "rise": ("Max rate of rise", "{u}/s", "Largest dV/dt"),
     "fall": ("Max rate of fall", "{u}/s", "Most negative dV/dt"),
     "freq": ("Main frequency", "Hz", "Frequency of the largest peak in the spectrum"),
     "start": ("Value at start", "{u}", "The first sample in the window"),
     "end": ("Value at end", "{u}", "The last sample in the window"),
-    "spikes": ("Spike count", "", "Action potentials found on the Spike Sorting tab, in the window"),
+    "spikes": ("Spike count", "", "The action potentials found, in the window"),
     "rate": ("Spike rate", "/s", "Spike count ÷ window length"),
 }
 SPIKE_KEYS = ("spikes", "rate")

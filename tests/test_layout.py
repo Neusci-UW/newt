@@ -23,8 +23,8 @@ def tab_texts(bar):
 def test_starts_on_acquisition_record_with_sub_pages(win):
     assert shown(win) == ["acq"]
     pane = win.tabs.panes[0]
-    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "Simulation"]
-    assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Trials"]
+    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "DataPad", "Simulation"]
+    assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Protocols"]
     assert pane.sub_bar.currentIndex() == 0 and not pane.sub_head.isHidden()
 
 
@@ -832,10 +832,10 @@ def test_stacked_plots_line_up(app, win):
     xs = [p.vb.sceneBoundingRect().left() for p in win.plots]
     widths = [p.getAxis("left").width() for p in win.plots]
     assert max(widths) - min(widths) < 0.5 and max(xs) - min(xs) < 0.5
-    raw = win.analysis_page.raw
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
-    ws = [pw.getPlotItem().getAxis("left").width() for pw in (raw.overlay, raw.raster, raw.rate_plot)]
+    ap = win.analysis_page
+    ws = [ap.chart(k).plot.getPlotItem().getAxis("left").width() for k in ("Trials", "Raster", "Rate")]
     assert max(ws) - min(ws) < 0.5
 
 
@@ -894,10 +894,10 @@ def test_tall_tabs_fit_a_short_laptop_screen(app, tmp_path, tab, scale):
         win.tabs.pick(0, tab)
         pump(app, 0.2)
         assert (win.width(), win.height()) == (1024, 560)
-        page = win.analysis_page if tab == "analysis" else win.sim_page
-        scrolls = [s for s in page.findChildren(QtWidgets.QScrollArea)
-                   if s.isVisible() and s.verticalScrollBar().maximum() > 0]
-        assert scrolls, "the settings should scroll, not be cut off"
+        if tab == "sim":                                              # Analysis's settings are in windows
+            scrolls = [s for s in win.sim_page.findChildren(QtWidgets.QScrollArea)
+                       if s.isVisible() and s.verticalScrollBar().maximum() > 0]
+            assert scrolls, "the settings should scroll, not be cut off"
     finally:
         win.close()
         win.deleteLater()

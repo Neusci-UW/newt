@@ -25,13 +25,15 @@ class ColorButton(QtWidgets.QToolButton):
     """A coloured bar. Click it to pick a palette colour or a custom one.
 
     Calls on_pick(hex) with the chosen colour. Used next to live plots (in the
-    channel strip) and review plots.
+    channel strip) and review plots. With on_opacity, its menu also has an Opacity slider,
+    which calls on_opacity(0 to 1) as it moves.
     """
 
     def __init__(self, color: str, on_pick, tooltip: str = "Change this channel's trace colour",
-                 enabled_look: bool = True):
+                 enabled_look: bool = True, opacity: float = 1.0, on_opacity=None):
         super().__init__()
         self._on_pick = on_pick
+        self.opacity, self._on_opacity = opacity, on_opacity
         self.setToolTip(tooltip)
         self.setFixedWidth(8)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Expanding)
@@ -59,7 +61,31 @@ class ColorButton(QtWidgets.QToolButton):
             a.triggered.connect(lambda _=False, c=c: self._pick(c))
         menu.addSeparator()
         menu.addAction("Custom…", self._custom)
+        if self._on_opacity is not None:
+            menu.addSeparator()
+            action = QtWidgets.QWidgetAction(menu)
+            action.setDefaultWidget(self._opacity_row())
+            menu.addAction(action)
         menu.exec(self.mapToGlobal(QtCore.QPoint(self.width(), 0)))
+
+    def _opacity_row(self) -> QtWidgets.QWidget:
+        row = QtWidgets.QWidget()
+        lay = QtWidgets.QHBoxLayout(row)
+        lay.setContentsMargins(8, 2, 8, 2)
+        lay.addWidget(QtWidgets.QLabel("Opacity"))
+        self.opacity_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, minimum=5, maximum=100)
+        self.opacity_slider.setValue(round(self.opacity * 100))
+        self.opacity_slider.setMinimumWidth(100)
+        shown = QtWidgets.QLabel(f"{self.opacity_slider.value()}%")
+        self.opacity_slider.valueChanged.connect(lambda v: shown.setText(f"{v}%"))
+        self.opacity_slider.valueChanged.connect(self._opacity_moved)
+        lay.addWidget(self.opacity_slider, 1)
+        lay.addWidget(shown)
+        return row
+
+    def _opacity_moved(self, v: int) -> None:
+        self.opacity = v / 100
+        self._on_opacity(self.opacity)
 
     def _custom(self):
         c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.color), self, "Trace colour")
@@ -150,7 +176,7 @@ class ChannelStrip(QtWidgets.QFrame):
         self.stim.setChecked(is_stim)
         self.stim.setToolTip("This channel records the stimulus: tick if this input records the stimulator's output (wired to it, or in the "
                              "simulation). Its pulses give exact stimulus times for Trials, and group the "
-                             "blocks by stimulus. Only one channel can")
+                             "trials by stimulus. Only one channel can")
         self.stim.setVisible(on_stim is not None)
         lay.addWidget(self.stim, 3, 0, 1, 3)
         info = QtWidgets.QLabel(f"{row.ch.units} · scale ×{row.ch.scale:g}")

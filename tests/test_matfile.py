@@ -34,7 +34,7 @@ def labchart_like(path, **override):
         "unittextmap": np.array([[1, 1, 1], [2, 2, 2]], float),
         "blocktimes": np.array([[739000.5, 739000.6, 739000.7]]),       # MATLAB datenums
         "com": np.array([[-1, 1, 251, 1, 1], [2, 1, 501, 1, 2], [-1, 3, 1, 1, 3]], float),
-        "comtext": np.array(["start      ", "on stim only", "block 3    "]),
+        "comtext": np.array(["start      ", "on stim only", "trial 3    "]),
     }
     d.update(override)
     savemat(path, d)
@@ -63,7 +63,7 @@ def test_slower_channels_are_resampled_to_the_fastest_and_noted(tmp_path):
     assert b3["rate"] == 1000 and b3["data"].shape == (2, 1000)
     assert b3["data"][1, 500] == pytest.approx(c2_at(0.5), abs=0.01)
     assert any("500 Hz" in n for n in b3["notes"])
-    assert b3["comments"] == [(0.0, "block 3")]
+    assert b3["comments"] == [(0.0, "trial 3")]
 
 
 def c2_at(t):
@@ -121,7 +121,7 @@ def test_import_makes_a_session_and_never_changes_the_file(tmp_path):
     info = session.block_info(blocks[0])
     assert info["backend"] == "imported" and len(set(info["colors"])) == 2
     assert session.block_info(blocks[1])["colors"][0] == info["colors"][0]   # same colour in every block
-    assert notes and "Block 3" in notes[0]
+    assert notes and "Trial 3" in notes[0]
     assert hashlib.md5(src.read_bytes()).hexdigest() == before
 
 

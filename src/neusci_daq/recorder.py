@@ -10,6 +10,7 @@ File layout:
 """
 from __future__ import annotations
 
+import json
 import queue
 import threading
 from datetime import datetime
@@ -108,6 +109,16 @@ class Recorder:
         with self._lock:
             if self._file is not None:
                 self._file.attrs[key] = value
+                self._file.flush()
+
+    def add_stimulus(self, settings: dict, rate: float) -> None:
+        """Save what was just sent with the block being recorded, at the latest acquired
+        sample, so analysis can line up the known waveform with the recording."""
+        with self._lock:
+            if self._file is not None:
+                sent = json.loads(self._file.attrs.get("stimuli", "[]"))
+                sent.append({"t": self.last_t - (self._t_offset or 0.0), "rate": rate, "settings": settings})
+                self._file.attrs["stimuli"] = json.dumps(sent)
                 self._file.flush()
 
     def get_comments(self) -> list[dict]:

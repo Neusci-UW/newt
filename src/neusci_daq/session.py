@@ -7,6 +7,7 @@ and read a block for review.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -147,6 +148,7 @@ def read_block(path: str | Path) -> dict:
             "colors": _colors(a, len(a["channel_names"])),
             "terminal_config": str(a["terminal_config"]) if "terminal_config" in a else None,
             "duration_s": float(t[-1]) if t.size else 0.0,
+            "stimuli": json.loads(a.get("stimuli", "[]")),      # what was sent (Recorder.add_stimulus)
         }
 
 

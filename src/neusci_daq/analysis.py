@@ -49,12 +49,12 @@ def parse_blocks(text: str, n: int) -> list[int]:
         elif part.isdigit():
             a = b = int(part)
         else:
-            raise ValueError(f"{part!r} isn't a block number or range. Use e.g. all, 1-20, 35, 100-")
+            raise ValueError(f"{part!r} isn't a trial number or range. Use e.g. all, 1-20, 35, 100-")
         if a < 1 or b < a:
-            raise ValueError(f"{part!r} isn't a range of blocks 1 to {n}.")
+            raise ValueError(f"{part!r} isn't a range of trials 1 to {n}.")
         out.update(range(a - 1, min(b, n)))
     if not out:
-        raise ValueError(f"No blocks in {text!r}: there are {n}.")
+        raise ValueError(f"No trials in {text!r}: there are {n}.")
     return sorted(out)
 
 
@@ -304,10 +304,10 @@ def find_events(blocks: list[tuple[int, np.ndarray, float]], *, threshold: float
     level in trace units from the baseline, or with bimodal=True found from the peak
     sizes (falling back to `threshold` SDs, with a note, if they don't form two groups)."""
     if not blocks:
-        raise ValueError("No blocks to search.")
+        raise ValueError("No trials to search.")
     fs = blocks[0][2]
     if any(b[2] != fs for b in blocks):
-        raise ValueError("These blocks were recorded at different sample rates; search them separately.")
+        raise ValueError("These trials were recorded at different sample rates; search them separately.")
     notes = []
     level = None
     if bimodal:
@@ -316,7 +316,7 @@ def find_events(blocks: list[tuple[int, np.ndarray, float]], *, threshold: float
     if level is None:
         level = abs(threshold) if fixed else abs(threshold) * float(np.median([noise_sd(y) for _, y, _ in blocks]))
     if level <= 0:
-        raise ValueError("The threshold is 0: these blocks look flat.")
+        raise ValueError("The threshold is 0: these trials look flat.")
     bi, ts, amps, ws = [], [], [], []
     for b, y, _ in blocks:
         idx = detect(y, fs, level, polarity, dead_ms, biphasic, biphasic_ms)
@@ -454,12 +454,12 @@ def triggered_average(traces: dict[int, np.ndarray], fs: float, times: dict[int,
 
 
 # -- grouping blocks by their stimulus ------------------------------------------
-_TRIAL_NOTE = re.compile(r"^Trial \d+(?:/\d+)?:\s*")
+_TRIAL_NOTE = re.compile(r"^(?:Trial|Stimulus) \d+(?:/\d+)?:\s*")
 
 
 def stimulus_notes(comments: list[tuple[float, str]]) -> tuple[str, ...]:
     """The stimuli a block's notes say were sent (the app notes each one while
-    recording): "Stim: ..." and "Trial n/m: ..." without the trial number. Distinct,
+    recording): "Stim: ..." and "Stimulus n/m: ..." (older sessions: "Trial n/m: ...") without the number. Distinct,
     in order; empty if none."""
     out = []
     for _, text in comments:
@@ -477,7 +477,9 @@ def _sig(x: float, n: int = 2) -> float:
 TRAIN_GAP_MS = 100.0               # pulses closer than this are one stimulus (a train)
 CYCLE_POINTS = 360                 # each stimulus cycle, stretched to one point per degree
 MIN_MATCH = 0.7                    # how alike a repeat and the template must be (correlation)
-FITS = ("Off", "Piecewise linear", "Smooth", "Sine", "Repeat average", "Harmonics")
+SINE_MATCH = 0.25                  # how far from a sine a stretch may be and still be it (RMS ÷ amplitude)
+SEARCH_S = 1.0                     # a stimulus sent is within this long of its note
+FITS = ("Off", "Known waveform", "Piecewise linear", "Smooth", "Sine", "Repeat average", "Harmonics")
 
 
 def pulse_signature(y: np.ndarray, fs: float) -> tuple | None:
@@ -676,6 +678,17 @@ def cycle_bounds(y: np.ndarray) -> np.ndarray:
     return np.column_stack((starts[:-1], starts[1:]))[keep]
 
 
+@dataclass(frozen=True, eq=False)
+class Sent:
+    """A stimulus sent during a block, from the settings saved with it."""
+    t: float                       # about when (s into the block): the note's time
+    wave: np.ndarray               # what was sent (V at `rate`)
+    rate: float
+    period_s: float = 0.0          # how long one repeat is, if it repeats
+    first_s: float = 0.0           # where the first repeat starts in `wave`
+    repeats: int = 0
+
+
 @dataclass
 class Repeats:
     """The repeats of a stimulus in one block."""
@@ -755,9 +768,59 @@ def match_repeats(y: np.ndarray, start: int, n: int) -> tuple[np.ndarray, int]:
     return np.column_stack((at, at + n)), int(len(peaks) - len(good))
 
 
-def find_repeats(y: np.ndarray, fs: float, length_s: float = 0.0, start_s: float | None = None) -> Repeats:
+def line_up(y: np.ndarray, fs: float, sent: Sent) -> tuple[int, float, float] | None:
+    """Where a stimulus that was sent is on the trace that recorded it: (first sample, size,
+    offset), with only its timing and size fitted. None if it isn't there."""
+    w = np.interp(np.arange(int(len(sent.wave) / sent.rate * fs)) / fs, np.arange(len(sent.wave)) / sent.rate, sent.wave)
+    if len(w) < 4 or len(y) < 4 or np.ptp(w) == 0:
+        return None
+    scores = signal.correlate(y - y.mean(), w - w.mean(), mode="full", method="fft")
+    lags = np.arange(-len(w) + 1, len(y))
+    near = np.abs(lags / fs - sent.t) <= SEARCH_S
+    if not near.any():
+        return None
+    at = int(lags[near][np.argmax(scores[near])])
+    i, j = max(0, at), min(len(y), at + len(w))
+    if j - i < 4:
+        return None
+    part = w[i - at:j - at]
+    if np.ptp(part) == 0 or np.ptp(y[i:j]) == 0 or np.corrcoef(part, y[i:j])[0, 1] < MIN_MATCH:
+        return None
+    size, offset = np.polyfit(part, y[i:j], 1)
+    return at, float(size), float(offset)
+
+
+def _known(y: np.ndarray, fs: float, sent: list[Sent]) -> np.ndarray:
+    """The waveforms that were sent, each lined up with the trace, with their rests left as
+    they are."""
+    out = y.copy()
+    for s in sent:
+        found = line_up(y, fs, s)
+        if found is not None:
+            at, size, offset = found
+            w = np.interp(np.arange(int(len(s.wave) / s.rate * fs)) / fs, np.arange(len(s.wave)) / s.rate, s.wave)
+            i, j = max(0, at), min(len(y), at + len(w))
+            out[i:j] = size * w[i - at:j - at] + offset
+    return out
+
+
+def known_repeats(y: np.ndarray, fs: float, sent: list[Sent]) -> np.ndarray:
+    """The repeats of stimuli sent as a repeating shape: exact, from their settings."""
+    out = []
+    for s in sent:
+        found = line_up(y, fs, s) if s.period_s > 0 else None
+        if found is not None:
+            n = s.period_s * fs
+            first = found[0] + s.first_s * fs
+            out += [(a, a + n) for a in first + n * np.arange(s.repeats) if a >= 0 and a + n <= len(y)]
+    return np.array(out, float).reshape(-1, 2)
+
+
+def find_repeats(y: np.ndarray, fs: float, length_s: float = 0.0, start_s: float | None = None,
+                 sent: tuple[Sent, ...] = ()) -> Repeats:
     """The repeats of a stimulus, by the most reliable way that works. With a length, you
-    said how long one is (and maybe where): that's the template. Otherwise its shape is
+    said how long one is (and maybe where): that's the template. Otherwise what was sent is
+    lined up with the trace, if the block saved it and it repeats. Otherwise its shape is
     matched, which suits any shape however many times it rises, then the rises through its
     middle level are used, which also follow a changing frequency. No repeats: none found."""
     y = np.asarray(y, float)
@@ -769,6 +832,9 @@ def find_repeats(y: np.ndarray, fs: float, length_s: float = 0.0, start_s: float
         start = int(round(start_s * fs)) if start_s is not None else first_rise(y)
         bounds, left = match_repeats(y, start, n) if start is not None else (none, 0)
         return Repeats(bounds, "hand" if len(bounds) else "", left)
+    bounds = known_repeats(y, fs, list(sent))
+    if len(bounds) >= 2:
+        return Repeats(bounds, "known")
     n, start = repeat_length(y), first_rise(y)
     if n is not None and start is not None:
         bounds, left = match_repeats(y, start, n)
@@ -809,8 +875,9 @@ def _piecewise(y: np.ndarray) -> np.ndarray:
 
 
 def _sine(y: np.ndarray, fs: float) -> np.ndarray:
-    """A sine through each unbroken run of full cycles, so a pause between bursts stays a
-    pause; the rest of the trace stays as it is."""
+    """A sine through each unbroken run of full cycles, carried on past either end for as
+    long as it still matches, so a block's first and last cycles are fitted too and a pause
+    between bursts stays a pause. The rest of the trace stays as it is."""
     bounds = cycle_bounds(y)
     out = y.copy()
     if not len(bounds):
@@ -818,7 +885,8 @@ def _sine(y: np.ndarray, fs: float) -> np.ndarray:
 
     def wave(t, amp, f, phase, offset):
         return amp * np.sin(2 * np.pi * f * t + phase) + offset
-    for run in np.split(bounds, np.flatnonzero(bounds[1:, 0] > bounds[:-1, 1]) + 1):
+    runs = np.split(bounds, np.flatnonzero(bounds[1:, 0] > bounds[:-1, 1]) + 1)
+    for k, run in enumerate(runs):
         a, b = int(run[0, 0]), int(np.ceil(run[-1, 1]))
         t = np.arange(a, b) / fs
         hz = fs / float(np.median(np.diff(run, axis=1)))
@@ -827,14 +895,26 @@ def _sine(y: np.ndarray, fs: float) -> np.ndarray:
             best = optimize.curve_fit(wave, t, y[a:b], p0=guess)[0]
         except RuntimeError:
             best = guess
-        out[a:b] = wave(t, *best)
+        lo = int(np.ceil(runs[k - 1][-1, 1])) if k else 0
+        hi = int(runs[k + 1][0, 0]) if k + 1 < len(runs) else len(y)
+        step = max(1, int(round(fs / abs(best[1]) / 4)))      # a quarter of a cycle at a time
+
+        def matches(i: int, j: int) -> bool:
+            there = wave(np.arange(i, j) / fs, *best)
+            return float(np.sqrt(np.mean((y[i:j] - there) ** 2))) < SINE_MATCH * abs(best[0])
+        while a > lo and matches(max(lo, a - step), a):
+            a = max(lo, a - step)
+        while b < hi and matches(b, min(hi, b + step)):
+            b = min(hi, b + step)
+        out[a:b] = wave(np.arange(a, b) / fs, *best)
     return out
 
 
-def _repeat_average(y: np.ndarray, fs: float, harmonics: int | None, length_s: float, start_s: float | None):
+def _repeat_average(y: np.ndarray, fs: float, harmonics: int | None, length_s: float, start_s: float | None,
+                    sent: tuple[Sent, ...] = ()):
     """Every repeat replaced by the average of them all, or with `harmonics`, by that
     average's first few harmonics. The rest of the trace stays as it is."""
-    bounds = find_repeats(y, fs, length_s, start_s).bounds
+    bounds = find_repeats(y, fs, length_s, start_s, sent).bounds
     if len(bounds) < 2:
         return y.copy()
     n = int(round(float(np.median(np.diff(bounds, axis=1)))))
@@ -851,14 +931,17 @@ def _repeat_average(y: np.ndarray, fs: float, harmonics: int | None, length_s: f
 
 
 def fit_stimulus(y: np.ndarray, fs: float, kind: str, length_s: float = 0.0, start_s: float | None = None,
-                 smooth_ms: float = 1.0, harmonics: int = 8) -> np.ndarray:
+                 smooth_ms: float = 1.0, harmonics: int = 8, sent: tuple[Sent, ...] = ()) -> np.ndarray:
     """A recorded stimulus without its sampling noise and coarse voltage steps, by the fit
-    that suits its shape (one of FITS): straight pieces for pulses, steps, ramps and custom
-    shapes; smoothing that doesn't shift timing; a sine; or the average of its repeats."""
+    that suits its shape (one of FITS): what was sent, lined up, if the block saved it;
+    straight pieces for pulses, steps, ramps and custom shapes; smoothing that doesn't shift
+    timing; a sine; or the average of its repeats."""
     y = np.asarray(y, float)
     y = np.nan_to_num(y, nan=float(np.nanmedian(y))) if np.isfinite(y).any() else y
     if y.size < 16 or kind == "Off":
         return y
+    if kind == "Known waveform":
+        return _known(y, fs, list(sent))
     if kind == "Piecewise linear":
         return _piecewise(y)
     if kind == "Smooth":
@@ -866,7 +949,7 @@ def fit_stimulus(y: np.ndarray, fs: float, kind: str, length_s: float = 0.0, sta
         return signal.savgol_filter(y, min(window, (len(y) - 1) | 1), 2)
     if kind == "Sine":
         return _sine(y, fs)
-    return _repeat_average(y, fs, harmonics if kind == "Harmonics" else None, length_s, start_s)
+    return _repeat_average(y, fs, harmonics if kind == "Harmonics" else None, length_s, start_s, sent)
 
 
 def cycle_rows(y: np.ndarray, bounds: np.ndarray, n: int = CYCLE_POINTS) -> np.ndarray:

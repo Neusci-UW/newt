@@ -54,7 +54,7 @@ class CommentsPanel(QtWidgets.QWidget):
             sc.setContext(QtCore.Qt.ShortcutContext.WidgetShortcut)
             sc.activated.connect(self._delete_selected)
         lay.addWidget(self.tree, 1)
-        self.empty = QtWidgets.QLabel("No comments in this block")
+        self.empty = QtWidgets.QLabel("No comments in this trial")
         lay.addWidget(self.empty)
         lay.addStretch(0)
         self._filling = False

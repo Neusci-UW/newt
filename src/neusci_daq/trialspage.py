@@ -346,7 +346,7 @@ class TrialsPage(QtWidgets.QWidget):
                                 "once per repeat. Random: every value once per repeat, shuffled.")
         form2.addRow("Order", self.order)
         self.gap = _spin(0.05, 3600, decimals=2, suffix=" s", step=0.5)
-        self.gap.setToolTip("From the start of one trial to the start of the next")
+        self.gap.setToolTip("From the start of one stimulus to the start of the next")
         form2.addRow("Between", self.gap)
         win_row = QtWidgets.QHBoxLayout()
         win_row.setSpacing(ROW_GAP)
@@ -386,9 +386,9 @@ class TrialsPage(QtWidgets.QWidget):
         self.btn_run = QtWidgets.QPushButton("Run protocol")
         self.btn_run.setObjectName("start")
         self.btn_pause = QtWidgets.QPushButton("Pause", checkable=True)
-        self.btn_pause.setToolTip("Hold the next trial; Resume carries on where it left off")
+        self.btn_pause.setToolTip("Hold the next stimulus; Resume carries on where it left off")
         self.btn_stop = QtWidgets.QPushButton("Stop")
-        self.btn_stop.setToolTip("End the protocol and keep the trials so far (Esc)")
+        self.btn_stop.setToolTip("End the protocol and keep the stimuli so far (Esc)")
         for b in (self.btn_run, self.btn_pause, self.btn_stop):
             run_row.addWidget(b)
         run_row.addStretch(1)
@@ -438,7 +438,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.view.set("plan")
         bar.addWidget(self.view)
         self.show_seg = _Segmented([("overlay", "Overlay"), ("averages", "Averages"), ("both", "Both")],
-                                   "Every trial, the average of each a, or both")
+                                   "Every stimulus, the average of each a, or both")
         self.show_seg.set("overlay")
         bar.addStretch(1)
         v.addLayout(bar)
@@ -476,7 +476,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.grid.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.grid.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.grid.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.grid.setToolTip("The trials each combination runs in. Click a row to preview its stimuli.")
+        self.grid.setToolTip("The stimuli each combination runs in. Click a row to preview its stimuli.")
         self.plan_note = QtWidgets.QLabel()
         self.plan_note.setWordWrap(True)
         self.preview = plot_widget()
@@ -554,11 +554,11 @@ class TrialsPage(QtWidgets.QWidget):
         for c, mode in enumerate([QtWidgets.QHeaderView.ResizeMode.ResizeToContents] * 5
                                  + [QtWidgets.QHeaderView.ResizeMode.Stretch]):
             hh.setSectionResizeMode(c, mode)
-        self.table.setToolTip("Untick a trial to leave it out of the averages and the curve. "
+        self.table.setToolTip("Untick a stimulus to leave it out of the averages and the curve. "
                               "Click a row to highlight its trace.")
         v.addWidget(self.table, 1)
         self.btn_export = QtWidgets.QPushButton("Export CSV…")
-        self.btn_export.setToolTip("Every trial's values and measurement, for a spreadsheet")
+        self.btn_export.setToolTip("Every stimulus's values and measurement, for a spreadsheet")
         v.addWidget(self.btn_export, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
 
         self.m_channel.activated.connect(self._measure_changed)
@@ -695,14 +695,14 @@ class TrialsPage(QtWidgets.QWidget):
         problems = list(c.errors) if c else []
         if not cfg.stim_monitor:
             problems.append("Record the stimulus on a spare input first (Line up on › Choose…), "
-                            "so each trial can be lined up on when the stimulus really started.")
+                            "so each stimulus can be lined up on when the stimulus really started.")
         if problems:
             self.summary.setStyleSheet(f"color: {t['error']}")
             self.summary.setText("\n".join(problems))
         else:
             mins, secs = divmod(int(round(c.duration_s)), 60)
             dur = f"{mins} min {secs} s" if mins else f"{secs} s"
-            text = (f"{c.n_trials} trials · about {dur} · highest {c.peak_v:g} V "
+            text = (f"{c.n_trials} stimuli · about {dur} · highest {c.peak_v:g} V "
                     f"(limit {cfg.stim_max_v:g} V)")
             if c.warnings:
                 text += "\n" + "\n".join(c.warnings)
@@ -769,7 +769,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.grid.setRowCount(nb)
         self.grid.setHorizontalHeaderLabels([f"a = {T.fmt(a, ua)}" for a in c.a_vals])
         ub = T.setting_info(shape, p.b.key)[1] if p.b else ""
-        self.grid.setVerticalHeaderLabels([f"b = {T.fmt(b, ub)}" for b in c.b_vals] if c.b_vals else ["Trials"])
+        self.grid.setVerticalHeaderLabels([f"b = {T.fmt(b, ub)}" for b in c.b_vals] if c.b_vals else ["Stimuli"])
         where: dict[tuple[int, int], list[int]] = {}
         for tr in self.plan:
             where.setdefault((tr.ia, tr.ib), []).append(tr.n)
@@ -829,9 +829,9 @@ class TrialsPage(QtWidgets.QWidget):
         c = self.chk
         problem = None
         if main.stim_out is None:
-            problem = "Trials needs the nidaqmx (or simulated) backend to send stimuli."
+            problem = "Protocols needs the nidaqmx (or simulated) backend to send stimuli."
         elif main.mode != "live":
-            problem = "Go back to live mode first (Blocks panel › Live): trials record new data."
+            problem = "Go back to live mode first (Trials panel › Live): protocols record new data."
         elif not cfg.stim_monitor or not any(ch.physical == cfg.stim_monitor for ch in cfg.channels):
             problem = "Record the stimulus on a spare input first (Line up on › Choose…)."
         elif not c or not c.ok:
@@ -887,7 +887,7 @@ class TrialsPage(QtWidgets.QWidget):
         self.btn_pause.setText("Resume" if on else "Pause")
         if not on:
             self._next_fire = time.monotonic()
-        self.show_message("Paused: Resume carries on with trial "
+        self.show_message("Paused: Resume carries on with stimulus "
                           f"{self.next_i + 1}" if on else "Resumed")
         self.main._update_stim_chip()
 
@@ -913,7 +913,7 @@ class TrialsPage(QtWidgets.QWidget):
         self._save_to_block()
         found = sum(1 for r in self.results.values() if r.found)
         missed = len(self.results) - found
-        msg = f"{why}: {found} of {len(self.trials)} trials recorded"
+        msg = f"{why}: {found} of {len(self.trials)} stimuli recorded"
         if missed:
             msg += (f"; {missed} couldn't be lined up (the recorded stimulus didn't match what was "
                     "sent: check the wire from the output to the input)")
@@ -928,7 +928,7 @@ class TrialsPage(QtWidgets.QWidget):
             return ""
         n = min(self.next_i, len(self.trials))
         cur = self.trials[n - 1] if n else None
-        text = f"Trial {n} of {len(self.trials)}"
+        text = f"Stimulus {n} of {len(self.trials)}"
         if cur is not None:
             text += " · " + T.describe(self._run["protocol"], self._run["shape"], cur.a, cur.b)
         return ("Paused · " if self.paused else "") + text
@@ -965,12 +965,12 @@ class TrialsPage(QtWidgets.QWidget):
             try:
                 wave, delay = T.make_wave(self._run["stimulus"], p, tr.a, tr.b, self._run["out_rate"])
             except ValueError as e:
-                self.stop_protocol(f"Stopped at trial {tr.n}: {e}")
+                self.stop_protocol(f"Stopped at stimulus {tr.n}: {e}")
                 return
-            label = (f"Trial {tr.n}/{len(self.trials)}: "
+            label = (f"Stimulus {tr.n}/{len(self.trials)}: "
                      + T.describe(p, self._run["shape"], tr.a, tr.b))
-            if not self.main.send_wave(wave, label):
-                self.stop_protocol(f"Stopped at trial {tr.n}")
+            if not self.main.send_wave(wave, label, T.trial_stimulus(self._run["stimulus"], p, tr.a, tr.b)):
+                self.stop_protocol(f"Stopped at stimulus {tr.n}")
                 return
             self.capture.sent(tr, wave, self._run["out_rate"], delay)
             self._set_row_status(tr.n, "sent")
@@ -1241,7 +1241,7 @@ class TrialsPage(QtWidgets.QWidget):
             b = QtWidgets.QPushButton(f"{T.fmt(a, ua)} · {n}", checkable=True)
             b.setChecked(ia not in self.hidden)
             b.setIcon(style.dot_icon(colors[ia]))
-            b.setToolTip("Show or hide this value of a (number = trials so far)")
+            b.setToolTip("Show or hide this value of a (number = stimuli so far)")
             b.toggled.connect(lambda on, ia=ia: self._legend_toggled(ia, on))
             self.legend.addWidget(b)
         self.legend.addStretch(1)
@@ -1375,7 +1375,7 @@ class TrialsPage(QtWidgets.QWidget):
                                            "trials": trials}))
 
     def _export(self):
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export trials", "trials.csv", "CSV (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export stimuli", "trials.csv", "CSV (*.csv)")
         if path:
             self.export_csv(path)
 
@@ -1402,7 +1402,7 @@ class TrialsPage(QtWidgets.QWidget):
                 line += ["yes" if r and r.use else "no", "yes" if r and r.found else "no",
                          "" if not np.isfinite(v) else f"{v:.6g}"]
                 w.writerow(line)
-        self.show_message(f"Exported {len(self.trials)} trials to {path.name}")
+        self.show_message(f"Exported {len(self.trials)} stimuli to {path.name}")
         return path
 
     def _save(self):

@@ -312,7 +312,7 @@ def test_cyclic_measurements_start_from_the_spike_sorting_settings(app, win):
     d.source.setCurrentText("Ch2")
     d.kind.setCurrentIndex(d.kind.findData("rate"))
     assert d.values()["level"] == pytest.approx(-0.12) and d.values()["dir"] == "below"
-    assert d.values()["dead"] == 2.0 and "from Spike Sorting" in d.settings_box.title()
+    assert d.values()["dead"] == 2.0 and "from Find action potentials" in d.settings_box.title()
     assert d.current_formula() == "60 * rate(-Ch2, 0.12, 2)"
     d.source.setCurrentText("Ch1")                                   # another channel: its own level
     assert d.values()["dir"] == "below" and d.values()["level"] == pytest.approx(0.5)
@@ -335,4 +335,4 @@ def test_spike_sorting_gives_its_threshold_as_a_level(app, win):
     raw.threshold.editingFinished.emit()
     d = raw.cyclic_defaults()
     assert d["channel"] == "Ch2" and d["dir"] == "below" and d["dead"] == raw.dead.value()
-    assert d["level"] == pytest.approx(raw._baseline() - 0.1)
+    assert d["level"] == pytest.approx(raw.baseline() - 0.1)

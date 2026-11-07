@@ -33,7 +33,7 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - live multichannel recording, with comments;
   - a Blocks panel that sorts recordings into pages by stimulus;
   - overlaid blocks and channels.
-- **Stimulator and Trials**:
+- **Stimulator and Protocols**:
   - stimuli and pulse trains, with units;
   - protocols that step a setting and measure each response.
 - **Analysis channels** (**+ Analysis channel**, like LabChart's channel calculations): pick a source
@@ -44,13 +44,15 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   - Moving windows: smoothing, RMS and envelope.
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.
 - **Analysis**:
-  - A Blocks panel beside every sub-tab: pick a page to see its average, or drag across blocks to see those trials; it also holds the stimulus and analyzed channels, Spread, and the colours of pages and trials (editable, or from a colour map).
-  - Every sub-tab has Charts checkboxes to show just the charts you want, and a ? button with an explanation and glossary. Spike Sorting and Response can swap their axes for draggable scale bars.
-  - A gain per channel, and a fit that cleans up a noisy or coarse recorded stimulus, both applied as data is read: the recordings never change.
-  - Spike Sorting: overlays and averages, with the stimulus above, with ± SD or SEM across trials; finding and sorting action potentials (tick the units to show, on every sub-tab); raster, rate, a PCA map of the units, waveforms, and size and ISI histograms.
-  - Response: the chosen blocks' channels and derivatives, PSTH and spike-triggered averages, and stimulus cycles: the repeats of any repeating stimulus overlaid by phase, with a raster per cycle, a phase histogram with vector strength, and a loop of response against stimulus.
-  - Waveforms: the action potentials as a phase plot of V against dV/dt, and against time.
-  - DataPad: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per block, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
+  - One canvas of charts: open any chart from Add chart, snap it beside or under another, stack it as a tab, or pull it onto a second screen. Spike Sorting, Response and Waveforms are built-in layouts; save your own, and lock one for a class.
+  - Any chart can be open more than once, each copy with its own name, settings and units. Pin a copy to chosen trials while the others follow the selection. The ⚙ on a chart opens its settings in a window, with a ? button for an explanation and glossary.
+  - Only the browser stays beside the charts, with a check box on every group and trial to hide it (colour maps spread across what's left) and groups you can drag or sort by frequency or amplitude: pick a group to see its average, or drag across trials to see those trials. What every chart shares opens in windows from the top bar. Data: the stimulus and analyzed channels, Spread, and the colours of groups and trials (editable, or from a colour map).
+  - An amplifier gain per channel to divide by, and a fit that cleans up a noisy or coarse recorded stimulus, both applied as data is read: the recordings never change. Trials save the stimulus settings sent, so the known waveform can be lined up with a recording.
+  - Finding and sorting action potentials, with each unit's tick, colour and opacity.
+  - Spike charts: overlays and averages, with ± SD or SEM across trials; the stimulus; raster, rate, a PCA map of the units, waveforms, and size and ISI histograms.
+  - Response charts: channels and derivatives, PSTH and spike-triggered averages, and stimulus cycles: the repeats overlaid by phase, with a raster per cycle, a phase histogram with vector strength, and a loop of response against stimulus. Charts against time can swap their axes for draggable scale bars.
+  - Waveform charts: the action potentials as a phase plot of V against dV/dt, and against time.
+- **DataPad**: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per trial, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
 - **Simulation**: a network of up to 10 integrate-and-fire cells with tunable synapses, to practise without an animal.
 - **Files**: opens and saves LabChart `.mat` exports.
 - **USB audio and video** (`pip install -e ".[audio]"` for audio):

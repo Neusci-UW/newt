@@ -88,7 +88,7 @@ class SimPage(QtWidgets.QWidget):
 
         box = QtWidgets.QGroupBox("⚡ Stimulator → network: which cells the stimulus drives")
         v = QtWidgets.QVBoxLayout(box)
-        hint = QtWidgets.QLabel("Whatever the Stimulator or Trials page sends is injected as a current into the "
+        hint = QtWidgets.QLabel("Whatever the Stimulator or Protocols tab sends is injected as a current into the "
                                 "ticked cells. Strength: the depolarization from a 1 V, 1 ms pulse.")
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -102,7 +102,7 @@ class SimPage(QtWidgets.QWidget):
         self.stim_wire.setWordWrap(True)
         self.btn_record_stim = QtWidgets.QPushButton()
         self.btn_record_stim.setToolTip("Record the stimulus on a spare input (a channel named Stim). "
-                                        "Trials needs it to line the responses up with each stimulus")
+                                        "Protocols needs it to line the responses up with each stimulus")
         self.btn_open_stim = QtWidgets.QPushButton("Open the Stimulator")
         wire.addWidget(self.stim_wire, 1)
         wire.addWidget(self.btn_record_stim)
@@ -294,7 +294,7 @@ class SimPage(QtWidgets.QWidget):
             self.btn_record_stim.setVisible(False)
         else:
             spare = self._spare_input()
-            self.stim_wire.setText(f"{drives} It isn't recorded on an input yet: Trials needs that.")
+            self.stim_wire.setText(f"{drives} It isn't recorded on an input yet: Protocols needs that.")
             self.btn_record_stim.setText(f"Record it on {spare}" if spare else "No spare input")
             self.btn_record_stim.setEnabled(bool(spare))
             self.btn_record_stim.setVisible(True)

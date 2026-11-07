@@ -129,8 +129,8 @@ class CameraPanel(QtWidgets.QFrame):
         self.btn_refresh = QtWidgets.QToolButton(text="↻")
         self.btn_refresh.setToolTip("Look for cameras again")
         self.btn_refresh.setAccessibleName("Look for cameras again")
-        self.record_video = QtWidgets.QCheckBox("Record video with each block")
-        self.record_video.setToolTip("Save a video next to each block while Record is on")
+        self.record_video = QtWidgets.QCheckBox("Record video with each trial")
+        self.record_video.setToolTip("Save a video next to each trial while Record is on")
         self.record_video.setChecked(True)
         pick = QtWidgets.QHBoxLayout()
         pick.addWidget(self.camera_box, 1)
@@ -153,7 +153,7 @@ class CameraPanel(QtWidgets.QFrame):
         row = QtWidgets.QHBoxLayout()
         row.addWidget(QtWidgets.QLabel("Video offset"))
         self.nudge = QtWidgets.QDoubleSpinBox(minimum=-10, maximum=10, decimals=3, singleStep=0.01, suffix=" s")
-        self.nudge.setToolTip("Shift the video against the traces if they're out of step (saved with the block)")
+        self.nudge.setToolTip("Shift the video against the traces if they're out of step (saved with the trial)")
         row.addWidget(self.nudge)
         lay.addLayout(row)
         self.message = QtWidgets.QLabel()
@@ -282,7 +282,7 @@ class CameraPanel(QtWidgets.QFrame):
         self._say_live(name)
 
     def _say_live(self, name: str) -> None:
-        self.message.setText(f"{name}: live. Recorded with each block." if self.record_video.isChecked()
+        self.message.setText(f"{name}: live. Recorded with each trial." if self.record_video.isChecked()
                              else f"{name}: live (not recorded).")
 
     # -- AmScope cameras ---------------------------------------------------------------------
@@ -314,7 +314,7 @@ class CameraPanel(QtWidgets.QFrame):
         if self.amcam is None or index < 0:
             return
         if self._block is not None and self.live:
-            self.message.setText("Change the size between blocks, not while recording one.")
+            self.message.setText("Change the size between trials, not while recording one.")
             self.size_box.setCurrentIndex(self.amcam.resolution())
             return
         try:
@@ -405,7 +405,7 @@ class CameraPanel(QtWidgets.QFrame):
         self._block = Path(block) if block else None
         found = video_of(block) if block else None
         if found is None:
-            self.message.setText("No video was recorded with this block.")
+            self.message.setText("No video was recorded with this trial.")
             if self.player is not None:
                 self.player.setSource(QtCore.QUrl())
             return False

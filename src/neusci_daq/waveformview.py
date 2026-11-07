@@ -1,148 +1,138 @@
-"""The Waveforms sub-tab of Analysis: the shape of the action potentials found on the
-Spike Sorting tab, as a phase plot of V against dV/dt, and against time.
+"""The shape of the action potentials found, as a phase plot of V against dV/dt, and
+against time.
 """
 from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from pyqtgraph.Qt import QtGui, QtWidgets
 
 from . import analysis as A
-from . import style, theme
-from .helpview import add_help
+from .chartbase import Chart
 from .plotzoom import plot_widget
 from .stimwindow import UnitSpinBox
-from .viewkit import ChartToggles, View, even_out, label_axis, scroll_column, style_plot
+from .viewkit import label_axis
 
 MAX_SHOWN = 150                    # spikes of each unit drawn behind its average
 
 
-class WaveformView(View):
-    def __init__(self, page):
-        super().__init__(page)
-        outer = QtWidgets.QHBoxLayout(self)
-        outer.setContentsMargins(0, 8, 0, 0)
-        outer.setSpacing(12)
+class ShapeChart(Chart):
+    group = "Waveforms"
+    help = "waveforms"
+    title = ""
 
-        side = QtWidgets.QWidget()
-        side.setMaximumWidth(360)
-        left = QtWidgets.QVBoxLayout(side)
-        left.setContentsMargins(0, 0, 0, 0)
-        left.setSpacing(10)
-        box = QtWidgets.QGroupBox("Action potentials")
-        f = QtWidgets.QFormLayout(box)
+    def __init__(self, page, cid: str = ""):
+        super().__init__(page, cid)
+        self.plot = plot_widget()
+        p = self.plot.getPlotItem()
+        p.setTitle(self.title)
+        p.showGrid(x=True, y=True, alpha=0.2)
+        self.plot.setMinimumHeight(40)
+        self.body.addWidget(self.plot)
         self.each = QtWidgets.QCheckBox("Each spike")
         self.each.setChecked(True)
         self.each.setToolTip(f"Draw the spikes behind each unit's average (up to {MAX_SHOWN} of each)")
+        self.field("each", "", self.each)
         self.smooth = UnitSpinBox(0, 5, "ms", step=0.05)
         self.smooth.setValue(0.1)
         self.smooth.setToolTip("Differentiating amplifies noise: average over this long first (0 = none)")
-        f.addRow(self.each)
-        f.addRow("Smooth for dV/dt", self.smooth)
-        left.addWidget(box)
-        add_help(box, "waveforms")
-        self.message = QtWidgets.QLabel()
-        self.message.setWordWrap(True)
+        self.field("smooth", "Smooth for dV/dt", self.smooth)
+        self.apply_theme(self._mode)
 
-        right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        self.phase = plot_widget()
-        self.phase.getPlotItem().setTitle("V against dV/dt")
-        column = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self.volts = plot_widget()
-        self.volts.getPlotItem().setTitle("V")
-        self.slope = plot_widget()
-        self.slope.getPlotItem().setTitle("dV/dt")
-        self.slope.getPlotItem().setXLink(self.volts)
-        self.slope.getPlotItem().setLabel("bottom", "ms from the peak")
-        self.volts.getPlotItem().setLabel("bottom", "ms from the peak")
-        for pw in (self.phase, self.volts, self.slope):
-            pw.getPlotItem().showGrid(x=True, y=True, alpha=0.2)
-        column.addWidget(self.volts)
-        column.addWidget(self.slope)
-        right.addWidget(self.phase)
-        right.addWidget(column)
-        right.setStretchFactor(0, 3)
-        right.setStretchFactor(1, 2)
-        self._column, self._right = column, right
-        self.charts = ChartToggles(self.main.settings, "waveforms", [
-            ("V against dV/dt", "The phase plot: how fast the voltage changes at each voltage", self.phase),
-            ("V", "The spikes against time", self.volts),
-            ("dV/dt", "How fast the voltage changes through each spike", self.slope)], self._charts_changed)
-        left.addWidget(self.charts)
-        left.addWidget(self.message)
-        left.addStretch(1)
-        outer.addWidget(scroll_column(side))
-        outer.addWidget(right, 1)
-        self.charts.apply()
+    def plots(self) -> list:
+        return [self.plot]
 
-        self.each.toggled.connect(lambda *_: self.redraw())
-        self.smooth.valueChanged.connect(lambda *_: self.redraw())
-        self.apply_theme(style.LIGHT)
+    def xy(self, t: np.ndarray, v: np.ndarray, d: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """What it plots of the time, voltage and slope of a spike."""
+        raise NotImplementedError
 
-    def _charts_changed(self) -> None:
-        on = self.charts.is_on
-        self._column.setVisible(on("V") or on("dV/dt"))
-        even_out(self._right)
-        even_out(self._column)
+    def labels(self, p: pg.PlotItem, name: str, unit: str) -> None:
+        raise NotImplementedError
 
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        self.redraw()
+    def no_events(self) -> str:
+        return self.title
 
-    def redraw(self) -> None:
-        plots = [pw.getPlotItem() for pw in (self.phase, self.volts, self.slope)]
-        for p in plots:
-            p.clear()
-        pp, vp, sp = plots
-        ev = self.page.events
+    def draw(self) -> None:
+        p = self.plot.getPlotItem()
+        p.clear()
+        ev = self.events()
         if ev is None or not len(ev.t):
-            pp.setTitle("V against dV/dt: find action potentials first", color=self._fg())
-            vp.setTitle("V", color=self._fg())
-            sp.setTitle("dV/dt", color=self._fg())
+            p.setTitle(self.no_events(), color=self._fg())
             return
         fs = 1000 / float(np.median(np.diff(ev.wave_t_ms)))
         total = 0
-        for u in sorted(self.page.raw.shown_units()):
+        for u in sorted(self.units()):
             w = ev.waves[ev.unit == u]
             if not len(w):
                 continue
             total += len(w)
-            color = self.page.raw.color_of(u)
+            color = self.finder.qcolor(u)
             if self.each.isChecked():
                 self._draw_each(w[::max(1, -(-len(w) // MAX_SHOWN))], ev.wave_t_ms, fs, color)
             mean = w.mean(0)
-            slope = A.derivative(mean, fs, 1, self.smooth.value())
-            pen = pg.mkPen(color, width=2.5)
-            pp.plot(mean, slope, pen=pen)
-            vp.plot(ev.wave_t_ms, mean, pen=pen)
-            sp.plot(ev.wave_t_ms, slope, pen=pen)
-        name = self.page.raw.channel.currentText()
-        unit = self.page.unit_of(name)
-        label_axis(pp, "bottom", f"{name} from baseline", unit)
-        label_axis(pp, "left", "dV/dt", f"{unit}/s")
-        label_axis(vp, "left", name, unit)
-        label_axis(sp, "left", "dV/dt", f"{unit}/s")
-        pp.setTitle(f"V against dV/dt ({total} spikes)", color=self._fg())
-        vp.setTitle("V", color=self._fg())
-        sp.setTitle("dV/dt", color=self._fg())
-        for p in plots:
-            p.enableAutoRange()
+            x, y = self.xy(ev.wave_t_ms, mean, A.derivative(mean, fs, 1, self.smooth.value()))
+            p.plot(x, y, pen=pg.mkPen(color, width=2.5))
+        name = self.finder.channel.currentText()
+        self.labels(p, name, self.page.unit_of(name))
+        p.setTitle(self.titled(total), color=self._fg())
+        p.enableAutoRange()
 
-    def _draw_each(self, w: np.ndarray, t: np.ndarray, fs: float, color: str) -> None:
-        """Spikes behind the average, each kind of plot as one item."""
+    def titled(self, total: int) -> str:
+        return self.title
+
+    def _draw_each(self, w: np.ndarray, t: np.ndarray, fs: float, color) -> None:
+        """Spikes behind the average, as one item."""
         c = QtGui.QColor(color)
-        c.setAlpha(45)
-        pen = pg.mkPen(c, width=1)
+        c.setAlpha(round(45 * c.alphaF()))
         d = np.array([A.derivative(y, fs, 1, self.smooth.value()) for y in w])
         gap = np.full((len(w), 1), np.nan)
-        T = np.hstack((np.broadcast_to(t, w.shape), gap)).ravel()
-        V, D = np.hstack((w, gap)).ravel(), np.hstack((d, gap)).ravel()
-        self.phase.getPlotItem().addItem(pg.PlotCurveItem(V, D, connect="finite", pen=pen))
-        self.volts.getPlotItem().addItem(pg.PlotCurveItem(T, V, connect="finite", pen=pen))
-        self.slope.getPlotItem().addItem(pg.PlotCurveItem(T, D, connect="finite", pen=pen))
+        x, y = self.xy(np.broadcast_to(t, w.shape), w, d)
+        self.plot.getPlotItem().addItem(pg.PlotCurveItem(np.hstack((x, gap)).ravel(), np.hstack((y, gap)).ravel(),
+                                                         connect="finite", pen=pg.mkPen(c, width=1)))
 
-    def apply_theme(self, mode: str) -> None:
-        self._mode = mode
-        th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
-        for pw in (self.phase, self.volts, self.slope):
-            style_plot(pw, th)
+
+class PhasePlotChart(ShapeChart):
+    kind = "V against dV/dt"
+    tip = "The phase plot: how fast the voltage changes at each voltage"
+    title = "V against dV/dt"
+
+    def xy(self, t, v, d):
+        return v, d
+
+    def labels(self, p, name, unit):
+        label_axis(p, "bottom", f"{name} from baseline", unit)
+        label_axis(p, "left", "dV/dt", f"{unit}/s")
+
+    def no_events(self) -> str:
+        return "V against dV/dt: find action potentials first"
+
+    def titled(self, total: int) -> str:
+        return f"V against dV/dt ({total} spikes)"
+
+
+class VoltsChart(ShapeChart):
+    kind = "V"
+    tip = "The spikes against time"
+    link = "spike"
+    title = "V"
+
+    def xy(self, t, v, d):
+        return t, v
+
+    def labels(self, p, name, unit):
+        p.setLabel("bottom", "ms from the peak")
+        label_axis(p, "left", name, unit)
+
+
+class SlopeChart(ShapeChart):
+    kind = "dV/dt"
+    tip = "How fast the voltage changes through each spike"
+    link = "spike"
+    title = "dV/dt"
+
+    def xy(self, t, v, d):
+        return t, d
+
+    def labels(self, p, name, unit):
+        p.setLabel("bottom", "ms from the peak")
+        label_axis(p, "left", "dV/dt", f"{unit}/s")

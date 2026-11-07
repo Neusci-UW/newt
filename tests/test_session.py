@@ -276,7 +276,7 @@ def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp
         pump(app, 0.3)
         assert not win.blocks_panel.tree.isEnabled()                        # not while recording
         win.btn_rec.setChecked(False)
-    assert _panel(win) == [("live", []), (("page", "Blocks"), [("block", 0), ("block", 1)])]
+    assert _panel(win) == [("live", []), (("page", "All trials"), [("block", 0), ("block", 1)])]
     assert win.blocks_panel.stim_ch.isEnabled()
     sess = win.session_dir
     win._activate(("block", 1))                # the second block
@@ -295,7 +295,7 @@ def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp
     win.btn_run.setChecked(False)
     assert win.session_dir == sess and len(win.blocks) == 3 and len(_panel(win)[1][1]) == 3
     win.open_session(sess)                                           # a plain Open isn't "browsing"
-    assert _panel(win)[0][0] == ("page", "Blocks")
+    assert _panel(win)[0][0] == ("page", "All trials")
     win.back_to_live()
     assert win.session_dir is None and not win.blocks                # so it starts afresh, as before
     win.close()
@@ -313,7 +313,7 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
         pump(app, 0.25)
         win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
-    win.rename_page("Blocks", "Baseline")
+    win.rename_page("All trials", "Baseline")
     texts = [it.text(0) for it in win.blocks_panel.items()]
     assert texts[1].startswith("Baseline  (3)") and texts[2].startswith("Baseline 1")
     assert texts[4].startswith("Baseline 3")
@@ -321,7 +321,7 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
     texts = [it.text(0) for it in win.blocks_panel.items()]
     assert any(t.startswith("Drug  (1)") for t in texts) and any(t.startswith("Drug 1") for t in texts)
     saved = pages.load(win.session_dir)
-    assert saved["renamed"] == {"Blocks": "Baseline"} and saved["moved"] == {"block_003": "Drug"}
+    assert saved["renamed"] == {"All trials": "Baseline"} and saved["moved"] == {"block_003": "Drug"}
     win.rename_page("Drug", "Drug A")                                # its block follows
     assert pages.load(win.session_dir)["moved"] == {"block_003": "Drug A"}
     win.move_block(2, "Baseline")                                    # back home: no longer "moved"
@@ -331,7 +331,7 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
     win.reset_pages()                                                # forget names and moves
     saved = pages.load(win.session_dir)
     assert saved["renamed"] == {} and saved["moved"] == {}
-    assert [it.text(0) for it in win.blocks_panel.items()][1].startswith("Blocks  (3)")
+    assert [it.text(0) for it in win.blocks_panel.items()][1].startswith("All trials  (3)")
     assert not win.blocks_panel.btn_reset.isEnabled()
     win.close()
 
@@ -359,7 +359,7 @@ def test_selected_blocks_are_overlaid(app, settings, tmp_path):
     win.step_block(1)                                                # stepping keeps the overlay
     assert len(win._overlay_items) == len(win.plots)
     win.blocks_panel.tree.clearSelection()
-    _item(win, ("page", "Blocks")).setSelected(True)                 # a whole page
+    _item(win, ("page", "All trials")).setSelected(True)                 # a whole page
     pump(app, 0.05)
     assert win._overlay_sel == [0, 1, 2]
     win.blocks_panel.tree.clearSelection()

@@ -120,6 +120,13 @@ The top picks for a teaching lab, roughly in order:
 
 Notes to act on later; nothing here has been changed yet.
 
-- **Stimulus: save its settings with each block.** Blocks keep only approximate notes of what was
-  sent. Saving the stimulus's settings would let Argus line up the known waveform with a recording,
-  fitting just its timing and size, as the first way of finding repeats and as another stimulus fit.
+- **Data: split into Channels and Groups.** A Channels… window for Stimulus channel, Analyze, Amplifier
+  Gain and Stim fit. A Groups… window for the group and trial colours, Spread and Reset groups, opened
+  from a button by the browser.
+
+- **Charts: zoom and move buttons.** On each chart, + and − zoom and arrows move, for each axis: + − ▲ ▼ by
+  the y axis at the top left, + − ◀ ▶ by the x axis at the bottom right. Each click is a fixed step, and
+  holding repeats. Linked charts move together. Show them only while the mouse is over the chart.
+
+- **Opening: show the logo.** Show the Argus logo in a splash screen while the program starts, until its
+  window is ready.

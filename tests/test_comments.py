@@ -258,7 +258,7 @@ def test_comment_lines_match_the_listed_times(app, win):
 
 def test_axis_keeps_counting_after_stop_recording_and_resets_on_next_record(app, win):
     start_recording(app, win)
-    comment(win, app, "first block")
+    comment(win, app, "first trial")
     pump(app, 0.2)
     win.btn_rec.setChecked(False)
     end_of_block = axis_end(win)

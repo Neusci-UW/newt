@@ -60,7 +60,7 @@ def _matrix(d: dict, key: str, n_ch: int, n_blk: int, fill=np.nan) -> np.ndarray
         return np.tile(a.reshape(1, n_blk), (n_ch, 1))
     if a.size == 1:
         return np.full((n_ch, n_blk), float(a.reshape(-1)[0]))
-    raise MatError(f"'{key}' has {a.size} values; expected {n_ch} channels × {n_blk} blocks.")
+    raise MatError(f"'{key}' has {a.size} values; expected {n_ch} channels × {n_blk} trials.")
 
 
 def _datenum(v: float) -> str | None:
@@ -96,7 +96,7 @@ def read_labchart_mat(path: str | Path) -> list[dict]:
     starts = np.atleast_2d(np.asarray(d["datastart"], dtype=float))
     n_ch, n_blk = starts.shape
     if n_ch == 0 or n_blk == 0:
-        raise MatError(f"{path.name} has no blocks.")
+        raise MatError(f"{path.name} has no trials.")
     ends = _matrix(d, "dataend", n_ch, n_blk)
     titles = _strings(d.get("titles"))
     titles = (titles + [f"Channel {i + 1}" for i in range(len(titles), n_ch)])[:n_ch]
@@ -124,10 +124,10 @@ def read_labchart_mat(path: str | Path) -> list[dict]:
             if not (np.isfinite(s) and np.isfinite(e)) or s < 1 or e < s:
                 continue                            # channel off in this block
             if e > data.size:
-                raise MatError(f"Block {b + 1}, {titles[c]}: dataend {int(e)} is past the end of the data.")
+                raise MatError(f"Trial {b + 1}, {titles[c]}: dataend {int(e)} is past the end of the data.")
             fs = rates[c, b] if np.isfinite(rates[c, b]) and rates[c, b] > 0 else tick[b]
             if not (np.isfinite(fs) and fs > 0):
-                raise MatError(f"Block {b + 1}, {titles[c]}: no sample rate in the file.")
+                raise MatError(f"Trial {b + 1}, {titles[c]}: no sample rate in the file.")
             chans.append((c, np.asarray(data[int(s) - 1:int(e)], dtype=np.float32), float(fs)))
         if not chans:
             continue
@@ -167,7 +167,7 @@ def read_labchart_mat(path: str | Path) -> list[dict]:
             "source_block": b + 1,
         })
     if not blocks:
-        raise MatError(f"{path.name} has no data in any block.")
+        raise MatError(f"{path.name} has no data in any trial.")
     return blocks
 
 
@@ -208,7 +208,7 @@ def import_mat(path: str | Path, dest_root: str | Path) -> tuple[Path, list[str]
                 if nm not in colors:
                     colors[nm] = next_color(colors.values())
             _write_block(folder / f"block_{i:03d}.h5", b, [normalize_color(colors[nm]) for nm in b["names"]], path)
-            notes += [f"Block {i}: {n}" for n in b["notes"]]
+            notes += [f"Trial {i}: {n}" for n in b["notes"]]
     except Exception:
         for p in folder.iterdir():
             p.unlink()
@@ -239,4 +239,4 @@ def _write_block(path: Path, b: dict, colors: list[str], source: Path) -> None:
         a["scale"] = [1.0] * n                 # the .mat holds values already in their units
         a["offset"] = [0.0] * n
         a["colors"] = colors
-        a["imported_from"] = f"{source.name}, block {b['source_block']}"
+        a["imported_from"] = f"{source.name}, trial {b['source_block']}"

@@ -77,12 +77,18 @@ canvas{display:block;width:100%;height:auto;border-radius:6px}
 .echip.na{color:var(--na);background:color-mix(in srgb,var(--na) 12%,transparent)}
 .echip.cl{color:var(--cl);background:color-mix(in srgb,var(--cl) 12%,transparent)}
 .ion .l3{font-size:11.5px;color:var(--muted)}
-.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
-.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:12px}
+.lgrp{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.lgrp .sect-title{margin-bottom:2px}
+.litem{display:flex;align-items:center;gap:10px;font-size:15px;line-height:1.3}
+.litem small{display:block;font-size:12.5px;color:var(--muted)}
+.lion{width:20px;height:20px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--surface);font:700 14px var(--font-mono);line-height:1}
+.lion.k{background:var(--k)}.lion.na{background:var(--na)}.lion.cl{background:var(--cl)}.lion.a{background:var(--a);width:24px;height:24px}
+.lpump{width:26px;height:18px;border-radius:5px;background:var(--accent);flex:none}
+.lbar{height:14px;border-radius:4px;border:1px solid var(--line);background:linear-gradient(90deg,var(--neg),transparent 50%,var(--pos))}
+.lticks{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-top:4px}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
 .dot.k{background:var(--k)}.dot.na{background:var(--na)}.dot.cl{background:var(--cl)}.dot.a{background:var(--a);width:12px;height:12px}
-.dot.pump{background:var(--accent);border-radius:3px}
-.dot.pos{background:var(--pos);border-radius:2px}.dot.neg{background:var(--neg);border-radius:2px}
 .sect-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
 .caption{font-size:13px;color:var(--muted);margin:0;max-width:90ch}
 table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
@@ -130,8 +136,7 @@ hr{border:0;border-top:1px solid var(--line);margin:0}
 table.conc{font-size:13.5px}
 table.conc th,table.conc td{padding:4px 6px}
 table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);text-align:right}
-.ghk{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:28px;align-items:start}
-@media (max-width:1000px){.ghk{grid-template-columns:1fr}}
+.ghk{display:flex;flex-direction:column;gap:20px}
 .ghk h2{font-size:20px;font-weight:600;margin:0 0 4px;text-wrap:balance}
 .ghk h3{font-size:15px;font-weight:600;margin:18px 0 4px}
 .deriv{max-width:72ch}
@@ -149,7 +154,10 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 .gr{display:grid;grid-template-columns:52px minmax(0,1fr) 78px;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .gr input[type=range]{width:100%;accent-color:var(--accent)}
 .gr output{font-family:var(--font-mono);font-size:12.5px;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.calc{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px}
+.calc{display:flex;flex-direction:column;gap:12px}
+.calc-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:28px;align-items:start}
+@media (max-width:1000px){.calc-body{grid-template-columns:1fr}}
+.calc-out{display:flex;flex-direction:column;gap:12px}
 .calc .grid{display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:6px 8px;align-items:center;font-size:13.5px}
 .calc .grid .h{color:var(--muted);font-size:12px;font-weight:500;text-align:right}
 .calc input{width:100%;font:inherit;font-family:var(--font-mono);font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);text-align:right}
@@ -195,15 +203,27 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       <output id="speedo" for="speed"></output>
       <span class="runhint">slide left for slow motion: below 1 step per frame, ions glide between steps</span>
     </div>
-    <div class="legend">
-      <span><i class="dot k"></i>K⁺</span>
-      <span><i class="dot na"></i>Na⁺</span>
-      <span><i class="dot cl"></i>Cl⁻</span>
-      <span><i class="dot a"></i>A⁻ impermeant anions</span>
-      <span><i class="dot pump"></i>Na⁺/K⁺ pump</span>
-      <span><i class="dot neg"></i><i class="dot pos"></i>charge density: each ion's charge spread as a Gaussian and summed</span>
+    <div class="legend" aria-label="Key">
+      <div class="lgrp">
+        <span class="sect-title">Ions</span>
+        <div class="litem"><span class="lion k">+</span><span>K⁺ <small>potassium</small></span></div>
+        <div class="litem"><span class="lion na">+</span><span>Na⁺ <small>sodium</small></span></div>
+        <div class="litem"><span class="lion cl">−</span><span>Cl⁻ <small>chloride</small></span></div>
+        <div class="litem"><span class="lion a">−</span><span>A⁻ <small>impermeant anions</small></span></div>
+      </div>
+      <div class="lgrp">
+        <span class="sect-title">Membrane</span>
+        <div class="litem"><svg width="26" height="22" viewBox="0 0 26 22" aria-hidden="true" style="color:var(--k);flex:none"><rect x="1" y="1" width="24" height="20" rx="6" fill="currentColor" fill-opacity="0.24" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="7" width="24" height="8" fill="var(--surface)"/></svg><span>Leak channel <small>always open; coloured by the ion it passes</small></span></div>
+        <div class="litem"><span class="lpump"></span><span>Na⁺/K⁺ pump <small>3 Na⁺ out, 2 K⁺ in</small></span></div>
+        <div class="litem"><svg width="26" height="22" viewBox="0 0 26 22" aria-hidden="true" style="color:var(--na);flex:none"><circle cx="13" cy="11" r="8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Ring <small>an ion that just crossed</small></span></div>
+      </div>
+      <div class="lgrp">
+        <span class="sect-title">Charge map</span>
+        <div><div class="lbar"></div><div class="lticks"><span>net −</span><span>0</span><span>net +</span></div></div>
+        <span class="caption">Each ion's charge spread as a Gaussian and summed.</span>
+      </div>
     </div>
-    <p class="caption">Every channel is a leak channel: always open, with a selectivity filter at its outer mouth. The sliders set how many of each there are. Rings mark ions that just crossed.</p>
+    <p class="caption">Each channel has a selectivity filter at its outer mouth. The sliders set how many of each there are.</p>
   </section>
   <aside class="side">
     <div class="card panel">
@@ -288,6 +308,51 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       <p>The GHK voltage equation gives the membrane potential at which several permeant ions together carry zero net current. It reduces to the Nernst equation when only one ion can cross.</p>
       <div class="eq">\[ V_m \;=\; \frac{RT}{F}\,\ln\!\left(\frac{P_\mathrm{K}[\mathrm{K}^+]_o + P_\mathrm{Na}[\mathrm{Na}^+]_o + P_\mathrm{Cl}[\mathrm{Cl}^-]_i}{P_\mathrm{K}[\mathrm{K}^+]_i + P_\mathrm{Na}[\mathrm{Na}^+]_i + P_\mathrm{Cl}[\mathrm{Cl}^-]_o}\right) \]</div>
 
+    </div>
+
+    <div class="calc card">
+      <span class="sect-title">GHK calculator</span>
+      <div class="calc-body">
+        <div class="gsliders">
+          <div class="gion">
+            <div class="gh"><i class="dot k"></i> K⁺</div>
+            <div class="gr"><label for="gPK">P</label><input type="range" id="gPK" data-log min="-3" max="1" step="0.01" value="0.0000"><output id="gPKo" for="gPK"></output></div>
+            <div class="gr"><label for="gKi">[K⁺]ᵢ</label><input type="range" id="gKi" data-log min="-1" max="3" step="0.005" value="2.1461"><output id="gKio" for="gKi"></output></div>
+            <div class="gr"><label for="gKo">[K⁺]ₒ</label><input type="range" id="gKo" data-log min="-1" max="3" step="0.005" value="0.6990"><output id="gKoo" for="gKo"></output></div>
+          </div>
+          <div class="gion">
+            <div class="gh"><i class="dot na"></i> Na⁺</div>
+            <div class="gr"><label for="gPNa">P</label><input type="range" id="gPNa" data-log min="-3" max="1" step="0.01" value="-1.3979"><output id="gPNao" for="gPNa"></output></div>
+            <div class="gr"><label for="gNai">[Na⁺]ᵢ</label><input type="range" id="gNai" data-log min="-1" max="3" step="0.005" value="1.1461"><output id="gNaio" for="gNai"></output></div>
+            <div class="gr"><label for="gNao">[Na⁺]ₒ</label><input type="range" id="gNao" data-log min="-1" max="3" step="0.005" value="2.1569"><output id="gNaoo" for="gNao"></output></div>
+          </div>
+          <div class="gion">
+            <div class="gh"><i class="dot cl"></i> Cl⁻</div>
+            <div class="gr"><label for="gPCl">P</label><input type="range" id="gPCl" data-log min="-3" max="1" step="0.01" value="-0.3468"><output id="gPClo" for="gPCl"></output></div>
+            <div class="gr"><label for="gCli">[Cl⁻]ᵢ</label><input type="range" id="gCli" data-log min="-1" max="3" step="0.005" value="1.0212"><output id="gClio" for="gCli"></output></div>
+            <div class="gr"><label for="gClo">[Cl⁻]ₒ</label><input type="range" id="gClo" data-log min="-1" max="3" step="0.005" value="2.1717"><output id="gCloo" for="gClo"></output></div>
+          </div>
+          <div class="gion">
+            <div class="gr"><label for="gT">T</label><input type="range" id="gT" min="0" max="45" step="1" value="25"><output id="gTo" for="gT"></output></div>
+            <span class="caption" id="gRTF"></span>
+          </div>
+        </div>
+        <div class="calc-out">
+          <div class="out"><span class="big" id="gV">—</span><span class="caption">V<sub>m</sub> from GHK</span></div>
+          <div class="es"><span>E<sub>K</sub> <b id="gEK">—</b></span><span>E<sub>Na</sub> <b id="gENa">—</b></span><span>E<sub>Cl</sub> <b id="gECl">—</b></span></div>
+          <canvas id="gChart" aria-label="Current-voltage lines for each ion and their sum"></canvas>
+          <p class="caption" id="gWeights"></p>
+          <p class="caption">I/V curves. Each ion's current is a straight line through its Nernst potential (dot), with slope equal to its chord conductance at rest, worked out from GHK. The bold line is their sum; where it crosses zero, no net current flows, which is the GHK resting potential: a conductance-weighted average of the Nernst potentials.</p>
+          <div class="btns">
+            <button id="gFromSim">Copy from simulation</button>
+            <button id="gToSim">Send to simulation</button>
+            <button id="gDefaults">Squid axon defaults</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="deriv">
       <h3>Definitions</h3>
       <dl class="defs">
         <dt>\(V_m\)</dt><dd>membrane potential, \(\phi_{\text{in}} - \phi_{\text{out}}\)</dd>
@@ -333,44 +398,6 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       <h3>How the simulation maps onto this</h3>
       <p>Inside each channel the potential falls linearly across the membrane, which is assumption 2. Permeability is proportional to the number of channels for that ion, since every channel is always open. The simulation never uses the formula to move ions; it uses the formula only to draw the GHK reference line.</p>
     </div>
-
-    <div class="calc card">
-      <span class="sect-title">GHK calculator</span>
-      <div class="gsliders">
-        <div class="gion">
-          <div class="gh"><i class="dot k"></i> K⁺</div>
-          <div class="gr"><label for="gPK">P</label><input type="range" id="gPK" data-log min="-3" max="1" step="0.01" value="0.0000"><output id="gPKo" for="gPK"></output></div>
-          <div class="gr"><label for="gKi">[K⁺]ᵢ</label><input type="range" id="gKi" data-log min="-1" max="3" step="0.005" value="2.1461"><output id="gKio" for="gKi"></output></div>
-          <div class="gr"><label for="gKo">[K⁺]ₒ</label><input type="range" id="gKo" data-log min="-1" max="3" step="0.005" value="0.6990"><output id="gKoo" for="gKo"></output></div>
-        </div>
-        <div class="gion">
-          <div class="gh"><i class="dot na"></i> Na⁺</div>
-          <div class="gr"><label for="gPNa">P</label><input type="range" id="gPNa" data-log min="-3" max="1" step="0.01" value="-1.3979"><output id="gPNao" for="gPNa"></output></div>
-          <div class="gr"><label for="gNai">[Na⁺]ᵢ</label><input type="range" id="gNai" data-log min="-1" max="3" step="0.005" value="1.1461"><output id="gNaio" for="gNai"></output></div>
-          <div class="gr"><label for="gNao">[Na⁺]ₒ</label><input type="range" id="gNao" data-log min="-1" max="3" step="0.005" value="2.1569"><output id="gNaoo" for="gNao"></output></div>
-        </div>
-        <div class="gion">
-          <div class="gh"><i class="dot cl"></i> Cl⁻</div>
-          <div class="gr"><label for="gPCl">P</label><input type="range" id="gPCl" data-log min="-3" max="1" step="0.01" value="-0.3468"><output id="gPClo" for="gPCl"></output></div>
-          <div class="gr"><label for="gCli">[Cl⁻]ᵢ</label><input type="range" id="gCli" data-log min="-1" max="3" step="0.005" value="1.0212"><output id="gClio" for="gCli"></output></div>
-          <div class="gr"><label for="gClo">[Cl⁻]ₒ</label><input type="range" id="gClo" data-log min="-1" max="3" step="0.005" value="2.1717"><output id="gCloo" for="gClo"></output></div>
-        </div>
-        <div class="gion">
-          <div class="gr"><label for="gT">T</label><input type="range" id="gT" min="0" max="45" step="1" value="25"><output id="gTo" for="gT"></output></div>
-          <span class="caption" id="gRTF"></span>
-        </div>
-      </div>
-      <div class="out"><span class="big" id="gV">—</span><span class="caption">V<sub>m</sub> from GHK</span></div>
-      <div class="es"><span>E<sub>K</sub> <b id="gEK">—</b></span><span>E<sub>Na</sub> <b id="gENa">—</b></span><span>E<sub>Cl</sub> <b id="gECl">—</b></span></div>
-      <canvas id="gChart" aria-label="Current-voltage lines for each ion and their sum"></canvas>
-      <p class="caption" id="gWeights"></p>
-      <p class="caption">I/V curves. Each ion's current is a straight line through its Nernst potential (dot), with slope equal to its chord conductance at rest, worked out from GHK. The bold line is their sum; where it crosses zero, no net current flows, which is the GHK resting potential: a conductance-weighted average of the Nernst potentials.</p>
-      <div class="btns">
-        <button id="gFromSim">Copy from simulation</button>
-        <button id="gToSim">Send to simulation</button>
-        <button id="gDefaults">Squid axon defaults</button>
-      </div>
-    </div>
   </section>
 
 <section class="notes card">
@@ -411,8 +438,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   const D_PORE = 2.0, D_BULK = 24.0, D_RAMP = 70;
   const Dx = new Float32Array(W + 1), dDx = new Float32Array(W + 1);
   const NAMES = ['K⁺', 'Na⁺', 'Cl⁻', 'A⁻'];
-  const DEF_IN = [140, 14, 10], DEF_OUT = [5, 145, 110]; // mM: K, Na, Cl, mammalian neuron (A⁻ fills in for neutrality)
-  const DEFAULTS = {
+  const DEFAULTS = {   // mM and mS/cm²: K, Na, Cl (A⁻ fills in for neutrality)
     mammal: { cin: [140, 14, 10], cout: [5, 145, 110], g: [0.30, 0.012, 0.10] },
     // squid seawater also has Ca²⁺ and Mg²⁺; with monovalent ions only, outside Cl⁻ is capped at K⁺ + Na⁺ (460 mM)
     squid: { cin: [400, 50, 52], cout: [20, 440, 460], g: [0.30, 0.009, 0.09] },
@@ -428,7 +454,6 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     else { Dx[i] = D_PORE + (D_BULK - D_PORE) * dist / D_RAMP; dDx[i] = (i < MX ? -1 : 1) * (D_BULK - D_PORE) / D_RAMP; }
   }
   const BIN = 16, NB = W / BIN;
-  const NAV_DM = 6;
 
   const px = new Float32Array(MAXN), py = new Float32Array(MAXN), ox = new Float32Array(MAXN), oy = new Float32Array(MAXN);
   const sp = new Uint8Array(MAXN), pore = new Int16Array(MAXN), side = new Int8Array(MAXN);
@@ -458,7 +483,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       else { const R = rightLimit(s, y); if (px[i] < R) px[i] = ox[i] = R + 0.3; }
     }
   }
-  let pores = [], pumps = [], slotPore = [], nLeak = [0,0,0], nNav = 0, nKv = 0, leakFull = false;
+  let pores = [], pumps = [], slotPore = [], nLeak = [0,0,0], leakFull = false;
   const isPumpSlot = i => i % 24 === 12;
   function buildChannels() {
     pores = []; pumps = []; slotPore = [];
@@ -479,7 +504,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       if (isPumpSlot(i)) { pumps.push({ y: yc, flash: 0 }); slotPore.push(-1); continue; }
       if (assign[i] < 0) { slotPore.push(-1); continue; }
       slotPore.push(pores.length);
-      pores.push({ y0: yc - PH/2, y1: yc + PH/2, yc, s: assign[i], kind: 'leak', dm: 1, slot: i });
+      pores.push({ y0: yc - PH/2, y1: yc + PH/2, yc, s: assign[i], slot: i });
     }
     nLeak = [0,0,0]; pores.forEach(p => nLeak[p.s]++);
     bodyAt = new Uint8Array(n);
@@ -509,13 +534,11 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   // Leak conductance (mS/cm²) sets the density of identical leak channels: 0.30 mS/cm² ↔ 18 per 1000 px.
   const G_PER_CH = 0.30 / 18;
   let gLeak = [0.30, 0.012, 0.10];
-  let perm = gLeak.map(g => g / G_PER_CH), effPerm = perm.slice();   // leak channels per 1000 px of membrane
+  let perm = gLeak.map(g => g / G_PER_CH);   // leak channels per 1000 px of membrane
   buildChannels();
-  let navOpen = false, kvOpen = false;
-  let concIn = DEF_IN.slice(), concOut = DEF_OUT.slice();
+  let concIn = DEFAULTS.mammal.cin.slice(), concOut = DEFAULTS.mammal.cout.slice();
   let clampOn = true, clampInOn = true, pumpOn = false, pumpRate = 0.5, pumpAcc = 0;
   let qmv = 11, lambda = 40 /* Debye length, px: fixed */, vSum = 0, speed = 60, tintOn = true, chargeColor = false, densTau = 1500;
-  let apStart = -1;   // no action potentials in this simulation
   const cIn = [0,0,0,0], cOut = [0,0,0,0];
   const crossings = [];
   const trace = []; const TRACE_LEN = 500, SAMPLE = 100; let sampleAcc = 0;
@@ -527,10 +550,16 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   let poreQ = 0, poreQSm = 0;                       // net charge held inside channels
   let dIn = 0, dMem = 0, dOut = 0;
   let cTot = 1.9;
-  let qClampIn = 0; // net charge the cytoplasm reservoir clamp has added; neutralized by an equal background charge (neutral salt exchange)
 
-  const accept = p => 1;   // leak channels are always open
-  const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
+  // Random kicks: a table of sums of three uniforms (mean 0, variance 1, bounded at ±3), read at random by a
+  // xorshift generator. Three Math.random() calls per kick were about half the cost of a step.
+  // Every entry is stored with its negative so the table's mean is exactly 0: a sampled table is off by
+  // about 0.004, which acts as a steady push on every ion and shifted the resting potential by ~17 mV.
+  const GN = 1 << 16, GTAB = new Float32Array(GN);
+  { let ss = 0;
+    for (let i = 0; i < GN; i += 2) { const v = (Math.random() + Math.random() + Math.random() - 1.5) * 2; GTAB[i] = v; GTAB[i + 1] = -v; ss += 2 * v * v; }
+    const k = Math.sqrt(GN / ss); for (let i = 0; i < GN; i++) GTAB[i] *= k; }   // and exactly unit variance
+  let rngState = (Math.random() * 0xffffffff) | 0 || 1;
 
   function setKappa() {
     const kMem = qmv / (KT * 2 * MW) * (H_REF / H);   // qmv = mV per ion per 100 px of membrane
@@ -561,7 +590,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     outN.forEach((n, s) => { for (let k = 0; k < n; k++) addParticle(s, XOUT + BW + 7 + Math.random() * (W - XOUT - BW - 12), Math.random() * H); });
     cTot = inN.reduce((a, b) => a + b, 0) / XIN;
     setKappa();
-    V = vAvg = vSum = 0; qClampIn = 0; steps = 0; stepAcc = 0; sampleAcc = 0; pumpAcc = 0; apStart = -1;
+    V = vAvg = vSum = 0; steps = 0; stepAcc = 0; sampleAcc = 0; pumpAcc = 0;
     crossings.length = 0; trace.length = 0; rhoSm.fill(0); Esm.fill(0); dens.fill(0);
     sanitize();
     binAndField(); countSides();
@@ -577,14 +606,20 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     for (let i = 0; i < N; i++) { let b = px[i] | 0; if (b > W) b = W; hist[b] += Z[sp[i]]; if (pore[i] < 0) histSol[b] += Z[sp[i]]; else poreQ += Z[sp[i]]; }
     computeField();
   }
+  // voltage drop across the inner layer, the membrane and the outer layer (mV), from a field profile
+  const drops = [0, 0, 0];
+  function regionDrops(F) {
+    let a = 0, b = 0, c = 0;
+    for (let i = REF_IN; i < XIN; i++) a += F[i];
+    for (let i = XIN; i < XOUT; i++) b += F[i];
+    for (let i = XOUT; i < REF_OUT; i++) c += F[i];
+    drops[0] = KT * a; drops[1] = KT * b; drops[2] = KT * c;
+  }
   function computeField() {
     let qc = 0;
     for (let i = 0; i <= W; i++) { E[i] = kap[i] * (qc + 0.5 * hist[i]); qc += hist[i]; }
-    let a = 0, b = 0, c = 0;
-    for (let i = REF_IN; i < XIN; i++) a += E[i];
-    for (let i = XIN; i < XOUT; i++) b += E[i];
-    for (let i = XOUT; i < REF_OUT; i++) c += E[i];
-    V = KT * (a + b + c);
+    regionDrops(E);
+    V = drops[0] + drops[1] + drops[2];
   }
   function smoothProfiles(alpha) {
     for (let bI = 0; bI < NB; bI++) {
@@ -596,34 +631,22 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     poreQSm += (poreQ - poreQSm) * alpha;
   }
 
-  function findPore(s, y) {
-    const k = slotPore[(y / SLOT) | 0];
-    if (k === undefined || k < 0) return -1;
-    const p = pores[k];
-    return (p.s === s && y >= p.y0 && y <= p.y1) ? k : -1;
-  }
-  function updateGates() {
-    effPerm[0] = perm[0]; effPerm[1] = perm[1]; effPerm[2] = perm[2];
-  }
-
 
   // ---------- one Brownian step ----------
   function step() {
-    updateGates();
-    let q = 0;
+    let q = 0, rs = rngState;
     cIn.fill(0); cOut.fill(0); hist.fill(0); histSol.fill(0); let pq = 0;
     for (let i = 0; i < N; i++) {
       const s = sp[i], p = pore[i];
       const pr = p >= 0 ? pores[p] : null;
-      const dm = pr ? pr.dm : 1;
-      let xi0 = px[i] | 0; if (xi0 > W) xi0 = W; if (xi0 < 0) xi0 = 0;
-      const Dl = pr ? D_PORE * dm : Dx[xi0] * DIFF[s];
-      const sg = Math.sqrt(2 * Dl);
       const x = px[i];
-      let xi = x | 0; if (xi > W) xi = W;
+      let xi = x | 0; if (xi > W) xi = W; if (xi < 0) xi = 0;
+      const Dl = pr ? D_PORE : Dx[xi] * DIFF[s];
+      const sg = Math.sqrt(2 * Dl);
+      rs ^= rs << 13; rs ^= rs >>> 17; rs ^= rs << 5;   // one draw gives both kicks
       // Itô drift: D·z·E (minus the ion's own sheet field) plus dD/dx, which keeps Boltzmann equilibrium exact where D varies
-      let nx = x + sg * g() + Dl * Z[s] * (E[xi] - 0.5 * kap[xi] * Z[s]) + (pr ? 0 : dDx[xi] * DIFF[s]);
-      let ny = py[i] + sg * g();
+      let nx = x + sg * GTAB[rs & 0xffff] + Dl * Z[s] * (E[xi] - 0.5 * kap[xi] * Z[s]) + (pr ? 0 : dDx[xi] * DIFF[s]);
+      let ny = py[i] + sg * GTAB[(rs >>> 16) & 0xffff];
       if (pr) {
         // inside the lumen: the whole sphere stays inside; it leaves only through either mouth
         const lo = pr.y0 + RAD[s], hi = pr.y1 - RAD[s];
@@ -654,7 +677,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       let b = nx | 0; if (b > W) b = W; hist[b] += Z[s]; if (pore[i] < 0) histSol[b] += Z[s]; else pq += Z[s];
       if (nx < MX) { q += Z[s]; cIn[s]++; } else cOut[s]++;
     }
-    qin = q; poreQ = pq;
+    qin = q; poreQ = pq; rngState = rs;
     steps++;
     if ((clampOn || clampInOn) && steps % 25 === 0) clampBath();
     if (pumpOn && pumpRate > 0) {
@@ -758,11 +781,8 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     return KT * Math.log(num / den);
   }
   function layerDrops() {
-    let a = 0, b = 0, c = 0;
-    for (let i = REF_IN; i < XIN; i++) a += Esm[i];
-    for (let i = XIN; i < XOUT; i++) b += Esm[i];
-    for (let i = XOUT; i < REF_OUT; i++) c += Esm[i];
-    dIn = KT * a; dMem = KT * b; dOut = KT * c;
+    regionDrops(Esm);
+    [dIn, dMem, dOut] = drops;
   }
 
   // ---------- drawing setup ----------
@@ -850,8 +870,6 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     }
     H = Hn;
     neutralize();
-    buildChannels();
-    remapPores(oldSlot);
     relayoutChannels();
     setMembraneCharge(Math.round(qPerLen * Hn));
     for (let b = 0; b < NB; b++) rhoSm[b] *= Hn / Ho;
@@ -891,7 +909,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   }
 
   // ---------- 2D Gaussian charge density ----------
-  let CG = 8, GX = 0, GY = 0, qgrid, tmpg, dens = new Float32Array(1), dImg;
+  let CG = 8, GX = 0, GY = 0, qgrid, tmpg, rowAcc, dens = new Float32Array(1), dImg;
   const dCanvas = document.createElement('canvas'), dctx = dCanvas.getContext('2d');
   let blurSigma = 16, kern = null, kR = 0, dScale = 0.02;
   function allocDensity(keep) {
@@ -899,7 +917,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     CG = Math.max(2, Math.min(8, Math.round(sigEff() / 2)));
     while ((W / CG) * (H / CG) > 60000) CG *= 2;
     GX = Math.round(W / CG); GY = Math.max(1, Math.round(H / CG));
-    qgrid = new Float32Array(GX * GY); tmpg = new Float32Array(GX * GY); dens = new Float32Array(GX * GY);
+    qgrid = new Float32Array(GX * GY); tmpg = new Float32Array(GX * GY); rowAcc = new Float32Array(GX); dens = new Float32Array(GX * GY);
     if (keep && oGX && oCG === CG) for (let y = 0; y < GY; y++) for (let x = 0; x < GX; x++) dens[y * GX + x] = old[(y % oGY) * oGX + x];
     dCanvas.width = GX; dCanvas.height = GY; dImg = dctx.createImageData(GX, GY);
     makeKernel();
@@ -918,32 +936,45 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       if (gx >= GX) gx = GX - 1; if (gy >= GY) gy = GY - 1; if (gy < 0) gy = 0;
       qgrid[gy * GX + gx] += Z[sp[i]];
     }
-    // separable Gaussian blur with reflecting edges
+    // separable Gaussian blur: reflecting edges in x, periodic in y
     for (let y = 0; y < GY; y++) { const o = y * GX;
       for (let x = 0; x < GX; x++) { let a = 0;
-        for (let k = -kR; k <= kR; k++) { let xx = x + k; if (xx < 0) xx = -xx - 1; else if (xx >= GX) xx = 2 * GX - xx - 1; a += qgrid[o + xx] * kern[k + kR]; }
+        if (x >= kR && x < GX - kR) for (let k = -kR; k <= kR; k++) a += qgrid[o + x + k] * kern[k + kR];
+        else for (let k = -kR; k <= kR; k++) { let xx = x + k; if (xx < 0) xx = -xx - 1; else if (xx >= GX) xx = 2 * GX - xx - 1; a += qgrid[o + xx] * kern[k + kR]; }
         tmpg[o + x] = a; } }
+    // y pass a whole row at a time, so memory is read in order
     let mx = 0;
-    for (let x = 0; x < GX; x++)
-      for (let y = 0; y < GY; y++) { let a = 0;
-        for (let k = -kR; k <= kR; k++) { let yy = (y + k) % GY; if (yy < 0) yy += GY; a += tmpg[yy * GX + x] * kern[k + kR]; }
-        const j = y * GX + x; dens[j] += (a - dens[j]) * alpha; const m = Math.abs(dens[j]); if (m > mx) mx = m; }
+    for (let y = 0; y < GY; y++) {
+      rowAcc.fill(0);
+      for (let k = -kR; k <= kR; k++) {
+        let yy = (y + k) % GY; if (yy < 0) yy += GY;
+        const r = yy * GX, w = kern[k + kR];
+        for (let x = 0; x < GX; x++) rowAcc[x] += tmpg[r + x] * w;
+      }
+      const o = y * GX;
+      for (let x = 0; x < GX; x++) { const j = o + x; dens[j] += (rowAcc[x] - dens[j]) * alpha; const m = Math.abs(dens[j]); if (m > mx) mx = m; }
+    }
     dScale += (Math.max(mx * 0.75, 0.004) - dScale) * 0.05;
     paintDensity();
   }
+  const alphaLut = new Uint8Array(257);   // opacity for |charge| / scale in 0..1, rebuilt when light/dark changes
+  let lutDark = null;
   function paintDensity() {
     // On a dark background the map needs brighter colours, more opacity and a curve that lifts weak charge
     const bgc = rgb(C.bg), dark = (0.2126 * bgc[0] + 0.7152 * bgc[1] + 0.0722 * bgc[2]) < 90;
     const P = dark ? [255, 92, 104] : rgb(C.pos), Nn = dark ? [84, 150, 255] : rgb(C.neg), d = dImg.data;
     const gam = dark ? 0.95 : 1.2, amax = dark ? 200 : 150;
+    if (lutDark !== dark) { for (let k = 0; k <= 256; k++) alphaLut[k] = Math.round(Math.pow(k / 256, gam) * amax); lutDark = dark; }
+    const inv = 256 / dScale;
     for (let j = 0; j < GX * GY; j++) {
-      const v = dens[j] / dScale, a = Math.min(1, Math.abs(v)), c = v > 0 ? P : Nn, o = j * 4;
-      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = Math.round(Math.pow(a, gam) * amax);
+      const v = dens[j], c = v > 0 ? P : Nn, o = j * 4;
+      let k = (Math.abs(v) * inv) | 0; if (k > 256) k = 256;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = alphaLut[k];
     }
     dctx.putImageData(dImg, 0, 0);
   }
 
-  const PORE_LABEL = { leak: ['K⁺ leak', 'Na⁺ leak', 'Cl⁻ leak'] };
+  const PORE_LABEL = ['K⁺ leak', 'Na⁺ leak', 'Cl⁻ leak'];
 
   function drawSim(frac) {
     const z = dz(), cy = cyNow();
@@ -953,7 +984,6 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     const x0 = view.cx - CW / (2 * z), x1 = view.cx + CW / (2 * z), y0 = cy - CH / (2 * z), y1 = cy + CH / (2 * z);
     const k0 = Math.floor(y0 / H), k1 = Math.floor((y1 - 1e-6) / H);
     const lerp = frac < 1;
-    const rB = density < 0.4 ? 1.25 : density < 0.75 ? 1.1 : 0.85;
     const showSigns = z >= 3;
     for (let k = k0; k <= k1; k++) {          // the patch is periodic: tile it to fill the view
       const off = k * H;
@@ -974,7 +1004,9 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       }
       ctx.stroke();
       ctx.fillStyle = C.mem;
-      for (let y = yA; y < yB; y += 6) { ctx.beginPath(); ctx.arc(XIN + 2.2, y, 2.3, 0, 6.283); ctx.arc(XOUT - 2.2, y, 2.3, 0, 6.283); ctx.fill(); }
+      ctx.beginPath();
+      for (let y = yA; y < yB; y += 6) { ctx.moveTo(XIN + 4.5, y); ctx.arc(XIN + 2.2, y, 2.3, 0, 6.283); ctx.moveTo(XOUT + 0.1, y); ctx.arc(XOUT - 2.2, y, 2.3, 0, 6.283); }
+      ctx.fill();
       // leak channels, textbook cartoon: body spanning the bilayer, open lumen, selectivity filter at the extracellular mouth
       pores.forEach(p => {
         if (p.yc + BH < ly0 || p.yc - BH > ly1) return;
@@ -1064,7 +1096,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
         const off = k * H;
         pores.forEach(p => {
           const q = toScreen(XOUT + 22, p.yc + off); if (q.y < 36 || q.y > CH - 8 || q.x > CW - 90) return;
-          tag(PORE_LABEL.leak[p.s], q.x + 10, q.y + 4, 'left', C.sp[p.s]);
+          tag(PORE_LABEL[p.s], q.x + 10, q.y + 4, 'left', C.sp[p.s]);
         });
         pumps.forEach(pm => { const q = toScreen(XOUT + 22, pm.y + off); if (q.y < 36 || q.y > CH - 8 || q.x > CW - 90) return; tag('Na⁺/K⁺ pump', q.x + 14, q.y + 4, 'left', C.accent); });
       }
@@ -1074,6 +1106,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 
   // ---------- charge profile ----------
   let rScale = 6;
+  const phi = new Float32Array(W + 1);   // potential profile, reused every frame
   const PT = 34, PB = 34, PL = 50, PR = 58;
   const psx = x => PL + x / W * (PW - PL - PR);
   function drawProfile() {
@@ -1096,17 +1129,19 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     }
     // charge held inside the channels: its own hatched bar over the membrane
     {
-      const q = poreQSm * (NB > 0 ? 1 : 1), bh = Math.min(h / 2, Math.abs(q) / rScale * (h / 2));
+      const q = poreQSm, bh = Math.min(h / 2, Math.abs(q) / rScale * (h / 2));
       const xa = psx(XIN - BW), xb = psx(XOUT + BW), ytop = q > 0 ? y0 - bh : y0;
       c.save(); c.beginPath(); c.rect(xa, ytop, xb - xa, bh); c.clip();
       c.fillStyle = C.surface; c.fillRect(xa, ytop, xb - xa, bh);
       c.strokeStyle = q > 0 ? C.pos : C.neg; c.lineWidth = 1.5;
-      for (let t = -h; t < h; t += 5) { c.beginPath(); c.moveTo(xa, ytop + t); c.lineTo(xb, ytop + t + (xb - xa)); c.stroke(); }
+      c.beginPath();
+      for (let t = -h; t < h; t += 5) { c.moveTo(xa, ytop + t); c.lineTo(xb, ytop + t + (xb - xa)); }
+      c.stroke();
       c.restore();
       c.strokeStyle = q > 0 ? C.pos : C.neg; c.lineWidth = 1.2; c.strokeRect(xa + 0.5, ytop + 0.5, xb - xa - 1, Math.max(0, bh - 1));
     }
     // potential (bath = 0)
-    const phi = new Float32Array(W + 1); let acc = 0;
+    let acc = 0;
     for (let i = W; i >= 0; i--) { acc += Esm[i]; phi[i] = KT * acc; }
     const base = phi[REF_OUT];
     const PMIN = -120, PMAX = 60, py = v => PT + (PMAX - Math.max(PMIN, Math.min(PMAX, v))) / (PMAX - PMIN) * h;
@@ -1118,7 +1153,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     c.stroke();
     // axes
     c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle';
-    c.fillStyle = C.neg; c.textAlign = 'right';
+    c.textAlign = 'right';
     c.fillStyle = C.pos; c.fillText('+' + rScale.toFixed(0) + ' e', PL - 6, PT + 6);
     c.fillStyle = C.muted; c.fillText('0 e', PL - 6, y0);
     c.fillStyle = C.neg; c.fillText('−' + rScale.toFixed(0) + ' e', PL - 6, PT + h - 6);
@@ -1238,7 +1273,14 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   });
   const fmtG = g => g === 0 ? '0' : g < 0.1 ? g.toFixed(3) : g.toFixed(2);
   ['pK', 'pNa', 'pCl'].forEach((id, s) => bindRange(id, v => fmtG(v / 1000), v => { gLeak[s] = v / 1000; perm[s] = gLeak[s] / G_PER_CH; relayoutChannels(); }));
-  function setConductances(g) { ['pK', 'pNa', 'pCl'].forEach((id, k) => { $(id).value = Math.round(g[k] * 1000); $(id).dispatchEvent(new Event('input')); }); }
+  function setConductances(g) {
+    ['pK', 'pNa', 'pCl'].forEach((id, s) => {
+      $(id).value = Math.round(g[s] * 1000);
+      const v = parseFloat($(id).value);              // as the slider clamps it
+      $(id + 'o').textContent = fmtG(v / 1000); gLeak[s] = v / 1000; perm[s] = gLeak[s] / G_PER_CH;
+    });
+    relayoutChannels();
+  }
   // concentration inputs
   const cIds = [['cKi', 'cKo'], ['cNai', 'cNao'], ['cCli', 'cClo']];
   function syncConcUI() {
@@ -1272,8 +1314,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 
   const presets = { k: [300, 0, 0], rest: [300, 12, 100], na: [0, 300, 0], cl: [0, 0, 300], none: [0, 0, 0] };   // µS/cm²
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
-    const p = presets[b.dataset.preset];
-    ['pK', 'pNa', 'pCl'].forEach((id, i) => { $(id).value = p[i]; $(id).dispatchEvent(new Event('input')); });
+    setConductances(presets[b.dataset.preset].map(v => v / 1000));
   }));
   const densBtns = document.querySelectorAll('[data-density]');
   function setDensityUI() { densBtns.forEach(b => b.setAttribute('aria-pressed', String(parseFloat(b.dataset.density) === density))); }
@@ -1396,7 +1437,6 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     calcGHK();
   });
   $('gFromSim').addEventListener('click', () => {
-    updateGates();
     const pK = nLeak[0], pNa = nLeak[1], pCl = nLeak[2];
     const ref = pK > 0 ? pK : Math.max(pNa, pCl, 1);
     setG('gPK', pK / ref); setG('gPNa', pNa / ref); setG('gPCl', pCl / ref);
@@ -1421,13 +1461,15 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   reset();
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setRunning(false);
   let frame = 0;
+  // Frame budget: steps get what is left after the charge map and drawing (averaged over recent frames)
+  const FRAME_MS = 24;
+  let restMs = 4;
   function loop() {
-    let frac = 1;
+    let frac = 1, ran = 0;
     if (running) {
-      let ran = 0;
       if (speed >= 1) {
-        const want = Math.round(speed), t0 = performance.now();
-        for (let k = 0; k < want; k++) { step(); ran++; if ((k & 3) === 3 && performance.now() - t0 > 22) break; }
+        const want = Math.round(speed), t0 = performance.now(), budget = Math.max(6, FRAME_MS - restMs);
+        for (let k = 0; k < want; k++) { step(); ran++; if ((k & 3) === 3 && performance.now() - t0 > budget) break; }
         const lim = ran < want ? ran : 0;
         if ((lim > 0) !== (stepLimited > 0) || (lim && Math.abs(lim - stepLimited) > 3 && frame % 30 === 0)) { stepLimited = lim; updatePatchInfo(); }
       }
@@ -1436,17 +1478,21 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
         if (stepAcc >= 1) { stepAcc -= 1; ox.set(px.subarray(0, N)); oy.set(py.subarray(0, N)); step(); ran = 1; }
         frac = stepAcc;
       }
-      if (tintOn && ran) updateDensity(1 - Math.exp(-ran / densTau));
     } else if (speed < 1) frac = stepAcc;
+    const t1 = performance.now();
+    if (tintOn && ran) updateDensity(1 - Math.exp(-ran / densTau));
     drawSim(frac);
     drawProfile();
     if (frame++ % 6 === 0) { updateReadouts(); updateTable(); }
     drawTrace(refs());
+    restMs += (performance.now() - t1 - restMs) * 0.1;
     requestAnimationFrame(loop);
   }
   refreshAll();
   requestAnimationFrame(loop);
 })();
 </script>
+<!-- Student questions for the GHK lesson. Delete this line to remove them. -->
+<script src="ghk_questions.js"></script>
 </body>
 </html>

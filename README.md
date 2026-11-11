@@ -31,31 +31,31 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
 
 - **Acquisition**:
   - live multichannel recording, with comments;
-  - a Blocks panel that sorts recordings into pages by stimulus;
+  - a Trials browser that sorts recordings into groups by stimulus;
   - overlaid blocks and channels.
 - **Stimulator and Protocols**:
   - stimuli and pulse trains, with units;
   - protocols that step a setting and measure each response.
 - **Analysis channels** (**+ Analysis channel**, like LabChart's channel calculations): pick a source
-  channel and a calculation. Analysis channels can build on each other, and **Calculations…** shows
-  them all as formulas.
+  channel and a calculation, or type a formula (Custom formula). Analysis channels can build on each other.
   - Cyclic measurements: rate meter (per second or per minute), period, cyclic height and event count.
   - Filters: low-pass, high-pass, band-pass, band-stop and notch.
   - Moving windows: smoothing, RMS and envelope.
   - Derivative, integral and arithmetic: for example `bandpass(Ch1, 300, 3000)` or `Ch1 - Ch2`.
 - **Analysis**:
-  - One canvas of charts: open any chart from Add chart, snap it beside or under another, stack it as a tab, or pull it onto a second screen. Spike Sorting, Response and Waveforms are built-in layouts; save your own, and lock one for a class.
-  - Any chart can be open more than once, each copy with its own name, settings and units. Pin a copy to chosen trials while the others follow the selection. The ⚙ on a chart opens its settings in a window, with a ? button for an explanation and glossary.
-  - Only the browser stays beside the charts, with a check box on every group and trial to hide it (colour maps spread across what's left) and groups you can drag or sort by frequency or amplitude: pick a group to see its average, or drag across trials to see those trials. What every chart shares opens in windows: Channels has the stimulus and analyzed channels, and Groups has Spread and the colours of groups and trials (editable, or from a colour map).
+  - An endless whiteboard of charts that starts empty: students choose every chart and where it goes. Add one with + Add chart or by right-clicking the board; drag its title to move it and its corner to resize it (it snaps to a grid and lines up with the others); pan, zoom, and find your way with the minimap. Pick several (shift-click, or drag a box) to resize, line up or remove them together. Save the board as a layout of your own, and lock it for a class.
+  - Any chart can be open more than once, each copy with its own name, settings and units. Click a chart and its settings show beside the board, with a ? button for an explanation and glossary; number settings are a drag bar with a box to type in. A chart can show the page's groups or choose its own, to compare Group 3 here with Group 5 there.
+  - A strip on the left folds out what every chart shares: Trials (the browser, with a check box on every group and trial to hide it, and groups you can drag or sort by frequency or amplitude: pick a group to see its average, or drag across trials to see those trials), Groups (which groups show, their colours, Spread, and how a group's trials are drawn), Channels (the stimulus and analyzed channels, gains, the stimulus fit) and Spikes.
   - An amplifier gain per channel to divide by, and a fit that cleans up a noisy or coarse recorded stimulus, both applied as data is read: the recordings never change. Trials save the stimulus settings sent, so the known waveform can be lined up with a recording.
   - Finding and sorting action potentials, with each unit's tick, colour and opacity.
-  - The spikes found, the units and DataPad's rows are saved with the session, beside its recordings.
+  - The spikes found, the units and the measure windows are saved with the session, beside its recordings.
   - Every chart has + and − to zoom and arrows to move, by each axis, while the mouse is over it.
   - Spike charts: overlays and averages, with ± SD or SEM across trials; the stimulus; raster, rate, a PCA map of the units, waveforms, and size and ISI histograms.
   - Response charts: channels and derivatives, PSTH and spike-triggered averages, and stimulus cycles: the repeats overlaid by phase, with a raster per cycle, a phase histogram with vector strength, and a loop of response against stimulus. Charts against time can swap their axes for draggable scale bars.
   - Waveform charts: the action potentials as a phase plot of V against dV/dt, and against time.
 - **Saving**: File › Save puts everything in one `.argus` file: the recordings, groups, analysis, layouts and chart settings, the tabs and windows open, the stimulus and protocol, and the simulated network. Opening it (or double-clicking it, with `Argus.app` on a Mac) puts Argus back as it was. Argus still records into a working folder, and Save packs it; saving again only adds what changed. Argus asks before closing if anything has changed since. File › Open Session Folder… and Save Session Folder As… still work with plain folders.
-- **DataPad**: a table of measurements (mean, peak, area, slope, frequency, spike rate…) per trial, per stimulus average, or as mean ± SD/SEM per stimulus, exported as CSV or copied to a spreadsheet.
+- **Measuring** (the Measure tool, on the board): drag across a chart against time to measure a window of each trial, or, in Phase, across a chart against phase to measure the same part of every stimulus cycle. Windows can be dragged and repeat along the trace. A DataPad table chart holds the measurements (mean, peak, area, slope, frequency, spike count…) per trial, per group average, or as mean ± SD per group, exported as CSV or copied to a spreadsheet; a Scatter chart plots one column against another and fits a curve.
+- **Recordings never change**: comments and channel colours edited later are kept beside them, in `trial_edits.json`.
 - **Simulation**: a network of up to 10 integrate-and-fire cells with tunable synapses, to practise without an animal.
 - **Membrane potential** (under Simulation): ions as particles crossing a membrane through selective
   channels, so the Nernst and GHK potentials and the charge layers on the membrane emerge on their own.

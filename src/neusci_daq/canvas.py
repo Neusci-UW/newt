@@ -1,17 +1,22 @@
-"""The Analysis canvas: charts in dock panels that snap beside or under each other, stack as
-tabs, or float off onto a second screen. Add chart opens any chart, as many times as you
-like. A layout is a set of charts and how they're arranged: Spike Sorting, Response and
-Waveforms are built in, and Save layout adds your own. Each layout keeps its
-charts while you look at another, and how you left it is remembered.
+"""The Analysis canvas: an endless whiteboard of charts (see board.py). It starts empty and
+nothing is put on it for you: you choose every chart and where it goes. + Add chart, or
+right-click empty space, opens any chart, as many times as you like. Click a chart for its
+settings, beside the board; shift-click or drag a box to pick several and change them
+together.
+
+A layout is what's on the board, where, and as big as you made it, and the view. The board
+you work on is "Board"; Save… keeps it as a layout of your own, to come back to. Each layout
+keeps its charts while you look at another, and how you left it is remembered.
 """
 from __future__ import annotations
 
-import base64
 import json
 
 from pyqtgraph.Qt import QtCore, QtWidgets
 
+from . import board as B
 from . import style
+from .measurecharts import DataPadTableChart, ScatterChart
 from .plotzoom import AxisGroup
 from .responsecharts import (FitChart, LoopChart, PhaseChart, PsthChart, ResponseCycleChart, SpikeCycleChart, StaChart,
                              StimulusCycleChart, TracesChart)
@@ -21,163 +26,122 @@ from .waveformview import PhasePlotChart, SlopeChart, VoltsChart
 
 CHARTS = (StimulusChart, BlocksChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart,
           TracesChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
-          LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart)
+          LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart, DataPadTableChart, ScatterChart)
 KINDS = {c.kind: c for c in CHARTS}
-GROUPS = ("Spikes", "Response", "Waveforms")
-
-# A built-in layout: a chart's kind, or ("h" or "v", [(share of the room, what's there)]).
-BUILT_IN = {
-    "Spike Sorting": ("h", [(3, ("v", [(1, "Stimulus"), (3, "Trials"), (2, "Raster"), (2, "Rate")])),
-                            (2, ("v", [(1, "PCA map"), (1, "Waveforms"), (1, "AP sizes"), (1, "Intervals")]))]),
-    "Response": ("h", [(1, ("v", [(5, "Traces"),
-                                  (3, ("h", [(1, "Stimulus-triggered rate"), (1, "Spike-triggered average"),
-                                             (1, "Response against stimulus")])),
-                                  (2, "Stimulus fit")])),
-                       (1, ("v", [(1, "Stimulus cycle"), (2, "Response by cycle"), (2, "Spikes by cycle"),
-                                  (2, "Spikes per phase")]))]),
-    "Waveforms": ("h", [(3, "V against dV/dt"), (2, ("v", [(1, "V"), (1, "dV/dt")]))]),
-}
+GROUPS = ("Spikes", "Response", "Waveforms", "Measure")
+BOARD = "Board"                    # the board you work on; Save… keeps it as a layout of your own
+SIZE = {"DataPad table": (560, 260), "Traces": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
 
 
-def _first(tree) -> str:
-    return tree if isinstance(tree, str) else _first(tree[1][0][1])
+class _Toolbar(QtWidgets.QFrame):
+    """The board's tools, floating along its bottom."""
 
-
-class TitleBar(QtWidgets.QWidget):
-    """What a chart's dock has along its top: its name, what's its own, and Pin, Copy and ×.
-    Dragging it moves the chart; clicking it picks the chart."""
-
-    def __init__(self, dock: "ChartDock"):
+    def __init__(self, canvas: "ChartCanvas"):
         super().__init__()
-        self.dock = dock
-        self.setObjectName("chartBar")
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground)
+        self.setObjectName("boardBar")
         row = QtWidgets.QHBoxLayout(self)
-        row.setContentsMargins(8, 2, 4, 2)
-        row.setSpacing(6)
-        self.name = QtWidgets.QLabel()
-        self.tag = QtWidgets.QLabel()
-        for w in (self.name, self.tag):       # a long name gives way, so a narrow chart can be narrow
-            w.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
-        row.addWidget(self.name, 2)
-        row.addWidget(self.tag, 1)
-        chart = dock.chart
-        self.btn_pin = self._button("Pin", "Keep this chart on the trials selected now", row)
-        self.btn_pin.setCheckable(True)
-        self.btn_pin.setVisible(chart.uses_blocks)
-        self.btn_pin.clicked.connect(chart.set_pinned)
-        self.btn_set = self._button("⚙", "Open this chart's settings", row)
-        self.btn_set.setStyleSheet("QToolButton { font-size: 18px; padding: 0; }")
-        self.btn_set.clicked.connect(lambda: dock.canvas.open_settings(chart))
-        self.btn_copy = self._button("Copy", "Open another of this chart, with the same settings", row)
-        self.btn_copy.clicked.connect(lambda: dock.canvas.copy(chart))
-        self.btn_close = self._button("×", "Close this chart", row)
-        self.btn_close.clicked.connect(lambda: dock.canvas.close_chart(chart))
+        row.setContentsMargins(6, 4, 6, 4)
+        row.setSpacing(4)
+        self.tools = QtWidgets.QButtonGroup(self)
+        self.btn = {}
+        for key, text, tip in ((B.SELECT, "Select", "Pick charts: click, shift-click, or drag a box over empty space"),
+                               (B.HAND, "Hand", "Drag the board to move around it (or scroll, or drag with the "
+                                                "middle button)"),
+                               (B.MEASURE, "Measure", "Drag across a chart to measure that stretch of it: in Time on "
+                                                      "charts against time, in Phase on charts against phase. The "
+                                                      "numbers go in a DataPad table")):
+            b = QtWidgets.QToolButton(text=text, checkable=True, autoRaise=True)
+            b.setToolTip(tip)
+            self.tools.addButton(b)
+            self.btn[key] = b
+            row.addWidget(b)
+        self.btn[B.SELECT].setChecked(True)
+        self.unit = QtWidgets.QButtonGroup(self)
+        self.btn_time = QtWidgets.QToolButton(text="Time", checkable=True, autoRaise=True)
+        self.btn_time.setToolTip("Measure windows in time (ms), on charts against time, such as Traces")
+        self.btn_phase = QtWidgets.QToolButton(text="Phase", checkable=True, autoRaise=True)
+        self.btn_phase.setToolTip("Measure the same part of every stimulus cycle (degrees), on charts against "
+                                  "phase, such as Response by cycle")
+        for b in (self.btn_time, self.btn_phase):
+            self.unit.addButton(b)
+            row.addWidget(b)
+        self.btn_time.setChecked(True)
+        row.addSpacing(8)
+        self.btn_add = QtWidgets.QPushButton("+ Add chart")
+        self.btn_add.setToolTip("Put another chart on the board (or right-click empty space). Any chart can be "
+                                "open more than once")
+        self.btn_add.setMenu(canvas.add_menu)
+        row.addWidget(self.btn_add)
+        self.btn_tidy = QtWidgets.QToolButton(text="Tidy up", autoRaise=True)
+        self.btn_tidy.setToolTip("Line the charts up in rows, keeping their sizes")
+        row.addWidget(self.btn_tidy)
+        row.addSpacing(8)
+        self.btn_out = QtWidgets.QToolButton(text="−", autoRaise=True)
+        self.btn_out.setToolTip("Zoom out (⌘/Ctrl and scroll, or pinch)")
+        self.zoom = QtWidgets.QLabel("100%")
+        self.zoom.setMinimumWidth(40)
+        self.zoom.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.btn_in = QtWidgets.QToolButton(text="+", autoRaise=True)
+        self.btn_in.setToolTip("Zoom in")
+        self.btn_fit = QtWidgets.QToolButton(text="Fit", autoRaise=True)
+        self.btn_fit.setToolTip("Show every chart")
+        for w in (self.btn_out, self.zoom, self.btn_in, self.btn_fit):
+            row.addWidget(w)
 
-    @staticmethod
-    def _button(text: str, tip: str, row) -> QtWidgets.QToolButton:
-        b = QtWidgets.QToolButton(text=text, autoRaise=True)
-        b.setToolTip(tip)
-        row.addWidget(b)
-        return b
-
-    def mousePressEvent(self, ev):
-        self.dock.canvas.select(self.dock.chart)
-        ev.ignore()                               # the dock still gets it, to drag
-
-
-class ChartDock(QtWidgets.QDockWidget):
-    def __init__(self, chart, canvas: "ChartCanvas"):
-        super().__init__(chart.name)
-        self.chart, self.canvas = chart, canvas
-        chart.dock = self
-        self.setObjectName(chart.id)
-        self.bar = TitleBar(self)
-        self.setTitleBarWidget(self.bar)
-        self.setWidget(chart)
-        self.dockLocationChanged.connect(lambda *_: canvas.changed())
-        self.topLevelChanged.connect(lambda *_: canvas.changed())
-
-    def show_title(self, name: str, tag: str, pinned: bool) -> None:
-        self.bar.name.setText(f"<b>{name}</b>")
-        self.bar.tag.setText(tag)
-        self.bar.btn_pin.setChecked(pinned)
-
-    def set_locked(self, on: bool) -> None:
-        F = QtWidgets.QDockWidget.DockWidgetFeature
-        self.setFeatures(F.NoDockWidgetFeatures if on else F.DockWidgetMovable | F.DockWidgetFloatable)
-        self.bar.btn_close.setVisible(not on)
-        self.bar.btn_copy.setVisible(not on)
-
-
-class Workspace(QtWidgets.QMainWindow):
-    """One layout's charts."""
-
-    def __init__(self, canvas: "ChartCanvas", name: str):
-        super().__init__()
-        self.canvas, self.name = canvas, name
-        self.setWindowFlags(QtCore.Qt.WindowType.Widget)
-        self.setDockNestingEnabled(True)
-        O = QtWidgets.QMainWindow.DockOption
-        self.setDockOptions(O.AllowNestedDocks | O.AllowTabbedDocks | O.GroupedDragging)   # tabs drag out one by one
-        self.charts: list = []
-        self.axes: dict[str, AxisGroup] = {}
-        self._arrange = None                      # how to size the docks, once they're on screen
-        self.hint = QtWidgets.QLabel("No charts here. Use Add chart to put some on the canvas.", self)
-        self.hint.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.hint.hide()
-
-    def show_hint(self) -> None:
-        self.hint.setVisible(not self.charts)
-        self.hint.setGeometry(self.rect())
-
-    def resizeEvent(self, ev):
-        super().resizeEvent(ev)
-        self.hint.setGeometry(self.rect())
-
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        if self._arrange is not None:
-            arrange, self._arrange = self._arrange, None
-            QtCore.QTimer.singleShot(0, arrange)
+    def restyle(self, mode: str) -> None:
+        t = style.tokens(mode)
+        self.setStyleSheet(f"#boardBar {{ background: {t['panel']}; border: 1px solid {t['line']}; "
+                           f"border-radius: 10px; }} #boardBar QToolButton, #boardBar QLabel {{ color: {t['ink']}; }} "
+                           f"#boardBar QToolButton:checked {{ background: {t['selection']}; "
+                           f"color: {t['focus']}; border-radius: 6px; }}")
 
 
 class ChartCanvas(QtWidgets.QWidget):
+    tool_changed = QtCore.Signal(str, str)          # tool, measure unit ("time" or "phase")
+    picked_changed = QtCore.Signal()
+
     def __init__(self, page):
         super().__init__()
         self.page, self.settings = page, page.main.settings
-        self.spaces: dict[str, Workspace] = {}
-        self.space: Workspace | None = None
+        self.spaces: dict[str, B.Board] = {}
+        self.space: B.Board | None = None
         self.active = None                        # the chart whose settings are showing
         self._made = 0
         self._quiet = False                       # building a layout: nothing to remember yet
+        self._mode = style.LIGHT
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self.stack = QtWidgets.QStackedWidget()
         lay.addWidget(self.stack)
-        self.options = QtWidgets.QStackedWidget()   # the clicked chart's settings
-        self.nothing = QtWidgets.QLabel("Press Settings on a chart to see its settings here.")
-        self.nothing.setWordWrap(True)
+        self.options = QtWidgets.QStackedWidget()   # the picked chart's settings
+        self.nothing = QtWidgets.QWidget()
         self.options.addWidget(self.nothing)
         self._save_timer = QtCore.QTimer(self, singleShot=True, interval=400)
         self._save_timer.timeout.connect(self.save)
 
-        self.btn_add = QtWidgets.QPushButton("+ Add chart")
-        self.btn_add.setToolTip("Put another chart on the canvas. Any chart can be open more than once")
-        self.add_menu = QtWidgets.QMenu(self.btn_add)
-        self.add_menu.aboutToShow.connect(self._fill_add_menu)
-        self.btn_add.setMenu(self.add_menu)
+        self.add_menu = QtWidgets.QMenu(self)
+        self.add_menu.aboutToShow.connect(lambda: self._fill_add_menu(self.add_menu, None))
+        self.floating = _Toolbar(self)
+        self.floating.tools.buttonClicked.connect(lambda *_: self._tool_picked())
+        self.floating.unit.buttonClicked.connect(lambda *_: self._unit_picked())
+        self.floating.btn_tidy.clicked.connect(lambda: self.space.tidy())
+        self.floating.btn_in.clicked.connect(lambda: self.space.zoom_about(self.space.zoom * 1.25))
+        self.floating.btn_out.clicked.connect(lambda: self.space.zoom_about(self.space.zoom / 1.25))
+        self.floating.btn_fit.clicked.connect(lambda: self.space.fit_all())
+        self.btn_add = self.floating.btn_add
+
         self.layouts = QtWidgets.QComboBox()
-        self.layouts.setToolTip("The charts on the canvas and how they're arranged. Each layout remembers how you left it")
+        self.layouts.setToolTip("What's on the board: Board, the one you work on, or a layout you saved. Each "
+                                "remembers how you left it")
         self.layouts.setMinimumContentsLength(9)
         self.layouts.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.btn_save = QtWidgets.QPushButton("Save…")
-        self.btn_save.setToolTip("Keep these charts and their settings as a new layout of your own")
+        self.btn_save = QtWidgets.QPushButton("Save layout…")
+        self.btn_save.setToolTip("Keep these charts, where they are and their settings, as a layout of your own")
         self.btn_save.clicked.connect(self._save_dialog)
-        self.btn_reset = QtWidgets.QPushButton("Reset")
+        self.btn_reset = QtWidgets.QPushButton("Clear")
         self.btn_reset.clicked.connect(self._reset_pressed)
         self.lock = QtWidgets.QCheckBox("Lock")
-        self.lock.setToolTip("Lock the layout: stop the charts being moved, closed or added to, say for a class")
+        self.lock.setToolTip("Lock the board: stop the charts being moved, resized, closed or added to, say for a class")
         self.lock.setChecked(self.settings.value("analysis/lock", False, type=bool))
         self.lock.toggled.connect(self._lock_toggled)
         self.bars = QtWidgets.QCheckBox("Scale bars")
@@ -190,28 +154,51 @@ class ChartCanvas(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout(self.toolbar)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
-        for w in (self.btn_add, self.layouts, self.btn_save, self.btn_reset, self.lock, self.bars):
+        for w in (self.layouts, self.btn_save, self.btn_reset, self.lock, self.bars):
             row.addWidget(w)
         self._list_layouts()
         self.layouts.currentTextChanged.connect(self.show_layout)
         QtWidgets.QApplication.instance().focusChanged.connect(self._focus_moved)
 
+    # -- tools ---------------------------------------------------------------------------------
+    def tool(self) -> str:
+        return next(k for k, b in self.floating.btn.items() if b.isChecked())
+
+    def measure_unit(self) -> str:
+        return "phase" if self.floating.btn_phase.isChecked() else "time"
+
+    def set_tool(self, tool: str, unit: str | None = None) -> None:
+        self.floating.btn[tool].setChecked(True)
+        if unit is not None:
+            (self.floating.btn_phase if unit == "phase" else self.floating.btn_time).setChecked(True)
+        self._tool_picked()
+
+    def _unit_picked(self) -> None:
+        self.floating.btn[B.MEASURE].setChecked(True)     # picking Time or Phase picks Measure
+        self._tool_picked()
+
+    def _tool_picked(self) -> None:
+        tool = self.tool()
+        for space in self.spaces.values():
+            space.set_tool(tool)
+        self.tool_changed.emit(tool, self.measure_unit())
+
     # -- layouts -------------------------------------------------------------------------------
     def own_layouts(self) -> list[str]:
-        return json.loads(self.settings.value("analysis/layouts", "[]"))
+        return [n for n in json.loads(self.settings.value("analysis/layouts", "[]")) if n != BOARD]
 
     def _list_layouts(self) -> None:
         self.layouts.blockSignals(True)
         keep = self.layouts.currentText()
         self.layouts.clear()
-        self.layouts.addItems([*BUILT_IN, *self.own_layouts()])
+        self.layouts.addItems([BOARD, *self.own_layouts()])
         self.layouts.setCurrentText(keep)
         self.layouts.blockSignals(False)
 
     def start(self) -> None:
         """Open the layout last used."""
-        name = self.settings.value("analysis/layout", "Spike Sorting")
-        self.show_layout(name if self.layouts.findText(name) >= 0 else "Spike Sorting")
+        name = self.settings.value("analysis/layout", BOARD)
+        self.show_layout(name if self.layouts.findText(name) >= 0 else BOARD)
 
     def show_layout(self, name: str) -> None:
         if self.space is not None and self.space.name == name:
@@ -221,95 +208,78 @@ class ChartCanvas(QtWidgets.QWidget):
             self._open(name)
         self.space = self.spaces[name]
         self.stack.setCurrentWidget(self.space)
+        self.space.set_toolbar(self.floating)
         self.layouts.blockSignals(True)
         self.layouts.setCurrentText(name)
         self.layouts.blockSignals(False)
         self.settings.setValue("analysis/layout", name)
-        self.btn_reset.setText("Reset" if name in BUILT_IN else "Delete")
-        self.btn_reset.setToolTip("Put this layout back as it came" if name in BUILT_IN else "Delete this layout")
-        self.select(self.space.charts[0] if self.space.charts else None)
+        self.btn_reset.setText("Clear" if name == BOARD else "Delete")
+        self.btn_reset.setToolTip("Take every chart off the board" if name == BOARD else "Delete this layout")
+        self.floating.zoom.setText(f"{round(self.space.zoom * 100)}%")
+        self._picked()
         self.page.layout_changed()
 
     def _open(self, name: str) -> None:
         self._quiet = True
-        space = Workspace(self, name)
+        space = B.Board()
+        space.name = name
+        space.charts = []
+        space.axes = {}
+        space.apply_theme(self._mode)
+        space.set_tool(self.tool())
+        space.set_locked(self.lock.isChecked())
+        space.picked_changed.connect(lambda s=space: self._picked() if s is self.space else None)
+        space.moved.connect(self.changed)
+        space.context_requested.connect(self._context_menu)
+        space.delete_requested.connect(self.close_picked)
+        space.zoom_changed.connect(lambda z: self.floating.zoom.setText(f"{round(z * 100)}%"))
         self.spaces[name] = space
         self.stack.addWidget(space)
         saved = self.settings.value(f"analysis/layout/{name}", "")
         if saved:
             self._restore(space, json.loads(saved))
-        elif name in BUILT_IN:
-            self._build(space, BUILT_IN[name])
         self.relink_all(space)
-        space.show_hint()
-        for c in space.charts:
-            c.dock.set_locked(self.lock.isChecked())
-            c.collapse()
         self._quiet = False
 
-    def _build(self, space: Workspace, tree) -> None:
-        """Place a built-in layout: each level's first charts, split apart, then what's in them."""
-        first = self._make_dock(space, _first(tree))
-        space.addDockWidget(QtCore.Qt.DockWidgetArea.TopDockWidgetArea, first)
-        sizes: list = []
-        self._place(space, tree, first, sizes)
-
-        def arrange():
-            for docks, shares, way in sizes:
-                space.resizeDocks(docks, [s * 1000 for s in shares], way)
-        space._arrange = arrange
-
-    def _place(self, space: Workspace, tree, first: "ChartDock", sizes: list) -> None:
-        if isinstance(tree, str):
-            return
-        way = QtCore.Qt.Orientation.Horizontal if tree[0] == "h" else QtCore.Qt.Orientation.Vertical
-        heads = [first]
-        for _, part in tree[1][1:]:
-            head = self._make_dock(space, _first(part))
-            space.splitDockWidget(heads[-1], head, way)
-            heads.append(head)
-        for head, (_, part) in zip(heads, tree[1]):
-            self._place(space, part, head, sizes)
-        sizes.insert(0, (heads, [share for share, _ in tree[1]], way))
-
-    def _make_chart(self, space: Workspace, kind: str, cid: str | None = None):
+    def _make_chart(self, space: B.Board, kind: str, cid: str | None = None):
         self._made += 1
         chart = KINDS[kind](self.page, cid or f"{kind} {self._made}")
         space.charts.append(chart)
-        dock = ChartDock(chart, self)
         self.options.addWidget(chart.wrapped_options())
         chart.options_panel = self.options.widget(self.options.count() - 1)
         chart.channels_changed()
-        dock.set_locked(self.lock.isChecked())
+        chart.apply_theme(self._mode)
         return chart
 
-    def _make_dock(self, space: Workspace, kind: str) -> ChartDock:
-        chart = self._make_chart(space, kind)
-        chart.auto_hide = True
-        return chart.dock
+    def state_of(self, space: B.Board) -> dict:
+        charts = []
+        for c in space.charts:
+            p = c.dock.place
+            charts.append({"id": c.id, "kind": c.kind, **c.state(), "place": [p.x(), p.y(), p.width(), p.height()]})
+        return {"charts": charts, "view": space.state()}
 
-    def state_of(self, space: Workspace) -> dict:
-        return {"charts": [{"id": c.id, "kind": c.kind, **c.state()} for c in space.charts],
-                "docks": base64.b64encode(bytes(space.saveState())).decode()}
-
-    def _restore(self, space: Workspace, state: dict) -> None:
-        for s in state["charts"]:
+    def _restore(self, space: B.Board, state: dict) -> None:
+        loose = []
+        for s in state.get("charts", []):
             if s["kind"] == "Blocks":             # its name before Trials
                 s = {**s, "kind": "Trials", "name": "Trials" if s.get("name") == "Blocks" else s.get("name")}
-            if s["kind"] in KINDS:
-                chart = self._make_chart(space, s["kind"], s["id"])
-                chart.restore(s)
-                chart.channels_changed()
-                chart.show_title()
-                space.addDockWidget(QtCore.Qt.DockWidgetArea.TopDockWidgetArea, chart.dock)
-        docks = QtCore.QByteArray(base64.b64decode(state["docks"]))
-        space.restoreState(docks)
-
-        def arrange():
-            space.restoreState(docks)
-            for c in space.charts:
-                c.collapse(True)
-        space._arrange = arrange
+            if s["kind"] not in KINDS:
+                continue
+            chart = self._make_chart(space, s["kind"], s["id"])
+            chart.restore(s)
+            chart.channels_changed()
+            chart.show_title()
+            place = s.get("place")
+            if place:
+                self._put(space, chart, QtCore.QRectF(*place))
+            else:                                 # from before the whiteboard: lined up below
+                w, h = SIZE.get(s["kind"], (400, 280))
+                loose.append(self._put(space, chart, QtCore.QRectF(0, 0, w, h)))
+            chart.show_title()
+        if loose:
+            space.tidy()
+        if "view" in state:
+            space.restore(state["view"])
 
     def changed(self) -> None:
         """Something a layout remembers changed: save it once the changes stop."""
@@ -318,13 +288,18 @@ class ChartCanvas(QtWidgets.QWidget):
 
     def save(self) -> None:
         self._save_timer.stop()
-        if self.space is not None and not self.space._arrange:
-            self.settings.setValue(f"analysis/layout/{self.space.name}", json.dumps(self.state_of(self.space)))
+        if self.space is not None:
+            try:
+                self.settings.setValue(f"analysis/layout/{self.space.name}", json.dumps(self.state_of(self.space)))
+            except RuntimeError:                  # closing: the settings are gone already
+                pass
 
     def save_as(self, name: str) -> None:
-        """Keep these charts as a new layout, and go to it."""
+        """Keep these charts as a layout of your own, and go to it."""
+        if name == BOARD:
+            return
         own = self.own_layouts()
-        if name not in own and name not in BUILT_IN:
+        if name not in own:
             self.settings.setValue("analysis/layouts", json.dumps([*own, name]))
         self.settings.setValue(f"analysis/layout/{name}", json.dumps(self.state_of(self.space)))
         self._drop(name)
@@ -342,6 +317,8 @@ class ChartCanvas(QtWidgets.QWidget):
         if space is not None:
             for c in list(space.charts):
                 self._forget(c)
+            if self.floating.parent() is space:
+                self.floating.setParent(None)
             self.stack.removeWidget(space)
             space.deleteLater()
 
@@ -355,30 +332,26 @@ class ChartCanvas(QtWidgets.QWidget):
             self.active = None
 
     def reset(self) -> None:
-        """A built-in layout back as it came, or your own deleted."""
+        """Board cleared, or your own layout deleted."""
         name = self.space.name
         self.settings.remove(f"analysis/layout/{name}")
         self.space = None
         self._drop(name)
-        if name in BUILT_IN:
-            self.show_layout(name)
-        else:
+        if name != BOARD:
             self.settings.setValue("analysis/layouts", json.dumps([n for n in self.own_layouts() if n != name]))
             self._list_layouts()
-            self.show_layout("Spike Sorting")
+        self.show_layout(BOARD if name != BOARD else name)
 
     def _reset_pressed(self) -> None:
-        if self.space.name in BUILT_IN:
-            self.reset()
-            return
-        ask = QtWidgets.QMessageBox.question(self, "Delete layout", f"Delete the layout {self.space.name}?")
+        what = "Take every chart off the board?" if self.space.name == BOARD else f"Delete the layout {self.space.name}?"
+        ask = QtWidgets.QMessageBox.question(self, self.btn_reset.text(), what)
         if ask == QtWidgets.QMessageBox.StandardButton.Yes:
             self.reset()
 
     def app_state(self) -> dict:
         """Every layout opened, and the one showing, for an .argus file."""
         self.save()
-        return {"layout": self.space.name if self.space is not None else "Spike Sorting",
+        return {"layout": self.space.name if self.space is not None else BOARD,
                 "layouts": {name: self.state_of(space) for name, space in self.spaces.items()},
                 "own": self.own_layouts(), "lock": self.lock.isChecked(), "bars": self.bars.isChecked()}
 
@@ -395,13 +368,13 @@ class ChartCanvas(QtWidgets.QWidget):
         self._list_layouts()
         self.lock.setChecked(s["lock"])
         self.bars.setChecked(s["bars"])
-        self.show_layout(s["layout"] if self.layouts.findText(s["layout"]) >= 0 else "Spike Sorting")
+        self.show_layout(s["layout"] if self.layouts.findText(s["layout"]) >= 0 else BOARD)
 
     def _lock_toggled(self, on: bool) -> None:
         self.settings.setValue("analysis/lock", on)
         self.btn_add.setEnabled(not on)
-        for c in self.every():
-            c.dock.set_locked(on)
+        for space in self.spaces.values():
+            space.set_locked(on)
 
     # -- charts --------------------------------------------------------------------------------
     def every(self) -> list:
@@ -415,8 +388,7 @@ class ChartCanvas(QtWidgets.QWidget):
     def first(self, kind: str):
         return next((c for c in self.here() if c.kind == kind), None)
 
-    def _fill_add_menu(self) -> None:
-        menu = self.add_menu
+    def _fill_add_menu(self, menu: QtWidgets.QMenu, at) -> None:
         menu.clear()
         for group in GROUPS:
             menu.addSection(group)
@@ -425,102 +397,113 @@ class ChartCanvas(QtWidgets.QWidget):
                     n = sum(x.kind == c.kind for x in self.here())
                     action = menu.addAction(c.kind + (f"  ({n} open)" if n else ""))
                     action.setToolTip(c.tip)
-                    action.triggered.connect(lambda _=False, k=c.kind: self.add(k))
-        menu.addSeparator()
-        menu.addAction("Clear all charts", self.clear_all)
+                    action.triggered.connect(lambda _=False, k=c.kind: self.add(k, at=at))
+        menu.setToolTipsVisible(True)
 
-    def add(self, kind: str, beside=None):
-        """Open a chart, beside the one given or the clicked one."""
+    def _context_menu(self, at: QtCore.QPointF, where: QtCore.QPoint) -> None:
+        """Right-click on empty board: the charts, to put one there."""
+        menu = QtWidgets.QMenu(self)
+        menu.addSection("Add a chart here")
+        self._fill_add_menu(menu, at)
+        menu.addSeparator()
+        menu.addAction("Tidy up", self.space.tidy)
+        menu.addAction("Show every chart", self.space.fit_all)
+        menu.exec(where)
+
+    def add(self, kind: str, beside=None, at: QtCore.QPointF | None = None):
+        """Open a chart: at `at` (board place), beside the one given, else where there's room."""
         space = self.space
+        name = self._free_name(kind)
         chart = self._make_chart(space, kind)
-        chart.name = self._free_name(kind)
+        chart.name = name
         chart.name_box.setText(chart.name)
+        w, h = SIZE.get(kind, (400, 280))
+        if beside is not None and beside.dock is not None and beside in space.charts:
+            p = beside.dock.place
+            place = space.free_place(p.width(), p.height(), QtCore.QPointF(p.right() + B.GRID, p.top()))
+        else:
+            place = space.free_place(w, h, at)
+        frame = self._put(space, chart, place)
         chart.show_title()
-        self._dock_beside(space, chart, beside or self.active)
-        chart.collapse()
         self.relink_all(space)
-        space.show_hint()
-        self.select(chart)
+        space.pick([frame])
         self.page.layout_changed()
         self.changed()
         return chart
 
-    def _dock_beside(self, space: Workspace, chart, other) -> None:
-        if other is not None and other.dock is not None and other in space.charts and other is not chart:
-            space.splitDockWidget(other.dock, chart.dock, QtCore.Qt.Orientation.Horizontal)
-        else:
-            space.addDockWidget(QtCore.Qt.DockWidgetArea.TopDockWidgetArea, chart.dock)
+    def _put(self, space: B.Board, chart, place: QtCore.QRectF) -> B.ChartFrame:
+        frame = space.add(chart, place)
+        frame.bar.btn_copy.clicked.connect(lambda: self.copy(chart))
+        frame.bar.btn_close.clicked.connect(lambda: self.close_chart(chart))
+        return frame
 
     def _free_name(self, kind: str) -> str:
         names = {c.name for c in self.here()}
         return next(n for n in (kind if k == 1 else f"{kind} {k}" for k in range(1, 10000)) if n not in names)
 
     def copy(self, chart):
-        """Another of this chart, with its settings, and the same size."""
-        space, width, height = self.space, chart.dock.width(), chart.dock.height()
+        """Another of this chart, with its settings, the same size, beside it."""
         new = self.add(chart.kind, chart)
         name = new.name
-        new.restore({**chart.state(), "name": name, "auto_hide": False})
+        new.restore({**chart.state(), "name": name})
         new.channels_changed()
         new.show_title()
         new.refresh()
         self.page.raw.pins_changed()
-
-        def same_size():
-            if chart in space.charts and new in space.charts:
-                space.resizeDocks([chart.dock, new.dock], [width, width], QtCore.Qt.Orientation.Horizontal)
-                space.resizeDocks([new.dock], [height], QtCore.Qt.Orientation.Vertical)
-        same_size()
-        QtCore.QTimer.singleShot(0, same_size)    # once the new dock has its place
         return new
 
     def close_chart(self, chart) -> None:
         space = next(s for s in self.spaces.values() if chart in s.charts)
         space.charts.remove(chart)
         self._forget(chart)
-        space.removeDockWidget(chart.dock)
-        chart.dock.deleteLater()
+        space.remove(chart.dock)
         self.relink_all(space)
-        space.show_hint()
-        self.select(space.charts[0] if space.charts else None)
         self.page.raw.pins_changed()
         self.page.layout_changed()
+        self._picked()
         self.changed()
+
+    def close_picked(self) -> None:
+        for c in self.picked():
+            self.close_chart(c)
 
     def clear_all(self) -> None:
         for c in self.here():
             self.close_chart(c)
 
-    def select(self, chart) -> None:
-        """Show this chart's settings, and pick it out."""
-        if self.active is chart:
+    def picked(self) -> list:
+        """The charts picked on the board showing."""
+        if self.space is None:
+            return []
+        frames = self.space.picked()
+        return [c for c in self.space.charts if c.dock in frames]
+
+    def select(self, chart, add: bool = False) -> None:
+        """Pick this chart (and show its settings), or none."""
+        if self.space is None:
             return
-        for c in self.here():
-            c.dock.bar.setStyleSheet(self._bar_style(c is chart))
+        self.space.pick([chart.dock] if chart is not None and chart.dock is not None else [], add=add)
+
+    def _picked(self) -> None:
+        picked = self.picked()
+        chart = picked[0] if len(picked) == 1 else None
         self.active = chart
         self.options.setCurrentWidget(chart.options_panel if chart is not None else self.nothing)
         if chart is not None and chart.help == "cycles":
             chart._side.insertWidget(2, self.page.repeats)
             self.page.repeats.show()
-        self.page.windows["chart"].setWindowTitle(f"{chart.name} settings" if chart is not None else "Chart settings")
+        self.picked_changed.emit()
 
     def open_settings(self, chart) -> None:
-        """Open the settings window on this chart. While it's open, clicking another chart
-        shows that one's."""
+        """Show this chart's settings beside the board."""
         self.select(chart)
-        self.page.windows["chart"].open_()
-
-    def _bar_style(self, on: bool) -> str:
-        t = style.tokens(self.page._mode)
-        return f"#chartBar {{ background: {t['selection'] if on else t['panel']}; " \
-               f"border-bottom: 2px solid {t['focus'] if on else t['line']}; }} " \
-               f"#chartBar QLabel, #chartBar QToolButton {{ color: {t['ink']}; }}"
 
     def _focus_moved(self, _old, new) -> None:
         w = new
         while w is not None:
             if hasattr(w, "stale") and w in self.here():
-                self.select(w)
+                if w.dock is not None and not w.dock.picked:
+                    self.select(w)
                 return
             w = w.parentWidget()
 
@@ -531,9 +514,8 @@ class ChartCanvas(QtWidgets.QWidget):
             if chart in space.charts:
                 self.relink_all(space)
 
-    def relink_all(self, space: Workspace) -> None:
-        """Charts of a kind (against time, against phase) zoom together, unless unlinked, and
-        line up when they're stacked."""
+    def relink_all(self, space: B.Board) -> None:
+        """Charts of a kind (against time, against phase) zoom together, unless unlinked."""
         by_link: dict[str, list] = {}
         for c in space.charts:
             if c.link:
@@ -594,9 +576,12 @@ class ChartCanvas(QtWidgets.QWidget):
         return sorted({i for c in self.every() if c.pin is not None for i in c.blocks()})
 
     def apply_theme(self, mode: str) -> None:
+        self._mode = mode
+        self.floating.restyle(mode)
+        for space in self.spaces.values():
+            space.apply_theme(mode)
         for c in self.every():
             c.apply_theme(mode)
-            c.dock.bar.setStyleSheet(self._bar_style(c is self.active))
 
     def hideEvent(self, ev):
         super().hideEvent(ev)

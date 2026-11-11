@@ -380,12 +380,10 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("stim", "Stimulator", self.stim_page),
             ("trials", "Protocols", self.trials_page),
             ("analysis", "Analysis", self.analysis_page),
-            ("datapad", "DataPad", self.analysis_page.pad_page),
         ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else [])
           + [("membrane", "Membrane potential", self.membrane_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
             ("analysis", "Analysis", ["analysis"]),
-            ("datapad", "DataPad", ["datapad"]),
             ("sim", "Simulation", ["sim", "membrane"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)

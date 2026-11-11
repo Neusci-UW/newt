@@ -1,18 +1,17 @@
-"""The Analysis tab: every block of the session, the action potentials in them, and how
-the channels respond, on a canvas of charts (see canvas.py).
+"""The Analysis tab: every trial of the session, the action potentials in them, and how
+the channels respond, on a whiteboard of charts that you put there (see canvas.py, board.py).
 
-Beside the charts is the Blocks panel, which picks the blocks to analyze, with a check box to
-leave any out of everything. What every chart shares opens in windows from the top bar:
-Data (the stimulus and analyzed channels, Spread, gains and the stimulus fit), and Action
-potentials (threshold or bimodal, sorted into units, see analysis.py), run again whenever its
+Left of the board, a strip folds out what every chart shares (sidepanels.py): Trials, which
+picks the trials to analyze, with a check box to leave any out of everything; Groups,
+which groups every chart shows and their colours (and Spread, the SD or SEM shaded round
+averages); Channels (the stimulus and analyzed channels, gains and the stimulus fit); and
+Spikes (threshold or bimodal, sorted into units, see analysis.py, run again whenever its
 settings change until you Clear, with the units found, whose ticks decide what the charts
-show. The ⚙ on a chart opens its own settings; the phase charts share the repeats'. DataPad
-has a tab of its own, with a bar that picks the highlighted block (slider, ◀ ▶, or the ← →
-keys), and borrows the Blocks panel while it's showing.
+show). Right of the board are the settings of the chart you picked; the phase charts share
+the repeats'. The Measure tool measures stretches of the charts into a DataPad table
+(measurecharts.py). Above the board, a bar picks the highlighted trial (slider, ◀ ▶).
 
-Averages can be shaded with their SD or SEM across trials (Spread, in the Blocks panel).
-
-The blocks are the ones being reviewed, or those recorded so far in live mode.
+The trials are the ones being reviewed, or those recorded so far in live mode.
 """
 from __future__ import annotations
 
@@ -31,11 +30,12 @@ from . import groupsfile
 from . import style
 from .trialsbrowser import TrialsBrowser
 from .canvas import ChartCanvas
-from .datapadview import DataPadView
+from .measurecharts import MeasureTool
+from .sidepanels import GroupColours, Rail, SettingsPanel, drawer
 from .stim import Stimulus
 from .repeatfinder import RepeatFinder
 from .spikefinder import SpikeFinder
-from .viewkit import scroll_column, shrink_combos
+from .viewkit import scroll_column
 
 
 class AnalysisPage(QtWidgets.QWidget):
@@ -56,7 +56,7 @@ class AnalysisPage(QtWidgets.QWidget):
 
         top = QtWidgets.QHBoxLayout()
         self.source = _flexible_label()
-        self.block_bar = QtWidgets.QWidget()      # with a DataPad: the other charts work on the chosen blocks
+        self.block_bar = QtWidgets.QWidget()      # the highlighted trial
         bar = QtWidgets.QHBoxLayout(self.block_bar)
         bar.setContentsMargins(0, 0, 0, 0)
         bar.addWidget(QtWidgets.QLabel("Trial"))
@@ -148,28 +148,17 @@ class AnalysisPage(QtWidgets.QWidget):
 
         self.raw = SpikeFinder(self)
         self.repeats = RepeatFinder(self)
+        self.measure = MeasureTool(self)
         self.canvas = ChartCanvas(self)
-        self.datapad = DataPadView(self)
-        self.pad_page = DataPadPage(self)
-        self.windows = {"channels": SettingsWindow(self, "channels", "Channels", self.blocks_panel.extras),
-                        "groups": SettingsWindow(self, "groups", "Groups", self.blocks_panel.group_extras),
-                        "spikes": SettingsWindow(self, "spikes", "Action potentials", self.raw),
-                        "chart": SettingsWindow(self, "chart", "Chart settings", self.canvas.options)}
-        for k, (key, text, tip) in enumerate((
-                ("channels", "Channels…", "The stimulus and analyzed channels, amplifier gains and the stimulus fit"),
-                ("spikes", "Action potentials…", "Find action potentials, and tick and colour the units"))):
-            button = QtWidgets.QPushButton(text)
-            button.setToolTip(tip)
-            button.clicked.connect(self.windows[key].open_)
-            self.canvas.toolbar.layout().insertWidget(1 + k, button)
-        self.blocks_panel.btn_groups.clicked.connect(self.windows["groups"].open_)
         self.btn_save = QtWidgets.QPushButton("Save")
         self.btn_save.setToolTip("Save everything in one .argus file: the recordings, the spikes found and units, "
-                                 "DataPad's rows, and how Argus looks now, so it all comes back when it's opened")
+                                 "the measure windows, and how Argus looks now, so it all comes back when it's opened")
         self.btn_save.clicked.connect(self.main.save)
         self.canvas.toolbar.layout().insertWidget(0, self.btn_save)
         top.addWidget(self.canvas.toolbar)
+        top.addWidget(self.block_bar)
         top.addWidget(self.source, 1)
+        self.canvas.tool_changed.connect(lambda *_: self.measure.decorate_all())
         self.blocks_panel.add_setting("Analyze", self.raw.channel)
         self.blocks_panel.add_group_setting("Spread", self.spread_box)
         self.blocks_panel.add_group_setting("Groups", self.page_map)
@@ -178,11 +167,29 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.add_setting("Stim fit", self.fit_box)
         self.blocks_panel.color_requested.connect(self.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.set_page_color(name, None))
+        # left: the strip and the panel it folds out; right: the picked chart's settings
+        self.group_colours = GroupColours(self)
+        self.blocks_panel.group_extras.layout().insertWidget(0, self.group_colours)
+        self.blocks_panel.btn_groups.clicked.connect(lambda: self.open_panel("groups"))
+        self.rail = Rail()
+        self.drawer = QtWidgets.QStackedWidget()
+        self.panels = {"trials": self.blocks_panel, "groups": drawer(self.blocks_panel.group_extras),
+                       "channels": drawer(self.blocks_panel.extras), "spikes": drawer(self.raw)}
+        for w in self.panels.values():
+            self.drawer.addWidget(w)
+        self.rail.picked.connect(self.open_panel)
+        self.side = SettingsPanel(self)
+        self.side_scroll = scroll_column(self.side)
+        self.side_scroll.setMinimumWidth(260)
+        self.side_scroll.setMaximumWidth(340)
         self.body = QtWidgets.QHBoxLayout()
-        self.body.setSpacing(10)
-        self.body.addWidget(self.blocks_panel)
+        self.body.setSpacing(0)
+        self.body.addWidget(self.rail)
+        self.body.addWidget(self.drawer)
         self.body.addWidget(self.canvas, 1)
+        self.body.addWidget(self.side_scroll)
         lay.addLayout(self.body, 1)
+        self.open_panel(self.main.settings.value("analysis/panel", "trials"))
 
         self.btn_prev.clicked.connect(lambda: self.step(-1))
         self.btn_next.clicked.connect(lambda: self.step(1))
@@ -203,8 +210,6 @@ class AnalysisPage(QtWidgets.QWidget):
         self.slider.blockSignals(False)
         self.raw.current_changed()
         self.canvas.current_changed()
-        if self.datapad.isVisible():
-            self.datapad.redraw()
 
     # -- the blocks --------------------------------------------------------------------------
     @property
@@ -214,7 +219,7 @@ class AnalysisPage(QtWidgets.QWidget):
     def source_changed(self) -> None:
         """The session or its blocks changed: reload when next shown."""
         self._dirty = True
-        if self.isVisible() or self.pad_page.isVisible():
+        if self.isVisible():
             self.refresh()
 
     def catch_up(self) -> None:
@@ -224,15 +229,22 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def showEvent(self, ev):
         super().showEvent(ev)
-        self.body.insertWidget(0, self.blocks_panel)   # it goes with whichever tab is showing
         self.catch_up()
-        for w in self.windows.values():
-            w.come_back()
 
-    def hideEvent(self, ev):
-        super().hideEvent(ev)
-        for w in self.windows.values():
-            w.hide()                              # only with Analysis; they come back with it
+    def open_panel(self, key: str) -> None:
+        """Fold out one of the left panels (Trials, Groups, Channels, Spikes), or none ("")."""
+        key = key if key in self.panels else ""
+        self.rail.set_open(key)
+        self.drawer.setVisible(bool(key))
+        if key:
+            self.drawer.setCurrentWidget(self.panels[key])
+        self.main.settings.setValue("analysis/panel", key)
+
+    def panel(self) -> str:
+        """The left panel folded out, or ""."""
+        if not self.drawer.isVisibleTo(self):
+            return ""
+        return next(k for k, w in self.panels.items() if w is self.drawer.currentWidget())
 
     def _read(self, path: Path) -> dict:
         return self.main.store.read(path)            # shared with review and the Blocks panel
@@ -274,7 +286,6 @@ class AnalysisPage(QtWidgets.QWidget):
         # calculated channels these blocks can have (each may use the ones above it)
         self._calcs = {c.name: (c, f) for c, f in zip(self._chain.calcs, self._chain.formulas) if f is not None}
         names = self.names()
-        self.datapad.set_channels(names)
         self.canvas.channels_changed()
         self._fill_stim_channel(recorded)             # the stimulus is a recorded channel
         self.raw.set_channels(names)
@@ -293,7 +304,7 @@ class AnalysisPage(QtWidgets.QWidget):
         return [p.stem for p in self._paths]
 
     def _analysis_state(self) -> dict:
-        return {"spikes": self.raw.state(), "datapad": self.datapad.state()}
+        return {"spikes": self.raw.state(), "measure": self.measure.state()}
 
     def _digest(self) -> str:
         """What there is to save, as one string, to tell if it's changed."""
@@ -325,7 +336,7 @@ class AnalysisPage(QtWidgets.QWidget):
             try:
                 state, events = analysisfile.load(folder, self._stems())
                 self.raw.restore(state["spikes"], events)
-                self.datapad.restore(state["datapad"])
+                self.measure.restore(state.get("measure"))
             except (OSError, ValueError, KeyError, TypeError) as e:
                 self.main.statusBar().showMessage(f"Couldn't read the saved analysis: {e}", 10000)
         self._saved = self._digest()
@@ -335,7 +346,7 @@ class AnalysisPage(QtWidgets.QWidget):
         stems = self._stems()
         return {"stim_channel": self.stim_channel.currentData() or "", "current": self.index(),
                 "picked": [stems[i] for i in self.picked if i < len(stems)], "picked_pages": list(self.picked_pages),
-                "windows": [k for k, w in self.windows.items() if w.isVisible()], "canvas": self.canvas.app_state()}
+                "panel": self.panel(), "canvas": self.canvas.app_state()}
 
     def restore_app_state(self, s: dict) -> None:
         self.catch_up()
@@ -351,17 +362,14 @@ class AnalysisPage(QtWidgets.QWidget):
         self.current.setValue(s["current"] + 1)
         self._analysis_from = None                # picking the blocks cleared the spikes: as saved again
         self._load_analysis()
-        for key, w in self.windows.items():
-            self.main.settings.setValue(f"analysis/window/{key}/open", key in s["windows"])
-            if key in s["windows"] and self.isVisible():
-                w.show()
+        self.open_panel(s.get("panel", "trials"))
 
     def has_unsaved_analysis(self) -> bool:
         """Whether there's analysis that would be lost."""
         folder = self._folder()
         if folder is None or self._saved is None:
             return False
-        anything = self.raw.events is not None or self.datapad.rows or analysisfile.exists(folder)
+        anything = self.raw.events is not None or self.measure.windows or analysisfile.exists(folder)
         return bool(anything) and self._digest() != self._saved
 
     def resolve_unsaved(self) -> bool:
@@ -451,8 +459,6 @@ class AnalysisPage(QtWidgets.QWidget):
     def _data_changed(self) -> None:
         """A gain or fit changes what every analysis reads."""
         self._save_looks()
-        if self.datapad.rows:
-            self.datapad.recompute()
 
     def unit_of(self, name: str) -> str:
         calc = getattr(self, "_calcs", {}).get(name)
@@ -590,6 +596,10 @@ class AnalysisPage(QtWidgets.QWidget):
             + ": select a group to see just its trials" if n else
             f"No stimulus pulses found on {how}: is it the right channel?" if how != "notes" else
             "No stimuli in the notes")
+        if hasattr(self, "side"):                 # the group lists beside the board
+            self.group_colours.fill()
+            self.side.groups.show_for(self.canvas.picked())
+
 
     @staticmethod
     def _stimuli_note(b: dict | None) -> tuple:
@@ -835,13 +845,15 @@ class AnalysisPage(QtWidgets.QWidget):
     def layout_changed(self) -> None:
         """Other charts are showing."""
         self.repeats.listen()
+        self.measure.decorate_all()
 
     # -- looks ----------------------------------------------------------------------------
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         self.raw.apply_theme(mode)
         self.canvas.apply_theme(mode)
-        self.datapad.apply_theme(mode)
+        self.rail.restyle(mode)
+        self.side.restyle(mode)
 
 
 def _flexible_label() -> QtWidgets.QLabel:
@@ -851,68 +863,3 @@ def _flexible_label() -> QtWidgets.QLabel:
     lbl.setWordWrap(True)
     lbl.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
     return lbl
-
-
-class DataPadPage(QtWidgets.QWidget):
-    """The DataPad tab: the block bar above DataPad's settings and tables, beside the Blocks
-    panel, which it borrows from Analysis while it's showing."""
-
-    def __init__(self, page: AnalysisPage):
-        super().__init__()
-        self.page = page
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(8)
-        lay.addWidget(page.block_bar)
-        self.body = QtWidgets.QHBoxLayout()
-        self.body.setSpacing(10)
-        page.datapad.side.setMaximumWidth(360)
-        self.body.addWidget(scroll_column(page.datapad.side))
-        self.body.addWidget(page.datapad, 1)
-        lay.addLayout(self.body, 1)
-
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        self.body.insertWidget(0, self.page.blocks_panel)
-        self.page.catch_up()
-
-
-class SettingsWindow(QtWidgets.QWidget):
-    """Settings in a small window of their own, opened from Analysis. It stays open beside
-    the charts while you work, can go anywhere, and comes back where you left it."""
-
-    def __init__(self, page: AnalysisPage, key: str, title: str, content: QtWidgets.QWidget):
-        super().__init__(page, QtCore.Qt.WindowType.Tool)
-        self.key, self.settings = key, page.main.settings
-        self.setWindowTitle(title)
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(10, 10, 10, 10)
-        scroll = QtWidgets.QScrollArea()          # a tall one scrolls on a short screen
-        scroll.setWidget(content)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        shrink_combos(content)
-        lay.addWidget(scroll)
-        self.resize(340, 480)
-        saved = self.settings.value(f"analysis/window/{key}/geometry")
-        if saved is not None:
-            self.restoreGeometry(saved)
-
-    def open_(self) -> None:
-        self.settings.setValue(f"analysis/window/{self.key}/open", True)
-        self.show()
-        self.raise_()
-
-    def come_back(self) -> None:
-        """Open again with Analysis, if it was open when Analysis was left."""
-        if self.settings.value(f"analysis/window/{self.key}/open", False, type=bool):
-            self.show()
-
-    def hideEvent(self, ev):
-        super().hideEvent(ev)
-        self.settings.setValue(f"analysis/window/{self.key}/geometry", self.saveGeometry())
-
-    def closeEvent(self, ev):
-        self.settings.setValue(f"analysis/window/{self.key}/open", False)
-        super().closeEvent(ev)

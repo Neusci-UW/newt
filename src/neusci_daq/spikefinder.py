@@ -212,12 +212,13 @@ class SpikeFinder(View):
         self.channel.blockSignals(False)
         self.settings_changed()
 
-    def usable(self, idx: list[int]) -> list[int]:
-        """Those of these blocks that have this channel at the first block's rate."""
+    def usable(self, idx: list[int], hidden_too: bool = False) -> list[int]:
+        """Those of these blocks that have this channel at the first block's rate (and aren't
+        left out of everything, unless hidden_too: a chart's own groups show anyway)."""
         name = self.channel.currentText()
         good = [b for b in self.blocks if b is not None]
         fs = good[0]["sample_rate"] if good else 0
-        hidden = self.page.hidden_blocks()
+        hidden = set() if hidden_too else self.page.hidden_blocks()
         return [i for i in idx if i not in hidden and self.page.has(i, name) and self.blocks[i]["sample_rate"] == fs]
 
     def _chosen(self) -> list[int]:

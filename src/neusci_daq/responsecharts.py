@@ -63,6 +63,14 @@ class TracesChart(Chart):
     def plots(self) -> list:
         return self._plots
 
+    def measure_channel(self, k: int) -> str:
+        """Plot k's channel (stacked), or the first one ticked (overlaid)."""
+        names = self.page.names()
+        ticked = sorted(self.ticked(), key=lambda nc: (names.index(nc[0]) if nc[0] in names else 99, nc[1]))
+        if not ticked:
+            return super().measure_channel(k)
+        return ticked[min(k, len(ticked) - 1)][0]
+
     def state(self) -> dict:
         return {**super().state(), "ticked": sorted(self.ticked())}
 
@@ -466,6 +474,8 @@ class FitChart(Chart):
         if not chosen or not stim or not fit:
             self.fit_plot.getPlotItem().setTitle("Stimulus fit: pick the Stimulus channel and a Stim fit in Channels",
                                                  color=self._fg())
+            for curve in (self.fit_rec, self.fit_line, self.resid_line):
+                curve.setData([], [])
             return
         b = chosen[0]
         y, line = page.recorded(b, stim), page.trace(b, stim)
@@ -515,6 +525,11 @@ class CycleChart(Chart):
 
     def plots(self) -> list:
         return [self.plot]
+
+    def measure_channel(self, k: int) -> str:
+        """The channel cut into cycles, if this chart has one, else the stimulus."""
+        box = getattr(self, "cycle_resp", None)
+        return box.currentText() if box is not None and box.currentText() else self.page.repeats.channel()
 
     def _add_cycle_settings(self) -> None:
         self.cycle_resp = QtWidgets.QComboBox()

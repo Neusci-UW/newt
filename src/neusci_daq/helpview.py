@@ -309,22 +309,23 @@ TOPICS = {
         ),
     },
     "datapad": {
-        "title": "How DataPad works",
+        "title": "How measuring works",
         "picture": _datapad_picture,
-        "text": "DataPad turns traces into numbers. Each <b>column</b> is a channel and something to measure on it, "
-                "the <b>window</b> says when in each trial to measure, and each <b>row</b> is a trial, or the "
-                "average of several. Then read the table, or plot one column against another and <b>fit</b> a "
-                "curve to the points.",
+        "text": "The <b>Measure</b> tool turns traces into numbers. With it in <b>Time</b>, drag across a chart "
+                "against time to make a <b>window</b>: when, in each trial, to measure. In <b>Phase</b>, drag across "
+                "a chart against phase to measure the same part of every stimulus cycle. Each window is a "
+                "<b>column</b> of this table, with what to measure and on which channel in its settings; each "
+                "<b>row</b> is a trial, or a group. Then plot one column against another on a <b>Scatter</b> "
+                "chart and fit a curve to the points.",
         "warning": "",
         "glossary": (
-            ("Column", "A channel and a measurement, such as the peak of Ch1."),
-            ("Row", "One trial or average, measured in every column."),
-            ("Window", "The stretch of each trial that's measured."),
-            ("Repeat every", "Measures the window again further along, adding a row each time."),
-            ("Recompute", "Measures every row again with the settings as they are now."),
+            ("Window", "The stretch of each trial (Time) or cycle (Phase) that's measured. Drag it, or its edges."),
+            ("Column", "A window's measurement, such as the peak of Ch1 from 200 to 400 ms."),
+            ("Row", "One trial; a group's average trace; or a group's trials measured one by one (mean ± SD)."),
+            ("Repeat every", "Measures the window again further along, adding a column each time."),
+            ("Phase", "Where in the stimulus's cycle: 0° to 360°, measured on every cycle and averaged."),
             ("Scatter", "One column against another, a point per row."),
             ("Fit", "The curve that comes closest to the points."),
-            ("Spread", "SD shows how much rows vary; SEM how sure the average is."),
         ),
     },
 }

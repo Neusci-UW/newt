@@ -104,7 +104,7 @@ class SessionFilesMixin:
         """Ask what to do with analysis that isn't saved: 'save', 'discard' or 'cancel'."""
         B = QtWidgets.QMessageBox.StandardButton
         r = QtWidgets.QMessageBox.question(
-            self, "Unsaved analysis", "The spikes found, units or DataPad rows have changed since they were saved.\n\n"
+            self, "Unsaved analysis", "The spikes found, units or measure windows have changed since they were saved.\n\n"
             "Save them with the session?", B.Save | B.Discard | B.Cancel, B.Save)
         return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
 

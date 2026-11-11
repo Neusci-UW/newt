@@ -234,8 +234,8 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    assert [ap.canvas.layouts.itemText(i) for i in range(ap.canvas.layouts.count())] == \
-        ["Spike Sorting", "Response", "Waveforms"]
+    assert [ap.canvas.layouts.itemText(i) for i in range(ap.canvas.layouts.count())] == ["Board"]
+    assert not ap.canvas.here()                                      # empty: you choose every chart
     C(ap.raw, "Trials").plot.setFocus()
     key(C(ap.raw, "Trials").plot, QtCore.Qt.Key.Key_Right)
     pump(app, 0.05)
@@ -295,7 +295,7 @@ def test_comparison_traces_derivatives_and_triggered_averages(app, win):
     ap = win.analysis_page
     ap.raw.channel.setCurrentText("Ch2")
     ap.raw.find()
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.2)
     assert len(ap.chart("Traces")._plots) == 3                                      # Ch1, Ch2 and Stim V
     ap.chart("Traces").series.item(1, 1).setCheckState(QtCore.Qt.CheckState.Checked)   # + Ch2 dV/dt
@@ -519,7 +519,7 @@ def test_blocks_are_grouped_by_their_stimulus(app, win):
     ap.select_blocks([])                                             # all blocks, then compare groups
     raw.channel.setCurrentText("Ch2")
     raw.find()
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.2)
     ap.chart("Stimulus-triggered rate").trigger.setCurrentIndex(ap.chart("Stimulus-triggered rate").trigger.findData("Stim"))
     curves = ap.chart("Stimulus-triggered rate").plot.getPlotItem().listDataItems()
@@ -540,7 +540,7 @@ def test_stimulus_channel_is_set_after_recording_and_remembered(app, win, tmp_pa
     ap.stim_channel.setCurrentIndex(0)                               # None: the notes still group
     assert len(ap.groups) == 2 and "notes" in ap.group_note.text()
     ap.stim_channel.setCurrentIndex(ap.stim_channel.findData("Stim"))
-    ap.show_layout("Response")
+    put(ap, "Response")
     assert ap.chart("Stimulus-triggered rate").trigger.currentData() == "Stim"                 # Response follows it
     w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)        # open it again: remembered
     w2.open_session(win.review_dir)
@@ -659,20 +659,19 @@ def test_averages_show_and_export_sd_and_sem(app, win, tmp_path):
     assert float(rows[11][2]) == pytest.approx(sd[10], rel=1e-4) and rows[11][4] == "2"
     raw.channel.setCurrentText("Ch2")                                # the spike rate gets bands too
     raw.find()
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.2)
     ap.chart("Stimulus-triggered rate").trigger.setCurrentIndex(ap.chart("Stimulus-triggered rate").trigger.findData("Stim"))
     fills = [x for x in ap.chart("Stimulus-triggered rate").plot.getPlotItem().items if isinstance(x, __import__("pyqtgraph").FillBetweenItem)]
     assert len(fills) == 2 and "SEM across stimuli" in ap.chart("Stimulus-triggered rate").plot.getPlotItem().titleLabel.text
-    ap.show_layout("Spike Sorting")
+    put(ap, "Spike Sorting")
     ap.spread_box.setCurrentIndex(0)
     assert C(raw, "Trials").bands == []
 
 
-# ---------------------------------------------------------------- DataPad
-def test_datapad_measurements():
+# ---------------------------------------------------------------- measuring (the Measure tool, DataPad table, Scatter)
+def test_measurements():
     from neusci_daq import datapad as D
-    from neusci_daq.datapadview import fmt
     fs = 10000.0
     t = np.arange(int(fs)) / fs
     y = 2 * np.sin(2 * np.pi * 7 * t) + 1
@@ -685,92 +684,128 @@ def test_datapad_measurements():
     assert m["rise"] == pytest.approx(4 * np.pi * 7, rel=1e-3) and m["spikes"] == 3
     w = D.window(t, 0.2, 0.3)
     assert t[w][0] == pytest.approx(0.2) and t[w][-1] == pytest.approx(0.3)
-    assert D.window(t, None, None) == slice(0, len(t))
     assert D.measure("slope", t[w], 3 * t[w] + 1, fs) == pytest.approx(3)
     assert np.isnan(D.measure("spikes", t, y, fs)) and np.isnan(D.measure("mean", t, np.full(len(t), np.nan), fs))
-    assert D.unit_of("slope", "mV") == "mV/s" and D.unit_of("freq", "V") == "Hz"
-    assert fmt(0.0374, "V") == "37.4 mV" and fmt(12.5, "V/s") == "12.5 V/s" and fmt(0.002, "s") == "2 ms"
-    assert fmt(float("nan"), "V") == "—" and fmt(3, "") == "3"
 
 
-def test_datapad_measures_blocks_averages_and_groups(app, win, tmp_path):
-    import csv
-    two_stimulus_session(app, win)
-    win.show()
-    win.tabs.pick(0, "analysis")
+def test_measure_windows_repeat_into_columns_in_time_or_phase():
+    from neusci_daq import measure as M
+    w = M.Window(1, "W1", M.TIME, 0.1, 0.05, "max", "Ch1", repeat=0.2)
+    assert w.starts(0.6) == pytest.approx([0.1, 0.3, 0.5])         # one more wouldn't fit
+    cols = M.columns([w, M.Window(2, "P1", M.PHASE, 0, 90, "tmax", "Ch1")], 0.6)
+    assert len(cols) == 4 and cols[-1].end == 90
+    assert cols[0].label(lambda c: "V") == "W1 @ 100 ms Ch1 Maximum (V)"
+    assert cols[-1].label(lambda c: "V") == "P1 Ch1 Phase of maximum (°)"
+    assert M.unit_label("slope", "mV", M.PHASE) == "mV/°" and M.unit_label("spikes", "", M.PHASE) == "per cycle"
+    R = np.vstack([np.sin(np.radians(np.arange(360))) * k for k in (1, 2)])   # two cycles, peaks at 90°
+    peak = M.Column(M.Window(3, "P2", M.PHASE, 0, 180, "tmax", "Ch1"), 0, 180)
+    assert M.measure_cycles(peak, R) == pytest.approx(90, abs=1)
+    mean = M.Column(M.Window(4, "P3", M.PHASE, 0, 360, "max", "Ch1"), 0, 360)
+    assert M.measure_cycles(mean, R) == pytest.approx(1.5, abs=0.01)  # the mean of the cycles' maxima
+    assert M.fmt((1.0, 0.5, 3), "V") == "1 V ± 500 mV" and M.fmt(0.0374, "V") == "37.4 mV"
+    assert M.next_name([w], M.TIME) == "W2" and M.next_name([], M.PHASE) == "P1"
+
+
+def test_the_measure_tool_makes_a_window_and_a_datapad_table(app, win, tmp_path):
+    from neusci_daq import datapad as D, measure as M
+    ap, raw = two_stimulus_charts(app, win)
+    canvas = ap.canvas
+    traces = C(raw, "Traces")
+    canvas.set_tool("measure", "time")
+    assert traces.plots()[0].getPlotItem().vb.on_drag_select is not None   # the tool drags on charts against time
+    assert canvas.first("DataPad table") is None
+    ap.measure._dragged(traces, 0, 0.05, 0.15, True)
     pump(app, 0.2)
-    ap = win.analysis_page
-    ap.main.tabs.pick(0, "datapad")
-    pad = ap.datapad
+    table = canvas.first("DataPad table")
+    assert table is not None and len(ap.measure.windows) == 1         # the first window brings a table
+    w = ap.measure.windows[0]
+    assert w.name == "W1" and w.unit == M.TIME and w.start == pytest.approx(0.05) and w.width == pytest.approx(0.1)
+    assert any(isinstance(i, M_region()) for i in traces.plots()[0].getPlotItem().items)
+    chosen = raw.chosen_or_none()
+    assert len(table.rows) == len(chosen) and len(table.cols) == 1
+    i = chosen[0]
+    y = ap.trace(i, w.channel)
+    fs = ap.blocks[i]["sample_rate"]
+    t = np.arange(len(y)) / fs
+    sl = D.window(t, 0.05, 0.15)
+    assert table.rows[0]["values"][0] == pytest.approx(D.measure("max", t[sl], y[sl], fs))
+    table.rows_from.setCurrentIndex(table.rows_from.findData("spread"))
     pump(app, 0.1)
-    assert pad.columns == [] and pad.whole.isChecked()               # no columns yet; the whole block
-    assert pad.region.getRegion() == pytest.approx((0, ap.blocks[0]["duration_s"]), abs=1e-3)
-    pad.add_column("Stim", "max")
-    pad.add_column("Stim", "mean")
-    pad.whole.setChecked(True)
-    fs = ap.blocks[0]["sample_rate"]
-
-    assert pad.add_rows("current") == 1                               # the highlighted block
-    assert pad.rows[0]["values"][("Stim", "max")] == pytest.approx(ap.trace(0, "Stim").max())
-    assert pad.add_rows("blocks") == 4                                # each block
-    assert [r["group"] for r in pad.rows[1:]] == [g for g, b in ap.groups for _ in b]
-
-    pad.clear_rows()
-    pad.add_rows("stats")                                             # mean ± spread per group
-    assert [r["n"] for r in pad.rows] == [2, 2]
-    per = [ap.trace(i, "Stim").max() for i in ap.groups[1][1]]
-    assert pad.rows[1]["values"][("Stim", "max")] == pytest.approx(np.mean(per))
-    assert pad.rows[1]["spread"][("Stim", "max")] == pytest.approx(np.std(per, ddof=1))
-    assert pad.rows[0]["values"][("Stim", "max")] < pad.rows[1]["values"][("Stim", "max")]  # 1 V < 2 V
-    ap.spread_box.setCurrentIndex(2)                                  # SEM
-    pad.add_rows("stats")
-    assert pad.rows[3]["spread"][("Stim", "max")] == pytest.approx(np.std(per, ddof=1) / np.sqrt(2))
-    assert "± SEM" in pad.rows[3]["row"]
-
-    pad.clear_rows()
-    pad.whole.setChecked(False)                                       # a window: just before the 1st pulse
-    pad.t0.setValue(0.0)
-    pad.t1.setValue(0.0005)
-    assert pad.region.getRegion() == pytest.approx((0.0, 0.0005))
-    pad.add_rows("avg")                                               # each group's average trace
-    blocks = ap.groups[0][1]
-    Y = np.array([ap.trace(i, "Stim")[:int(0.0005 * fs) + 1] for i in blocks])
-    assert pad.rows[0]["values"][("Stim", "mean")] == pytest.approx(Y.mean(0).mean(), rel=1e-6)
-    assert pad.rows[0]["window"] == "0–0.0005 s"
-
-    pad.region.setRegion((0.1, 0.2))                                  # dragging sets the boxes
-    pad.region.sigRegionChangeFinished.emit(pad.region)
-    assert (pad.t0.value(), pad.t1.value()) == pytest.approx((0.1, 0.2))
-
-    out = pad.export(tmp_path / "pad.csv")
-    rows = list(csv.reader(out.open()))
-    assert rows[0][:4] == ["row", "group", "window", "n"] and rows[0][4] == "Stim: Maximum (V)"
-    assert len(rows) == 1 + len(pad.rows) and float(rows[1][6]) == pytest.approx(
-        pad.rows[0]["values"][("Stim", "mean")], rel=1e-5)
-    pad.copy()
-    assert app.clipboard().text().splitlines()[0].startswith("row\tgroup\twindow\tn")
-    assert pad.table.rowCount() == len(pad.rows) and pad.table.columnCount() == 6
+    assert len(table.rows) == len(ap.shown) and isinstance(table.rows[0]["values"][0], tuple)
+    table.rows_from.setCurrentIndex(table.rows_from.findData("average"))
+    pump(app, 0.1)
+    assert len(table.rows) == len(ap.shown) and np.isfinite(table.rows[0]["values"][0])
+    ap.measure.update(w.id, repeat=0.2)                               # a column each time it repeats
+    pump(app, 0.1)
+    assert len(table.cols) > 1
+    out = table.export(tmp_path / "pad.csv")
+    head = out.read_text().splitlines()[0]
+    assert "W1" in head and head.startswith("Group")
+    ap.measure.remove(w.id)
+    pump(app, 0.1)
+    assert not table.cols and table.empty_note.isVisibleTo(table)
 
 
-def test_datapad_counts_spikes_found_on_the_raw_tab(app, win):
-    two_stimulus_session(app, win)
-    win.show()
-    win.tabs.pick(0, "analysis")
+def M_region():
+    from neusci_daq.measurecharts import _Region
+    return _Region
+
+
+def test_a_window_on_a_spike_chart_counts_spikes(app, win):
+    ap, raw = two_stimulus_charts(app, win)
+    ev = raw.find()
+    raster = C(raw, "Raster")
+    ap.canvas.set_tool("measure", "time")
+    ap.measure._dragged(raster, 0, 0.0, 10.0, True)
     pump(app, 0.2)
-    ap = win.analysis_page
-    ap.main.tabs.pick(0, "datapad")
-    pad = ap.datapad
-    pad.columns = []
-    pad.add_column("Ch2", "spikes")
-    pad.whole.setChecked(True)
-    pad.add_rows("current")
-    assert np.isnan(pad.rows[0]["values"][("Ch2", "spikes")])       # nothing found yet
-    assert "press Find" in pad.message.text()
-    ap.raw.channel.setCurrentText("Ch2")
-    ev = ap.raw.find()
-    pad.add_rows("blocks")
-    assert [r["values"][("Ch2", "spikes")] for r in pad.rows[1:]] == \
-        [float(np.sum(ev.block == i)) for i in range(4)]
+    w = ap.measure.windows[0]
+    assert w.key == "spikes"
+    table = ap.canvas.first("DataPad table")
+    total = sum(r["values"][0] for r in table.rows)
+    assert total == (np.isin(ev.block, raw.chosen_or_none())).sum()
+
+
+def test_phase_windows_measure_every_cycle_and_scatter_plots_the_columns(app, win):
+    from neusci_daq import measure as M
+    ap, _ = _sine_session(app, win)
+    canvas = ap.canvas
+    cycles = ap.chart("Response by cycle")
+    canvas.set_tool("measure", "time")
+    assert cycles.plot.getPlotItem().vb.on_drag_select is None        # Time doesn't measure in phase
+    canvas.set_tool("measure", "phase")
+    assert cycles.plot.getPlotItem().vb.on_drag_select is not None
+    ap.measure._dragged(cycles, 0, 0, 180, True)
+    ap.measure._dragged(cycles, 0, 180, 360, True)
+    pump(app, 0.2)
+    first, second = ap.measure.windows
+    assert first.unit == second.unit == M.PHASE and (first.name, second.name) == ("P1", "P2") and first.key == "mean"
+    table = canvas.first("DataPad table")
+    assert table.rows and all(np.isfinite(v) for v in table.rows[0]["values"])
+    scatter = canvas.add("Scatter")
+    pump(app, 0.2)
+    labels = [c.label(ap.unit_of) for c in table.cols]
+    scatter.x_box.setCurrentIndex(scatter.x_box.findData(labels[0]))
+    scatter.y_box.setCurrentIndex(scatter.y_box.findData(labels[1]))
+    scatter.fit_model.setCurrentIndex(scatter.fit_model.findData("poly"))
+    pump(app, 0.2)
+    assert "against" in scatter.plot.getPlotItem().titleLabel.text
+    assert "R²" in scatter.fit_note.text() or "fit" in scatter.fit_note.text().lower() or len(table.rows) < 2
+
+
+def test_a_window_dragged_on_its_chart_moves(app, win):
+    ap, raw = two_stimulus_charts(app, win)
+    traces = C(raw, "Traces")
+    ap.measure.add("time", 0.1, 0.1, ap.raw.channel.currentText(), "mean")
+    pump(app, 0.1)
+    region = next(i for i in traces.plots()[0].getPlotItem().items if isinstance(i, M_region()))
+    region.setRegion((0.3, 0.45))
+    region._moved()
+    w = ap.measure.windows[0]
+    assert w.start == pytest.approx(0.3) and w.width == pytest.approx(0.15)
+
+
+
+
 
 
 
@@ -792,57 +827,6 @@ def test_fitting_models():
         F.fit("log", x, x, 1)
 
 
-def test_datapad_overlays_scatters_fits_and_recomputes(app, win):
-    two_stimulus_session(app, win)
-    win.show()
-    win.tabs.pick(0, "analysis")
-    pump(app, 0.2)
-    ap = win.analysis_page
-    ap.main.tabs.pick(0, "datapad")
-    pad = ap.datapad
-    pump(app, 0.1)
-    # the preview overlays the ticked channels
-    assert list(pad.show_boxes) == ap.names()
-    pad.set_shown(["Ch1", "Ch2", "Stim"])
-    on = [n for n, c in pad.traces.items() if c.scene() is not None]
-    assert on == ["Ch1", "Ch2", "Stim"]
-    pad.show_boxes["Ch2"].setChecked(False)
-    assert pad.traces["Ch2"].scene() is None and pad.traces["Ch1"].scene() is not None
-    # a repeating window gives a row per range
-    pad.columns = []
-    pad.add_column("Stim", "max")
-    pad.whole.setChecked(False)
-    pad.t0.setValue(0.0)
-    pad.t1.setValue(0.05)
-    pad.every.setValue(0.25)
-    dur = ap.blocks[0]["duration_s"]
-    assert pad.add_rows("current") == len(np.arange(0, dur, 0.25))
-    assert [r["t0"] for r in pad.rows] == pytest.approx(list(np.arange(0, dur, 0.25)))
-    # scatter: Y against X, coloured by group
-    pad.set_axes("t0", ("Stim", "max"))
-    assert pad.sy.currentData() == ("Stim", "max")
-    pts = [i for i in pad.scatter.getPlotItem().items if isinstance(i, __import__("pyqtgraph").ScatterPlotItem)]
-    assert sum(len(i.getData()[0]) for i in pts) == len(pad.rows)
-    # fits: a polynomial on the scatter, an exponential on the trace
-    pad.fit_model.setCurrentIndex(pad.fit_model.findData("poly"))
-    pad.fit_degree.setValue(2)
-    r = pad.run_fit()
-    assert r is not None and len(r.params) == 3 and pad.fit_params.rowCount() == 3
-    pad.fit_on.setCurrentIndex(1)
-    pad.set_shown(["Ch1"])
-    pad.fit_model.setCurrentIndex(pad.fit_model.findData("poly"))
-    pad.fit_degree.setValue(1)
-    assert pad.run_fit() is not None and pad._fit_items[0][0] is pad.preview.getPlotItem()
-    pad.clear_fit()
-    assert pad.fit_result is None and not pad._fit_items
-    # recompute: the same rows, measured again with new columns
-    pad.add_column("Stim", "mean")
-    n = len(pad.rows)
-    assert pad.recompute() == n
-    assert all(("Stim", "mean") in r["values"] for r in pad.rows)
-    first = pad.rows[0]
-    w = slice(0, int(0.05 * ap.blocks[0]["sample_rate"]) + 1)
-    assert first["values"][("Stim", "mean")] == pytest.approx(ap.trace(ap.index(), "Stim")[w].mean())
 
 
 # ---------------------------------------------------------------- Spike Sorting
@@ -852,7 +836,7 @@ def test_spike_sorting_shows_the_stimulus_and_leaves_it_out_of_the_channels(app,
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap, raw = win.analysis_page, win.analysis_page.raw
-    assert ap.canvas.layouts.currentText() == "Spike Sorting"
+    assert ap.canvas.layouts.currentText() == "Board"
     channels = [raw.channel.itemText(i) for i in range(raw.channel.count())]
     assert ap.stim_channel.currentData() == "Stim" and "Stim" not in channels and "Ch2" in channels
     assert C(raw, "Stimulus").plot.isVisible()
@@ -925,47 +909,8 @@ def test_normalize_options(app, win):
     assert np.nanmax(rate) == pytest.approx(1)
 
 
-def test_datapad_overlaid_axes_share_the_time_axis(app, win):
-    two_stimulus_session(app, win)
-    win.resize(1200, 800)
-    win.show()
-    win.tabs.pick(0, "analysis")
-    pump(app, 0.2)
-    ap = win.analysis_page
-    ap.main.tabs.pick(0, "datapad")
-    pad = ap.datapad
-    pad.set_shown(["Ch1", "Ch2"])
-    ap.step(1)                                                       # redrawn for another block
-    pump(app, 0.2)
-    main = pad.preview.getPlotItem().vb
-    for vb in pad.multi._extras():
-        assert vb.viewRange()[0] == pytest.approx(main.viewRange()[0])
-        assert vb.sceneBoundingRect().width() == pytest.approx(main.sceneBoundingRect().width(), abs=1)
 
 
-def test_datapad_drag_picks_a_window_and_traces_stay_sharp(app, win):
-    two_stimulus_session(app, win)
-    win.resize(1200, 800)
-    win.show()
-    win.tabs.pick(0, "analysis")
-    pump(app, 0.2)
-    ap = win.analysis_page
-    ap.main.tabs.pick(0, "datapad")
-    pad = ap.datapad
-    pump(app, 0.1)
-    vb = pad.preview.getPlotItem().vb
-    vb.on_drag_select(0.1, 0.3, False)                              # dragging: the shading follows
-    assert pad.whole.isChecked() and pad.region.getRegion() == pytest.approx((0.1, 0.3))
-    vb.on_drag_select(0.1, 0.3, True)                               # let go: that's the window
-    assert not pad.whole.isChecked() and pad.bounds() == pytest.approx((0.1, 0.3))
-    pad.set_window(None, None)                                      # double-click: the whole block again
-    assert pad.whole.isChecked() and pad.bounds() == (None, None)
-    pad.set_shown(["Ch1", "Ch2"])
-    ap.step(1)                                                      # another block
-    pump(app, 0.3)
-    ch2 = pad.traces["Ch2"]
-    shown = len(ch2.xData) if ch2.xData is not None else 0
-    assert shown > 400                                              # drawn at the view's width, not ~50 px
 
 
 def trials_shown(raw):
@@ -973,8 +918,29 @@ def trials_shown(raw):
 
 
 def C(raw, kind):
-    """The first chart of this kind on the canvas."""
-    return raw.page.chart(kind)
+    """The first chart of this kind on the board, put there first if it isn't yet."""
+    chart = raw.page.chart(kind)
+    if chart is None:
+        chart = raw.page.canvas.add(kind)
+        pump(QtWidgets.QApplication.instance(), 0.05)
+    return chart
+
+
+# The charts the tests use together: what the built-in layouts held, before the board started empty.
+SETS = {
+    "Spike Sorting": ("Stimulus", "Trials", "Raster", "Rate", "PCA map", "Waveforms", "AP sizes", "Intervals"),
+    "Response": ("Traces", "Stimulus-triggered rate", "Spike-triggered average", "Response against stimulus",
+                 "Stimulus fit", "Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase"),
+    "Waveforms": ("V against dV/dt", "V", "dV/dt"),
+}
+
+
+def put(ap, name):
+    """Put these charts on the board (those not on it yet), as a student would."""
+    for kind in SETS[name]:
+        if ap.canvas.first(kind) is None:
+            ap.canvas.add(kind)
+    pump(QtWidgets.QApplication.instance(), 0.05)
 
 
 def _spike_sorting(app, win):
@@ -984,16 +950,13 @@ def _spike_sorting(app, win):
     pump(app, 0.2)
     ap = win.analysis_page
     ap.raw.channel.setCurrentText("Ch2")
+    put(ap, "Spike Sorting")
     return ap, ap.raw
 
 
-def test_the_blocks_panel_picks_the_blocks_on_every_sub_tab(app, win):
+def test_the_trials_browser_picks_the_trials(app, win):
     ap, raw = _spike_sorting(app, win)
     assert ap.blocks_panel.isVisible() and ap.blocks_panel.title.text().startswith("<b>Trials</b>")
-    ap.main.tabs.pick(0, "datapad")
-    pump(app, 0.05)
-    assert ap.blocks_panel.isVisible()
-    ap.show_layout("Spike Sorting")
     tree = ap.blocks_panel.tree
     for item in ap.blocks_panel.items():                             # as a drag across two blocks would
         data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
@@ -1051,21 +1014,14 @@ def test_spikes_per_second_during_a_block():
     assert rates[None].tolist() == [1.5, 1.0]                        # the mean of the 2 blocks
 
 
-def test_the_stimulus_is_above_the_blocks_and_the_block_bar_leaves_spike_sorting(app, win):
+def test_new_charts_go_where_there_is_room_and_the_block_bar_picks_the_trial(app, win):
     ap, raw = _spike_sorting(app, win)
-    tops = [C(raw, k).dock.y() for k in ("Stimulus", "Trials", "Raster")]
-    assert tops == sorted(tops) and len(set(tops)) == 3
-    assert not ap.block_bar.isVisible()
-    ap.show_layout("Response")
-    pump(app, 0.1)
-    assert not ap.block_bar.isVisible()                              # Response shows the chosen blocks too
-    ap.main.tabs.pick(0, "datapad")
-    pump(app, 0.1)
-    assert ap.block_bar.isVisible() and ap.blocks_panel.isVisible()  # with the browser, borrowed from Analysis
-    ap.main.tabs.pick(0, "analysis")
-    pump(app, 0.1)
-    assert not ap.block_bar.isVisible()
-    ap._block_clicked(("block", 1))                                  # the Blocks panel still picks it
+    places = [c.dock.place for c in ap.canvas.here()]
+    assert all(not a.intersects(b) for i, a in enumerate(places) for b in places[i + 1:])   # none on another
+    assert ap.block_bar.isVisible() and ap.blocks_panel.isVisible()  # the highlighted trial, above the board
+    ap.slider.setValue(2)
+    assert ap.index() == 1
+    ap._block_clicked(("block", 1))                                  # the Trials browser picks it too
     assert ap.index() == 1
     ap.select_blocks([2, 3])                                         # and it stays among the chosen ones
     assert ap.index() == 2
@@ -1076,7 +1032,7 @@ def test_rate_bins_are_in_the_rate_charts_settings(app, win):
     chart = C(raw, "Rate")
     ap.canvas.open_settings(chart)
     pump(app, 0.05)
-    assert chart.rate_bin.isVisible() and ap.windows["chart"].isVisible()
+    assert chart.rate_bin.isVisible() and ap.canvas.options.currentWidget() is chart.options_panel
     raw.find()
     n = len(chart.plot.getPlotItem().listDataItems()[0].getData()[0])
     chart.rate_bin.setValue(0.05)
@@ -1220,7 +1176,7 @@ def test_charts_open_close_and_are_remembered_with_their_layout(app, win, tmp_pa
     canvas = ap.canvas
     canvas.close_chart(C(raw, "Intervals"))
     pump(app, 0.1)
-    assert C(raw, "Intervals") is None and C(raw, "AP sizes").plot.isVisible()
+    assert ap.chart("Intervals") is None and C(raw, "AP sizes").plot.isVisible()
     canvas.add("Intervals")
     pump(app, 0.1)
     assert C(raw, "Intervals").plot.isVisible()
@@ -1233,9 +1189,9 @@ def test_charts_open_close_and_are_remembered_with_their_layout(app, win, tmp_pa
     w2._ask_unsaved = lambda: "discard"
     assert [c.kind for c in w2.analysis_page.canvas.here()] == ["Raster"]
     w2.close()
-    canvas.reset()
+    canvas.reset()                                                   # Clear: the board is empty again
     pump(app, 0.1)
-    assert C(raw, "Trials") is not None and len(canvas.here()) == 8
+    assert not canvas.here() and canvas.layouts.currentText() == "Board"
 
 
 def test_a_chart_you_open_stays_and_says_why_it_is_empty(app, win):
@@ -1252,7 +1208,7 @@ def test_a_chart_you_open_stays_and_says_why_it_is_empty(app, win):
         assert chart.dock.isVisible() and chart.plot.width() > 50
         assert "Stimulus channel" in chart.plot.getPlotItem().titleLabel.text
     copy = ap.canvas.copy(C(raw, "Raster"))
-    assert not copy.auto_hide
+    assert copy.dock.isVisible()
     fit = ap.canvas.add("Stimulus fit")
     pump(app, 0.2)
     assert fit.dock.isVisible() and "Stim fit" in fit.fit_plot.getPlotItem().titleLabel.text
@@ -1292,7 +1248,7 @@ def test_a_pinned_chart_keeps_its_blocks(app, win):
     ap.select_blocks([0])
     raster = C(raw, "Raster")
     raster.set_pinned(True)
-    assert raster.pin["stems"] == [ap._paths[0].stem] and raster.dock.bar.btn_pin.isChecked()
+    assert raster.pin["stems"] == [ap._paths[0].stem] and "1 trial" in raster.dock.bar.tag.text()
     ap.select_blocks([1, 2])
     pump(app, 0.1)
     assert raster.blocks() == [0] and C(raw, "Trials").blocks() == [1, 2]
@@ -1304,27 +1260,83 @@ def test_a_pinned_chart_keeps_its_blocks(app, win):
     assert raster.blocks() == [1, 2]
 
 
-def test_a_copy_is_the_same_size_as_its_chart(app, win):
+def test_a_copy_is_the_same_size_as_its_chart_and_goes_beside_it(app, win):
     ap, raw = _spike_sorting(app, win)
-    win.resize(1400, 900)
-    pump(app, 0.2)
     first = C(raw, "Raster")
-    width = first.dock.width()
+    first.dock.place.setSize(QtCore.QSizeF(500, 300))
+    ap.canvas.space.place_all()
     second = ap.canvas.copy(first)
     pump(app, 0.2)
-    assert abs(second.dock.width() - first.dock.width()) <= 12
-    assert abs(second.dock.height() - first.dock.height()) <= 12
-    assert second.dock.width() > 0.55 * width                        # room comes from the charts beside them
+    assert second.dock.place.size() == first.dock.place.size()
+    assert not second.dock.place.intersects(first.dock.place)
+    sizes = [c.dock.place.size() for c in ap.canvas.here() if c not in (first, second)]
+    assert all(s == QtCore.QSizeF(400, 280) for s in sizes)          # nothing else was resized
 
 
-def test_stacked_charts_can_be_dragged_out_of_their_tabs(app, win):
+def test_charts_move_snap_and_resize_on_the_board(app, win):
+    from neusci_daq import board as B
     ap, raw = _spike_sorting(app, win)
-    assert ap.canvas.space.dockOptions() & ap.canvas.space.DockOption.GroupedDragging
+    space = ap.canvas.space
+    raster, rate = C(raw, "Raster"), C(raw, "Rate")
+    f = raster.dock
+    space.title_pressed(f, _mouse(QtCore.QPointF(0, 0)))
+    space.drag_to(_mouse(QtCore.QPointF(33, 47)))
+    space.drag_done()
+    assert f.place.x() % B.GRID == 0 and f.place.y() % B.GRID == 0    # snapped to the grid
+    left = rate.dock.place.left()
+    space.title_pressed(f, _mouse(QtCore.QPointF(0, 0)))
+    space.drag_to(_mouse(QtCore.QPointF(left - f.place.left() + 4, 0)))
+    assert f.place.left() == left and space.guide_x == left           # lined up with another chart
+    space.drag_done()
+    space.grip_pressed(f, _mouse(QtCore.QPointF(0, 0)))
+    space.drag_to(_mouse(QtCore.QPointF(-1000, -1000)))
+    space.drag_done()
+    assert (f.place.width(), f.place.height()) == (B.MIN_W, B.MIN_H)
+    space.zoom_about(0.5)                                            # smaller on screen, same place on the board
+    assert abs(f.width() - B.MIN_W * 0.5) <= 1 and f.place.width() == B.MIN_W
+
+
+def test_picking_several_charts_changes_them_together(app, win):
+    ap, raw = _spike_sorting(app, win)
+    canvas, side = ap.canvas, ap.side
+    raster, rate = C(raw, "Raster"), C(raw, "Rate")
+    canvas.space.pick([raster.dock, rate.dock])
+    pump(app, 0.05)
+    assert set(canvas.picked()) == {raster, rate} and side.multi.isVisible() and "2 charts" in side.heading.text()
+    first = canvas.picked()[0]
+    first.dock.place.setSize(QtCore.QSizeF(600, 200))
+    side.btn_size.click()                                            # all the size of the first picked
+    assert raster.dock.place.size() == rate.dock.place.size() == QtCore.QSizeF(600, 200)
+    side.btn_line.click()
+    assert raster.dock.place.top() == rate.dock.place.top()
+    side.btn_remove.click()
+    assert ap.chart("Raster") is None and ap.chart("Rate") is None
+
+
+def test_a_chart_can_show_its_own_groups(app, win):
+    ap, raw = two_stimulus_charts(app, win)
+    first, second = ap.shown[0][0], ap.shown[1][0]
+    trials = C(raw, "Trials")
+    ap.canvas.select(trials)
+    pump(app, 0.05)
+    groups = ap.side.groups
+    assert groups.same.isChecked() and not groups.own.isChecked()
+    groups.own.setChecked(True)                                      # Choose: starts with the page's groups
+    assert trials.pin is not None and set(trials.pin["pages"]) == {n for n, _ in ap.shown}
+    trials.set_own_groups([second])
+    pump(app, 0.1)
+    assert second in trials.dock.bar.tag.text()
+    assert set(trials.blocks()) == set(ap.shown[1][1])
+    ap.set_hidden(("page", second), True)                            # hidden on the page: still its own
+    assert set(trials.blocks()) == set(ap.shown[1][1]) and not set(C(raw, "Raster").blocks()) & set(ap.shown[1][1])
+    groups.show_for([trials])
+    groups.same.setChecked(True)
+    assert trials.pin is None
 
 
 def test_the_repeats_show_with_whichever_phase_chart_was_clicked(app, win):
     ap, raw = _spike_sorting(app, win)
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.1)
     one, other = ap.chart("Spikes per phase"), ap.chart("Stimulus cycle")
     ap.canvas.open_settings(one)
@@ -1350,10 +1362,10 @@ def test_your_own_layouts_keep_their_charts_and_settings(app, win):
     assert sum(c.kind == "Raster" for c in canvas.here()) == 2
     assert {c.name for c in canvas.here() if c.kind == "Raster"} == {"Raster", "Second"}
     assert all(c.point_size.value() == 6 for c in canvas.here() if c.kind == "Raster")
-    ap.show_layout("Waveforms")
-    ap.show_layout("Lab 3")
+    canvas.show_layout("Board")
+    canvas.show_layout("Lab 3")
     canvas.reset()                                                   # your own: deleted
-    assert canvas.layouts.findText("Lab 3") < 0 and canvas.space.name == "Spike Sorting"
+    assert canvas.layouts.findText("Lab 3") < 0 and canvas.space.name == "Board"
 
 
 def test_the_layout_can_be_locked(app, win):
@@ -1362,8 +1374,12 @@ def test_the_layout_can_be_locked(app, win):
     canvas.lock.setChecked(True)
     pump(app, 0.05)
     dock = C(raw, "Raster").dock
-    assert not canvas.btn_add.isEnabled() and not dock.bar.btn_close.isVisible()
-    assert dock.features() == dock.DockWidgetFeature.NoDockWidgetFeatures
+    assert not canvas.btn_add.isEnabled() and not dock.bar.btn_close.isVisible() and not dock.grip.isVisible()
+    before = QtCore.QRectF(dock.place)
+    canvas.space.title_pressed(dock, _mouse(QtCore.QPointF(0, 0)))
+    canvas.space.drag_to(_mouse(QtCore.QPointF(200, 200)))
+    canvas.space.drag_done()
+    assert dock.place == before                                      # locked: it stays put
     canvas.lock.setChecked(False)
     assert canvas.btn_add.isEnabled() and dock.bar.btn_close.isVisible()
 
@@ -1388,30 +1404,42 @@ def test_clicking_a_chart_shows_its_settings(app, win):
     canvas._focus_moved(None, chart.plot)
     pump(app, 0.05)
     assert canvas.active is chart and canvas.options.currentWidget() is chart.options_panel
-    assert not ap.windows["chart"].isVisible()                       # zooming doesn't open anything
-    chart.dock.bar.btn_set.click()
-    pump(app, 0.05)
-    assert ap.windows["chart"].isVisible() and "Rate" in ap.windows["chart"].windowTitle()
+    assert ap.side.isVisible() and "Rate" in ap.side.heading.text()  # beside the board, not in a window
 
 
-def test_settings_open_in_windows_that_come_back_with_analysis(app, win):
+def test_the_left_strip_folds_out_one_panel_at_a_time(app, win):
     ap, raw = _spike_sorting(app, win)
-    assert not raw.isVisible() and not ap.stim_channel.isVisible()   # only the block browser, until asked
-    assert ap.blocks_panel.tree.isVisible()
-    ap.windows["spikes"].open_()
+    assert ap.panel() == "trials" and ap.blocks_panel.tree.isVisible() and not raw.isVisible()
+    ap.rail.buttons["spikes"].click()
     pump(app, 0.05)
-    assert raw.btn_find.isVisible()
-    win.tabs.pick(0, "acq")
+    assert ap.panel() == "spikes" and raw.btn_find.isVisible() and not ap.blocks_panel.tree.isVisible()
+    ap.rail.buttons["channels"].click()
     pump(app, 0.05)
-    assert not raw.isVisible()                                       # only with Analysis
+    assert ap.stim_channel.isVisible() and not raw.isVisible()
+    ap.rail.buttons["channels"].click()                              # again: folded away
+    pump(app, 0.05)
+    assert ap.panel() == "" and not ap.stim_channel.isVisible()
+    ap.open_panel("groups")
+    assert ap.spread_box.isVisibleTo(ap) and ap.group_colours.isVisibleTo(ap)
+
+
+def _mouse(at: QtCore.QPointF):
+    """A left-button press or move at a screen place, for the board's drag handlers."""
+    return QtGui.QMouseEvent(QtCore.QEvent.Type.MouseButtonPress, at, at, QtCore.Qt.MouseButton.LeftButton,
+                             QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier)
+
+
+def two_stimulus_charts(app, win):
+    """Two stimuli, so two groups, with the spike-sorting charts on the board."""
+    two_stimulus_session(app, win)
+    win.show()
     win.tabs.pick(0, "analysis")
-    pump(app, 0.05)
-    assert raw.isVisible()
-    ap.windows["spikes"].close()
-    win.tabs.pick(0, "acq")
-    win.tabs.pick(0, "analysis")
-    pump(app, 0.05)
-    assert not raw.isVisible()
+    pump(app, 0.2)
+    ap = win.analysis_page
+    ap.raw.channel.setCurrentText("Ch2")
+    put(ap, "Spike Sorting")
+    assert len(ap.shown) >= 2
+    return ap, ap.raw
 
 
 def _sine_session(app, win, n=2):
@@ -1433,7 +1461,7 @@ def _sine_session(app, win, n=2):
     pump(app, 0.2)
     ap = win.analysis_page
     ap.raw.channel.setCurrentText("Ch2")
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.2)
     return ap, ap
 
@@ -1459,7 +1487,7 @@ def test_comparison_overlays_cycles_by_phase(app, win):
 
 def test_cycle_charts_have_check_boxes_and_say_when_there_are_none(app, win):
     ap, raw = _spike_sorting(app, win)
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.1)
     ap.stim_channel.setCurrentIndex(ap.stim_channel.findData("Ch1"))
     assert "no repeats" in ap.chart("Stimulus cycle").plot.getPlotItem().titleLabel.text
@@ -1469,7 +1497,7 @@ def test_cycle_charts_have_check_boxes_and_say_when_there_are_none(app, win):
 def test_waveforms_plot_v_against_dv_dt(app, win):
     ap, raw = _spike_sorting(app, win)
     ev = raw.find()
-    ap.show_layout("Waveforms")
+    put(ap, "Waveforms")
     pump(app, 0.1)
     view = ap.chart("V against dV/dt")
     assert str(len(ev.t)) in view.plot.getPlotItem().titleLabel.text
@@ -1519,7 +1547,7 @@ def test_scale_bars_replace_the_axes_and_follow_the_zoom(app, win):
     ap.canvas.bars.setChecked(False)
     assert p.getAxis("left").isVisible() and p._scale_bar is None
     assert win.settings.value("analysis/scale_bars", True, type=bool) is False
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.1)
     ap.canvas.bars.setChecked(True)
     plots = ap.chart("Traces")._plots
@@ -1547,7 +1575,7 @@ def test_a_trace_drawn_small_regroups_when_its_plot_grows(app, win):
 
 def test_response_traces_follow_spike_sortings_rules(app, win):
     ap, raw = _spike_sorting(app, win)
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.1)
     from neusci_daq.plotzoom import OverlayCurve, TraceCurve
     name = ap.shown[0][0]
@@ -1573,7 +1601,7 @@ def test_response_uses_the_units_ticked_on_spike_sorting(app, win):
     ev.unit = np.arange(len(ev.t)) % 2
     raw._show_results()
     raw.page.events_changed()
-    ap.show_layout("Response")
+    put(ap, "Response")
     pump(app, 0.1)
     assert sum(len(v) for v in ap.chart("Spike-triggered average")._times().values()) == len(ev.t)
     raw.color_of(0)
@@ -1616,7 +1644,9 @@ def test_a_stimulus_fit_is_read_everywhere_and_shown_against_the_recording(app, 
     assert groupsfile.load(ap._folder())["stim_fit"] == "Sine"
     ap.fit_box.setCurrentText("Off")
     pump(app, 0.1)
-    assert not ap.chart("Stimulus fit").isVisible() and ap.trace(0, "Stim") == pytest.approx(y)
+    assert ap.trace(0, "Stim") == pytest.approx(y)
+    assert ap.chart("Stimulus fit").isVisible()                      # you put it there: it stays, and says why it's empty
+    assert "Stim fit" in ap.chart("Stimulus fit").fit_plot.getPlotItem().titleLabel.text
 
 
 def test_repeats_can_be_typed_or_marked_and_a_one_off_says_so(app, win):
@@ -1645,7 +1675,10 @@ def test_a_pulse_recording_has_no_cycles_to_overlay_when_it_is_one_pulse():
 
 
 def test_every_analysis_chart_zooms_by_the_same_rules(app, win):
+    from neusci_daq.canvas import KINDS
     from neusci_daq.plotzoom import WheelViewBox
+    for kind in KINDS:
+        win.analysis_page.canvas.add(kind)
     plots = win.analysis_page.findChildren(__import__("pyqtgraph").PlotWidget)
     assert plots and all(isinstance(pw.getPlotItem().vb, WheelViewBox) for pw in plots)
     assert all(isinstance(pw.getPlotItem().vb, WheelViewBox) for pw in win.findChildren(__import__("pyqtgraph").PlotWidget)
@@ -1808,11 +1841,8 @@ def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):
     ev = raw.events
     raw.set_unit_color(0, "#123456")
     raw.unit_opacity[0] = 0.5
-    ap.main.tabs.pick(0, "datapad")
-    pump(app, 0.1)
-    ap.datapad.add_column("Ch2", "spikes")
-    assert ap.datapad.add_rows("blocks") > 0
-    n = len(ap.datapad.rows)
+    ap.measure.add("time", 0.1, 0.2, "Ch2", "spikes")
+    n = len(ap.measure.windows)
     assert ap.has_unsaved_analysis()
     asked = []
     win._ask_unsaved_analysis = lambda: asked.append(1) or "cancel"
@@ -1831,7 +1861,7 @@ def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):
     assert a2.raw.events is not None and len(a2.raw.events.t) == len(ev.t)
     assert a2.raw.events.t == pytest.approx(ev.t) and a2.raw.threshold.text() == "6 SD"
     assert a2.raw.color_of(0) == "#123456" and a2.raw.opacity_of(0) == 0.5
-    assert len(a2.datapad.rows) == n and a2.datapad.columns[-1] == ("Ch2", "spikes")
+    assert len(a2.measure.windows) == n and a2.measure.windows[-1].key == "spikes"
     assert not a2.has_unsaved_analysis()
     assert sorted(p.name for p in session.list_blocks(folder)) == before
     w2.close()
@@ -1861,9 +1891,9 @@ def test_zoom_and_move_buttons_show_over_a_chart(app, win):
     assert pw.buttons.x.isHidden()
 
 
-def test_channels_and_groups_settings_open_in_their_own_windows(app, win):
+def test_channels_and_groups_settings_fold_out_on_the_left(app, win):
     ap, raw = _spike_sorting(app, win)
-    ap.windows["channels"].open_()
+    ap.open_panel("channels")
     pump(app, 0.05)
     assert ap.stim_channel.isVisible() and ap.fit_box.isVisible() and ap.gain.isVisible()
     assert not ap.spread_box.isVisible()

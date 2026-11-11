@@ -23,7 +23,7 @@ def tab_texts(bar):
 def test_starts_on_acquisition_record_with_sub_pages(win):
     assert shown(win) == ["acq"]
     pane = win.tabs.panes[0]
-    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "DataPad", "Simulation"]
+    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "Simulation"]
     assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Protocols"]
     assert pane.sub_bar.currentIndex() == 0 and not pane.sub_head.isHidden()
 
@@ -835,6 +835,9 @@ def test_stacked_plots_line_up(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
+    for k in ("Trials", "Raster", "Rate"):
+        ap.canvas.add(k)
+    pump(app, 0.2)
     ws = [ap.chart(k).plot.getPlotItem().getAxis("left").width() for k in ("Trials", "Raster", "Rate")]
     assert max(ws) - min(ws) < 0.5
 

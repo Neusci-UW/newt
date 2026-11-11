@@ -83,8 +83,9 @@ def test_save_reopens_argus_as_it_was(app, win, tmp_path):
     ap = win.analysis_page
     ap.raw.channel.setCurrentText("Ch2")
     ev = ap.raw.find()
-    ap.show_layout("Response")
+    ap.canvas.add("Traces")
     ap.canvas.copy(ap.chart("Traces")).name_box.setText("Mine")
+    place = ap.chart("Traces").dock.place.topLeft()
     ap.canvas.here()[-1]._renamed()
     win.set_stimulus(Stimulus(shape="sine", amplitude_v=0.5, freq_hz=7, duration_ms=300))
     from neusci_daq.tabs import SIDE
@@ -110,7 +111,8 @@ def test_save_reopens_argus_as_it_was(app, win, tmp_path):
     assert "Couldn't" not in w2.statusBar().currentMessage(), w2.statusBar().currentMessage()
     assert w2.mode == "review" and len(w2.review_blocks) == len(session.list_blocks(win.session_dir))
     assert w2.stimulus.freq_hz == 7 and w2.tabs.layout_mode == SIDE
-    assert a2.canvas.space.name == "Response" and "Mine" in [c.name for c in a2.canvas.here()]
+    assert a2.canvas.space.name == "Board" and "Mine" in [c.name for c in a2.canvas.here()]
+    assert a2.chart("Traces").dock.place.topLeft() == place          # where it was on the board
     assert a2.raw.events is not None and len(a2.raw.events.t) == len(ev.t)
     assert a2.group_color(0) == "#123456"
     assert not w2._has_unsaved()

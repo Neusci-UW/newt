@@ -67,6 +67,7 @@ class RepeatFinder(View):
     def listen(self) -> None:
         for c in self.page.canvas.here():
             c.listen_for_mark(self._marked if self.btn_mark.isChecked() else None)
+        self.page.measure.decorate_all()             # the Measure tool listens again once you've marked
 
     def _marked(self, x0: float, x1: float, finished: bool) -> None:
         if finished and x1 > x0:

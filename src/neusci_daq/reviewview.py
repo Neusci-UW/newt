@@ -250,7 +250,7 @@ class ReviewMixin:
 
     def analysis_step(self, d: int) -> None:
         """← / →: Analysis's highlighted block, when Analysis is showing."""
-        if self.tabs.is_visible("analysis") or self.tabs.is_visible("datapad"):
+        if self.tabs.is_visible("analysis"):
             self.analysis_page.step(d)
 
     def step_block(self, d: int) -> None:

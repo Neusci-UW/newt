@@ -110,7 +110,10 @@ def test_every_analysis_plot_follows_the_theme(app, win):
     """The stimulus strip under Spike Sorting's overlay stayed black in light mode."""
     import pyqtgraph as pg
     from neusci_daq import theme
+    from neusci_daq.canvas import KINDS
     win.tabs.pick(0, "analysis")
+    for kind in KINDS:                                               # the board starts empty: every chart
+        win.analysis_page.canvas.add(kind)
     for mode, dark in ((theme.LIGHT, False), (theme.DARK, True)):
         win.set_plot_theme(mode)
         plots = win.analysis_page.findChildren(pg.PlotWidget)

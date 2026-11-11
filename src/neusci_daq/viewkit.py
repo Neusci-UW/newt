@@ -194,3 +194,56 @@ class View(QtWidgets.QWidget):
         th = theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT]
         for pw in widgets:
             style_plot(pw, th)
+
+
+STEPS = 1000                    # a slider's positions
+
+
+def with_slider(box: QtWidgets.QAbstractSpinBox) -> QtWidgets.QWidget:
+    """A number setting as a drag bar with its box beside it: drag the bar, or type in the box
+    (with units, in a UnitSpinBox); each follows the other. The bar runs evenly from the
+    box's lowest to highest value, or on a log scale when that's a range of more than 100
+    times (so 0.1 ms and 1 s are both easy to reach); a range from 0 goes up as a square."""
+    row = QtWidgets.QWidget()
+    lay = QtWidgets.QHBoxLayout(row)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(6)
+    bar = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, minimum=0, maximum=STEPS)
+    bar.setMinimumWidth(60)
+    bar.setToolTip(box.toolTip())
+    lo, hi = float(box.minimum()), float(box.maximum())
+    log = lo > 0 and hi / lo > 100
+    square = not log and lo == 0 and hi > 1000
+
+    def to_bar(v: float) -> int:
+        if hi <= lo:
+            return 0
+        if log:
+            f = np.log(max(v, lo) / lo) / np.log(hi / lo)
+        elif square:
+            f = np.sqrt(max(v - lo, 0) / (hi - lo))
+        else:
+            f = (v - lo) / (hi - lo)
+        return int(round(min(1.0, max(0.0, f)) * STEPS))
+
+    def from_bar(k: int) -> float:
+        f = k / STEPS
+        v = lo * (hi / lo) ** f if log else lo + (hi - lo) * (f * f if square else f)
+        if isinstance(box, QtWidgets.QSpinBox):
+            return int(round(v))
+        step = box.singleStep() or 0
+        return round(v / step) * step if step and not log else v
+
+    def box_moved(v) -> None:
+        bar.blockSignals(True)
+        bar.setValue(to_bar(float(v)))
+        bar.blockSignals(False)
+
+    bar.setValue(to_bar(float(box.value())))
+    bar.valueChanged.connect(lambda k: box.setValue(from_bar(k)) if to_bar(float(box.value())) != k else None)
+    box.valueChanged.connect(box_moved)
+    box.setMinimumWidth(72)
+    lay.addWidget(bar, 1)
+    lay.addWidget(box)
+    row.bar = bar
+    return row

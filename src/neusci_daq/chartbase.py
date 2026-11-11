@@ -17,7 +17,7 @@ from . import analysis as A
 from . import style, theme
 from .helpview import add_help
 from .plotzoom import add_buttons
-from .viewkit import View, show_scale_bar, shrink_combos, style_plot
+from .viewkit import View, show_scale_bar, shrink_combos, style_plot, with_slider
 
 
 class Chart(View):
@@ -84,9 +84,9 @@ class Chart(View):
         if self.uses_units:
             f.addRow("Units", self.units_box)
             f.addRow(self.unit_ticks)
-        if self.uses_blocks:
-            f.addRow(self.pin_box)
-            f.addRow(self.pin_note)
+        # a chart's own trials are its own Groups, set with the Groups of the settings panel
+        self.pin_box.hide()
+        self.pin_note.hide()
         if self.link:
             f.addRow(self.link_box)
         self._side.addWidget(box)
@@ -105,10 +105,11 @@ class Chart(View):
         Changing it calls then() (default: draw again)."""
         self._fields[key] = widget
         self.settings_box.show()
+        shown = with_slider(widget) if isinstance(widget, QtWidgets.QAbstractSpinBox) else widget
         if label:
-            self.form.addRow(label, widget)
+            self.form.addRow(label, shown)
         else:
-            self.form.addRow(widget)
+            self.form.addRow(shown)
         changed = {QtWidgets.QCheckBox: "toggled", QtWidgets.QComboBox: "currentIndexChanged"}
         signal = next((getattr(widget, s) for t, s in changed.items() if isinstance(widget, t)), None) \
             or widget.valueChanged
@@ -210,7 +211,7 @@ class Chart(View):
             self.name = name
             self.show_title()
             if self.page.canvas.active is self:
-                self.page.windows["chart"].setWindowTitle(f"{name} settings")
+                self.page.side.update_for_picked()
             self.saved()
 
     def show_title(self) -> None:
@@ -225,7 +226,8 @@ class Chart(View):
         if self.own_units is not None:
             parts.append(", ".join(f"Unit {u + 1}" for u in sorted(self.own_units)) or "no units")
         if self.pin is not None:
-            parts.append(", ".join(self.pin["pages"]) or f"{len(self.pin['stems'])} trial(s)")
+            parts.append(", ".join(self.pin["pages"]) or (f"{len(self.pin['stems'])} trial(s)" if self.pin["stems"]
+                                                          else "no groups"))
         return " · ".join(parts)
 
     # -- what it shows -------------------------------------------------------------------------
@@ -242,7 +244,7 @@ class Chart(View):
         if self.pin is None:
             return self.finder.chosen_or_none()
         where = {p.stem: i for i, p in enumerate(self.page._paths)}
-        return self.finder.usable([where[s] for s in self.pin["stems"] if s in where])
+        return self.finder.usable([where[s] for s in self.pin["stems"] if s in where], self.pin.get("own", False))
 
     def plan(self, chosen: list[int]):
         """Which of these to average and which to show as trials (see AnalysisPage.plan)."""
@@ -261,6 +263,24 @@ class Chart(View):
             self.pin = None
         self.pin_box.blockSignals(True)
         self.pin_box.setChecked(on)
+        self.pin_box.blockSignals(False)
+        self._show_pin()
+        self.show_title()
+        self.saved()
+        self.page.raw.pins_changed()
+        self.refresh()
+
+    def set_own_groups(self, names: list[str] | None) -> None:
+        """Show just these groups, whatever the page shows (they're its own), or follow the
+        page again (None)."""
+        if names is None:
+            self.pin = None
+        else:
+            page = self.page
+            stems = [page._paths[i].stem for n, blocks in page.shown if n in names for i in blocks]
+            self.pin = {"stems": stems, "pages": list(names), "picked": stems, "own": True}
+        self.pin_box.blockSignals(True)
+        self.pin_box.setChecked(self.pin is not None)
         self.pin_box.blockSignals(False)
         self._show_pin()
         self.show_title()
@@ -342,6 +362,13 @@ class Chart(View):
         self.show_bars()
         for pw in self.plots():
             add_buttons(pw)
+        measure = getattr(self.page, "measure", None)
+        if measure is not None:
+            measure.decorate(self)
+
+    def measure_channel(self, k: int) -> str:
+        """The channel a window dragged across plot k measures: the one the spikes are found on."""
+        return self.page.raw.channel.currentText()
 
     def collapse(self, always: bool = False) -> None:
         """Give up its dock's room while it has nothing to show, unless you opened it: a chart
@@ -375,6 +402,7 @@ class Chart(View):
         """Fit its y axis to its data again."""
         for pw in self.plots():
             pw.getPlotItem().enableAutoRange(axis="y")
+            pw.getPlotItem().vb.updateAutoRange()     # now: a chart off screen on the board isn't painted
 
     def listen_for_mark(self, on_drag) -> None:
         """Dragging across this chart marks one repeat, if it's a trace of the stimulus."""

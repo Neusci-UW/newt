@@ -375,6 +375,28 @@ class ChartCanvas(QtWidgets.QWidget):
         if ask == QtWidgets.QMessageBox.StandardButton.Yes:
             self.reset()
 
+    def app_state(self) -> dict:
+        """Every layout opened, and the one showing, for an .argus file."""
+        self.save()
+        return {"layout": self.space.name if self.space is not None else "Spike Sorting",
+                "layouts": {name: self.state_of(space) for name, space in self.spaces.items()},
+                "own": self.own_layouts(), "lock": self.lock.isChecked(), "bars": self.bars.isChecked()}
+
+    def restore_app_state(self, s: dict) -> None:
+        """The layouts of an .argus file, in place of what's on screen. Your own layouts stay
+        in the menu; one of the same name as the file's takes the file's charts."""
+        own = self.own_layouts()
+        self.settings.setValue("analysis/layouts", json.dumps(own + [n for n in s["own"] if n not in own]))
+        for name, state in s["layouts"].items():
+            self.settings.setValue(f"analysis/layout/{name}", json.dumps(state))
+        self.space = None
+        for name in list(self.spaces):
+            self._drop(name)
+        self._list_layouts()
+        self.lock.setChecked(s["lock"])
+        self.bars.setChecked(s["bars"])
+        self.show_layout(s["layout"] if self.layouts.findText(s["layout"]) >= 0 else "Spike Sorting")
+
     def _lock_toggled(self, on: bool) -> None:
         self.settings.setValue("analysis/lock", on)
         self.btn_add.setEnabled(not on)

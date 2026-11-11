@@ -478,6 +478,28 @@ class DataPadView(View):
                            "were dropped." if gone else "") + self._spike_note())
         return len(self.rows)
 
+    def state(self) -> dict:
+        """The columns, window and rows, to save with the session. Rows are saved as how to make
+        them, with their blocks by file stem."""
+        stems = [p.stem for p in self.page._paths]
+        return {"columns": [list(c) for c in self.columns], "whole": self.whole.isChecked(), "t0": self.t0.value(),
+                "t1": self.t1.value(), "every": self.every.value(),
+                "rows": [{**r["recipe"], "blocks": [stems[i] for i in r["recipe"]["blocks"] if i < len(stems)]}
+                         for r in self.rows]}
+
+    def restore(self, state: dict) -> None:
+        """Back as it was saved. Rows are measured again, without blocks that are gone."""
+        self.columns = [tuple(c) for c in state["columns"]]
+        self._fill_columns()
+        self.whole.setChecked(state["whole"])
+        self.t0.setValue(state["t0"])
+        self.t1.setValue(state["t1"])
+        self.every.setValue(state["every"])
+        where = {p.stem: i for i, p in enumerate(self.page._paths)}
+        recipes = [{**r, "blocks": [where[s] for s in r["blocks"] if s in where]} for r in state["rows"]]
+        self.rows = [self._make_row(r) for r in recipes if r["blocks"]]
+        self._show_table()
+
     def _spike_note(self) -> str:
         if any(k in D.SPIKE_KEYS for _, k in self.columns) and self.page.raw.events is None:
             return " Spike columns need action potentials: press Find action potentials first."

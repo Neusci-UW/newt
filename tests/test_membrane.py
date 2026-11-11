@@ -28,6 +28,7 @@ def test_tab_shows_the_page_or_explains_what_to_install(app, win):
     page = win.membrane_page
     if membranepage.available():
         assert page.view is not None and page.view.url().toLocalFile().endswith("membrane_potential.html")
+        assert page.btn_refresh.isVisible()
     else:
         texts = " ".join(lbl.text() for lbl in page.findChildren(QtWidgets.QLabel))
         assert "PyQt6-WebEngine" in texts

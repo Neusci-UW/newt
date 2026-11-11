@@ -17,6 +17,8 @@ The blocks are the ones being reviewed, or those recorded so far in live mode.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import warnings
 from pathlib import Path
 
@@ -25,6 +27,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
+from . import analysisfile
 from . import colormaps as cm
 from . import dsp
 from . import pages
@@ -50,6 +53,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self._paths: list[Path] = []
         self.blocks: list[dict | None] = []
         self._dirty = True
+        self._analysis_from = None                # the session whose saved analysis is loaded
+        self._saved: str | None = None            # what was last saved or loaded (_digest)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(8)
@@ -151,22 +156,29 @@ class AnalysisPage(QtWidgets.QWidget):
         self.canvas = ChartCanvas(self)
         self.datapad = DataPadView(self)
         self.pad_page = DataPadPage(self)
-        self.windows = {"data": SettingsWindow(self, "data", "Data", self.blocks_panel.extras),
+        self.windows = {"channels": SettingsWindow(self, "channels", "Channels", self.blocks_panel.extras),
+                        "groups": SettingsWindow(self, "groups", "Groups", self.blocks_panel.group_extras),
                         "spikes": SettingsWindow(self, "spikes", "Action potentials", self.raw),
                         "chart": SettingsWindow(self, "chart", "Chart settings", self.canvas.options)}
         for k, (key, text, tip) in enumerate((
-                ("data", "Data…", "The stimulus and analyzed channels, Spread, colours, gains and the stimulus fit"),
+                ("channels", "Channels…", "The stimulus and analyzed channels, amplifier gains and the stimulus fit"),
                 ("spikes", "Action potentials…", "Find action potentials, and tick and colour the units"))):
             button = QtWidgets.QPushButton(text)
             button.setToolTip(tip)
             button.clicked.connect(self.windows[key].open_)
             self.canvas.toolbar.layout().insertWidget(1 + k, button)
+        self.blocks_panel.btn_groups.clicked.connect(self.windows["groups"].open_)
+        self.btn_save = QtWidgets.QPushButton("Save")
+        self.btn_save.setToolTip("Save everything in one .argus file: the recordings, the spikes found and units, "
+                                 "DataPad's rows, and how Argus looks now, so it all comes back when it's opened")
+        self.btn_save.clicked.connect(self.main.save)
+        self.canvas.toolbar.layout().insertWidget(0, self.btn_save)
         top.addWidget(self.canvas.toolbar)
         top.addWidget(self.source, 1)
         self.blocks_panel.add_setting("Analyze", self.raw.channel)
-        self.blocks_panel.add_setting("Spread", self.spread_box)
-        self.blocks_panel.add_setting("Groups", self.page_map)
-        self.blocks_panel.add_setting("Trials", self.trial_map)
+        self.blocks_panel.add_group_setting("Spread", self.spread_box)
+        self.blocks_panel.add_group_setting("Groups", self.page_map)
+        self.blocks_panel.add_group_setting("Trials", self.trial_map)
         self.blocks_panel.add_setting("Amplifier Gain", self.gain_row)
         self.blocks_panel.add_setting("Stim fit", self.fit_box)
         self.blocks_panel.color_requested.connect(self.pick_color)
@@ -279,6 +291,92 @@ class AnalysisPage(QtWidgets.QWidget):
         self.gain_channel.blockSignals(False)
         self._show_gain()
         self.repeats.stimulus_channel_changed()
+        self._load_analysis()
+
+    # -- saving ---------------------------------------------------------------------------------
+    def _stems(self) -> list[str]:
+        return [p.stem for p in self._paths]
+
+    def _analysis_state(self) -> dict:
+        return {"spikes": self.raw.state(), "datapad": self.datapad.state()}
+
+    def _digest(self) -> str:
+        """What there is to save, as one string, to tell if it's changed."""
+        ev = self.raw.events
+        spikes = (ev.t.tobytes() + ev.unit.tobytes()) if ev is not None else b""
+        return hashlib.sha1(json.dumps(self._analysis_state(), sort_keys=True).encode() + spikes).hexdigest()
+
+    def save_analysis(self) -> bool:
+        """Save the analysis in the session's folder, beside its recordings. False if there's no
+        session to save it in."""
+        folder = self._folder()
+        if folder is None:
+            self.main.statusBar().showMessage("Record a trial or open a session first: analysis is saved with it.", 8000)
+            return False
+        if self.raw._find_timer.isActive():       # a search waiting to run again: run it now, so it's saved
+            self.raw._find_timer.stop()
+            self.raw._find_again()
+        analysisfile.save(folder, self._analysis_state(), self.raw.events, self._stems())
+        self._saved = self._digest()
+        return True
+
+    def _load_analysis(self) -> None:
+        """Bring back what was saved with this session, the first time it's opened."""
+        folder = self._folder()
+        if folder == self._analysis_from:
+            return
+        self._analysis_from = folder
+        if folder is not None and analysisfile.exists(folder):
+            try:
+                state, events = analysisfile.load(folder, self._stems())
+                self.raw.restore(state["spikes"], events)
+                self.datapad.restore(state["datapad"])
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                self.main.statusBar().showMessage(f"Couldn't read the saved analysis: {e}", 10000)
+        self._saved = self._digest()
+
+    def app_state(self) -> dict:
+        """What Analysis shows, for an .argus file."""
+        stems = self._stems()
+        return {"stim_channel": self.stim_channel.currentData() or "", "current": self.index(),
+                "picked": [stems[i] for i in self.picked if i < len(stems)], "picked_pages": list(self.picked_pages),
+                "windows": [k for k, w in self.windows.items() if w.isVisible()], "canvas": self.canvas.app_state()}
+
+    def restore_app_state(self, s: dict) -> None:
+        self.catch_up()
+        i = self.stim_channel.findData(s["stim_channel"])
+        if i >= 0 and i != self.stim_channel.currentIndex():
+            self.stim_channel.setCurrentIndex(i)
+        self.canvas.restore_app_state(s["canvas"])
+        where = {stem: i for i, stem in enumerate(self._stems())}
+        if s["picked_pages"]:
+            self.select_pages(s["picked_pages"])
+        else:
+            self.select_blocks([where[x] for x in s["picked"] if x in where])
+        self.current.setValue(s["current"] + 1)
+        self._analysis_from = None                # picking the blocks cleared the spikes: as saved again
+        self._load_analysis()
+        for key, w in self.windows.items():
+            self.main.settings.setValue(f"analysis/window/{key}/open", key in s["windows"])
+            if key in s["windows"] and self.isVisible():
+                w.show()
+
+    def has_unsaved_analysis(self) -> bool:
+        """Whether there's analysis that would be lost."""
+        folder = self._folder()
+        if folder is None or self._saved is None:
+            return False
+        anything = self.raw.events is not None or self.datapad.rows or analysisfile.exists(folder)
+        return bool(anything) and self._digest() != self._saved
+
+    def resolve_unsaved(self) -> bool:
+        """True if it's OK to leave this session's analysis."""
+        if not self.has_unsaved_analysis():
+            return True
+        choice = self.main._ask_unsaved_analysis()
+        if choice == "save":
+            return self.save_analysis()
+        return choice == "discard"
 
     def names(self) -> list[str]:
         """The recorded channels, then the calculated ones."""
@@ -959,6 +1057,42 @@ class SpikeFinder(View):
             w.valueChanged.connect(lambda *_: self._detection_changed())
         self.biphasic.toggled.connect(lambda *_: self._detection_changed())
         self._paused = False                      # Clear stops searching again until the next Find
+
+    def state(self) -> dict:
+        """What's set here, to save with the session."""
+        return {"channel": self.channel.currentText(), "method": self.method.currentIndex(),
+                "threshold": self.threshold.text(), "polarity": self.polarity.currentData(),
+                "biphasic": self.biphasic.isChecked(), "bip_frac": self.bip_frac.value(), "bip_ms": self.bip_ms.value(),
+                "dead": self.dead.value(), "pre": self.pre.value(), "post": self.post.value(),
+                "units": self.units.currentIndex(), "unticked": sorted(self._unticked),
+                "colors": {str(u): c for u, c in self.unit_colors.items()},
+                "opacity": {str(u): o for u, o in self.unit_opacity.items()}}
+
+    def restore(self, state: dict, events: A.Events | None) -> None:
+        """Back as it was saved, without searching again."""
+        self._find_timer.stop()
+        widgets = (self.channel, self.method, self.threshold, self.polarity, self.biphasic, self.bip_frac,
+                   self.bip_ms, self.dead, self.pre, self.post, self.units)
+        for w in widgets:
+            w.blockSignals(True)
+        self.channel.setCurrentText(state["channel"])
+        self.method.setCurrentIndex(state["method"])
+        self.threshold.setText(state["threshold"])
+        self.polarity.setCurrentIndex(max(0, self.polarity.findData(state["polarity"])))
+        self.biphasic.setChecked(state["biphasic"])
+        self.units.setCurrentIndex(state["units"])
+        for w, key in ((self.bip_frac, "bip_frac"), (self.bip_ms, "bip_ms"), (self.dead, "dead"), (self.pre, "pre"),
+                       (self.post, "post")):
+            w.setValue(state[key])
+        for w in widgets:
+            w.blockSignals(False)
+        self._unticked = set(state["unticked"])
+        self.unit_colors = {int(u): c for u, c in state["colors"].items()}
+        self.unit_opacity = {int(u): o for u, o in state["opacity"].items()}
+        self.events = events
+        self._show_results()
+        self.page.canvas.refresh()
+        self.page.events_changed()
 
     def _show_search(self, on: bool) -> None:
         self.main.settings.setValue("analysis/search_settings", on)

@@ -12,7 +12,7 @@ import warnings
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore
+from pyqtgraph.Qt import QtCore, QtWidgets
 
 
 # Ctrl (or Cmd: Qt reports Cmd as Control on macOS, and Ctrl as Meta) + drag: box zoom.
@@ -597,3 +597,74 @@ class AxisGroup:
                 ax.setMinimumWidth(w)
                 ax.setMaximumWidth(w)
                 ax.picture = None
+
+
+class PlotButtons(QtCore.QObject):
+    """Buttons that show while the mouse is over a plot: + and − zoom and the arrows move, by
+    each axis. Each click is a step, and holding one repeats it."""
+    ZOOM, STEP = 0.8, 0.2
+
+    def __init__(self, pw: pg.PlotWidget):
+        super().__init__(pw)
+        self.pw, self.vb = pw, pw.getPlotItem().vb
+        self.y = self._group(((0, 0, "+", "Zoom in on the y axis", lambda: self.zoom(1, self.ZOOM)),
+                              (0, 1, "−", "Zoom out on the y axis", lambda: self.zoom(1, 1 / self.ZOOM)),
+                              (1, 0, "▲", "Move up", lambda: self.move(1, 1)),
+                              (1, 1, "▼", "Move down", lambda: self.move(1, -1))))
+        self.x = self._group(((0, 0, "+", "Zoom in on the x axis", lambda: self.zoom(0, self.ZOOM)),
+                              (0, 1, "−", "Zoom out on the x axis", lambda: self.zoom(0, 1 / self.ZOOM)),
+                              (0, 2, "◀", "Move left", lambda: self.move(0, -1)),
+                              (0, 3, "▶", "Move right", lambda: self.move(0, 1))))
+        pw.installEventFilter(self)
+
+    def _group(self, buttons) -> QtWidgets.QWidget:
+        box = QtWidgets.QWidget(self.pw)
+        grid = QtWidgets.QGridLayout(box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        for row, col, text, tip, act in buttons:
+            b = QtWidgets.QToolButton(text=text)
+            b.setToolTip(tip)
+            b.setFixedSize(22, 22)
+            b.setAutoRepeat(True)
+            b.setStyleSheet("QToolButton { background: rgba(47, 51, 58, 225); color: #e6e8eb; "
+                            "border: 1px solid #5a6069; border-radius: 4px; padding: 0; }")
+            b.clicked.connect(act)
+            grid.addWidget(b, row, col)
+        box.adjustSize()
+        box.hide()
+        return box
+
+    def zoom(self, axis: int, by: float) -> None:
+        lo, hi = self.vb.viewRange()[axis]
+        mid, half = (lo + hi) / 2, (hi - lo) / 2 * by
+        (self.vb.setXRange, self.vb.setYRange)[axis](mid - half, mid + half, padding=0)
+
+    def move(self, axis: int, way: int) -> None:
+        lo, hi = self.vb.viewRange()[axis]
+        step = (hi - lo) * self.STEP * way * (-1 if axis == 1 and self.vb.yInverted() else 1)
+        (self.vb.setXRange, self.vb.setYRange)[axis](lo + step, hi + step, padding=0)
+
+    def place(self) -> None:
+        area = self.pw.mapFromScene(self.vb.sceneBoundingRect()).boundingRect()
+        self.y.move(area.left() + 6, area.top() + 6)
+        self.x.move(area.right() - self.x.width() - 6, area.bottom() - self.x.height() - 6)
+
+    def eventFilter(self, obj, ev):
+        kind = ev.type()
+        if kind == QtCore.QEvent.Type.Enter:
+            self.place()
+            self.y.show()
+            self.x.show()
+        elif kind == QtCore.QEvent.Type.Leave:
+            self.y.hide()
+            self.x.hide()
+        elif kind == QtCore.QEvent.Type.Resize:
+            self.place()
+        return False
+
+
+def add_buttons(pw: pg.PlotWidget) -> None:
+    """Give a plot its PlotButtons, once."""
+    if getattr(pw, "buttons", None) is None:
+        pw.buttons = PlotButtons(pw)

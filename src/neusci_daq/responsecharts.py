@@ -465,7 +465,7 @@ class FitChart(Chart):
         chosen = self.blocks()
         fit = page._looks["stim_fit"]
         if not chosen or not stim or not fit:
-            self.fit_plot.getPlotItem().setTitle("Stimulus fit: pick the Stimulus channel and a Stim fit in Data",
+            self.fit_plot.getPlotItem().setTitle("Stimulus fit: pick the Stimulus channel and a Stim fit in Channels",
                                                  color=self._fg())
             return
         b = chosen[0]
@@ -605,7 +605,7 @@ class CycleChart(Chart):
     def no_cycles(self, p: pg.PlotItem) -> None:
         stim = self.page.repeats.channel()
         p.setTitle(f"{self.title}: no repeats on {stim}. For a one-off stimulus, use the stimulus-triggered rate" if stim
-                   else f"{self.title}: pick the Stimulus channel in Data", color=self._fg())
+                   else f"{self.title}: pick the Stimulus channel in Channels", color=self._fg())
 
     def draw_cycles(self, p: pg.PlotItem, cycles: dict, sets: list) -> None:
         raise NotImplementedError

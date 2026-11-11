@@ -1,6 +1,6 @@
 """Make Argus.app: a small Mac app that starts Argus from this folder's .venv, so the Dock
-and the app switcher say Argus and show its icon, instead of python3.12. Mac only: Windows
-runs Argus as before.
+and the app switcher say Argus and show its icon, instead of python3.12, and .argus files
+open in it with a double-click. Mac only: Windows runs Argus as before.
 
     .venv/bin/python tools/make_mac_app.py [--backend simulated] [--to ~/Applications]
 
@@ -47,12 +47,20 @@ def main() -> None:
                        "CFBundleIdentifier": "edu.uw.neuroscience.argus", "CFBundleIconFile": "argus",
                        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0",
                        "NSHighResolutionCapable": True,
+                       "CFBundleDocumentTypes": [{"CFBundleTypeName": "Argus file", "CFBundleTypeRole": "Editor",
+                                                  "LSHandlerRank": "Owner", "CFBundleTypeIconFile": "argus",
+                                                  "LSItemContentTypes": ["edu.uw.neuroscience.argus.file"]}],
+                       "UTExportedTypeDeclarations": [{"UTTypeIdentifier": "edu.uw.neuroscience.argus.file",
+                                                       "UTTypeDescription": "Argus file",
+                                                       "UTTypeConformsTo": ["public.data", "public.zip-archive"],
+                                                       "UTTypeIconFile": "argus",
+                                                       "UTTypeTagSpecification": {"public.filename-extension": ["argus"]}}],
                        "NSCameraUsageDescription": "Argus records video with each trial.",
                        "NSMicrophoneUsageDescription": "Argus can record from an audio input."}, f)
     backend = f" --backend {shlex.quote(args.backend)}" if args.backend else ""
     run = app / "Contents" / "MacOS" / "Argus"
     run.write_text(f"#!/bin/sh\ncd {shlex.quote(str(ROOT))}\n"
-                   f"exec .venv/bin/python -m neusci_daq -c config.toml{backend}\n")
+                   f"exec .venv/bin/python -m neusci_daq -c config.toml{backend} \"$@\"\n")
     run.chmod(0o755)
     print(f"Made {app}")
 

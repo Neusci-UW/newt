@@ -89,10 +89,10 @@ def test_record_save_open_append_export_recent(tmp_path, app, settings):
     assert w.recent_sessions()[0] == str(sess)
     assert "my_prep — Live" in w.windowTitle()
 
-    # Keep recording into the saved session; Save updates the .mat
+    # Keep recording into the saved session; saving it in place updates the .mat
     record_blocks(app, w, 1)
     assert [p.name for p in session.list_blocks(sess)][-1] == "block_003.h5"
-    assert w.save()
+    assert w.save_as(sess) == sess
     assert len(neuscitk.LabChartDataset(str(sess / "my_prep.mat")).data["Channel 1"]) == 3
 
     # Save As refuses a non-empty folder; a copy keeps the original
@@ -214,11 +214,15 @@ def test_unsaved_session_prompts_before_leaving(tmp_path, app, settings):
     assert w.close()
 
 
-def test_save_without_recording_does_nothing(tmp_path, app, settings):
+def test_save_without_recording_does_nothing(tmp_path, app, settings, monkeypatch):
+    from pyqtgraph.Qt import QtWidgets
     from neusci_daq.gui import MainWindow
 
+    said = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda parent, title, text: said.append(text))
     w = MainWindow(make_cfg(tmp_path), settings=settings)
     assert w.save() is False
+    assert said == ["Record a trial first."]
     with pytest.raises(session.SessionError, match="Nothing"):
         w.save_as(tmp_path / "x")
     w.close()

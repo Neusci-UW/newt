@@ -96,7 +96,7 @@ class StimulusChart(SpikeChart):
         self.stim_items = []
         self.stim_onsets.setData([], [])
         self.time_range(self._span(chosen))
-        sp.setTitle("" if how and chosen else "Stimulus: pick the Stimulus channel in Data" if not how else
+        sp.setTitle("" if how and chosen else "Stimulus: pick the Stimulus channel in Channels" if not how else
                     "Stimulus: no trials chosen", color=self._fg())
         if not how or not chosen:
             return

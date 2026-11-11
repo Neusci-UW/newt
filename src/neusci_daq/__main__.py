@@ -6,6 +6,7 @@ from . import config
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="neusci-daq", description=__doc__)
+    ap.add_argument("file", nargs="?", help="an .argus file (or session folder, or .mat) to open")
     ap.add_argument("-c", "--config", default="config.toml")
     ap.add_argument("--backend", choices=["nidaqmx", "multichannelio", "simulated", "audio"],
                     help="override the backend in the config")
@@ -34,7 +35,7 @@ def main(argv=None):
             config.use_audio_channels(cfg)
         config.validate(cfg)
     from .gui import run
-    return run(cfg, config_path=args.config)
+    return run(cfg, config_path=args.config, open_path=args.file)
 
 
 if __name__ == "__main__":

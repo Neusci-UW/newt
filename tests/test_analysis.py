@@ -1797,6 +1797,81 @@ def test_saved_order_goes_first_and_new_groups_after():
     assert [n for n, _ in pages.arrange(shown, {"sort": "frequency"}, lambda b: size[b[0]])] == ["b", "c", "a"]
 
 
+def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):
+    from neusci_daq import analysisfile
+    from neusci_daq.gui import MainWindow
+    ap, raw = _spike_sorting(app, win)
+    assert not ap.has_unsaved_analysis()
+    ev = raw.find()
+    raw.threshold.setText("6 SD")
+    raw.find()
+    ev = raw.events
+    raw.set_unit_color(0, "#123456")
+    raw.unit_opacity[0] = 0.5
+    ap.main.tabs.pick(0, "datapad")
+    pump(app, 0.1)
+    ap.datapad.add_column("Ch2", "spikes")
+    assert ap.datapad.add_rows("blocks") > 0
+    n = len(ap.datapad.rows)
+    assert ap.has_unsaved_analysis()
+    asked = []
+    win._ask_unsaved_analysis = lambda: asked.append(1) or "cancel"
+    assert not win._resolve_unsaved() and asked                      # Cancel stays
+    assert ap.save_analysis() and not ap.has_unsaved_analysis()
+    folder = ap._folder()
+    assert analysisfile.exists(folder)
+    before = sorted(p.name for p in session.list_blocks(folder))
+    w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)
+    w2._ask_unsaved = lambda: "discard"
+    w2.open_session(folder)
+    w2.show()
+    w2.tabs.pick(0, "analysis")
+    pump(app, 0.3)
+    a2 = w2.analysis_page
+    assert a2.raw.events is not None and len(a2.raw.events.t) == len(ev.t)
+    assert a2.raw.events.t == pytest.approx(ev.t) and a2.raw.threshold.text() == "6 SD"
+    assert a2.raw.color_of(0) == "#123456" and a2.raw.opacity_of(0) == 0.5
+    assert len(a2.datapad.rows) == n and a2.datapad.columns[-1] == ("Ch2", "spikes")
+    assert not a2.has_unsaved_analysis()
+    assert sorted(p.name for p in session.list_blocks(folder)) == before
+    w2.close()
+
+
+def test_zoom_and_move_buttons_show_over_a_chart(app, win):
+    ap, raw = _spike_sorting(app, win)
+    win.resize(1400, 900)
+    pump(app, 0.2)
+    chart, other = C(raw, "Raster"), C(raw, "Rate")
+    pw = chart.plot
+    assert pw.buttons.x.isHidden()
+    app.sendEvent(pw, QtCore.QEvent(QtCore.QEvent.Type.Enter))
+    assert pw.buttons.x.isVisible() and pw.buttons.y.isVisible()
+    area = pw.mapFromScene(pw.getPlotItem().vb.sceneBoundingRect()).boundingRect()
+    assert area.contains(pw.buttons.y.geometry().topLeft()) and area.contains(pw.buttons.x.geometry().bottomRight())
+    lo, hi = pw.getPlotItem().viewRange()[0]
+    pw.buttons.zoom(0, 0.5)
+    pump(app, 0.05)
+    lo2, hi2 = pw.getPlotItem().viewRange()[0]
+    assert hi2 - lo2 == pytest.approx((hi - lo) / 2, rel=0.02)
+    assert other.plot.getPlotItem().viewRange()[0] == pytest.approx([lo2, hi2], abs=0.01)   # linked charts follow
+    pw.buttons.move(0, 1)
+    pump(app, 0.05)
+    assert pw.getPlotItem().viewRange()[0][0] > lo2
+    app.sendEvent(pw, QtCore.QEvent(QtCore.QEvent.Type.Leave))
+    assert pw.buttons.x.isHidden()
+
+
+def test_channels_and_groups_settings_open_in_their_own_windows(app, win):
+    ap, raw = _spike_sorting(app, win)
+    ap.windows["channels"].open_()
+    pump(app, 0.05)
+    assert ap.stim_channel.isVisible() and ap.fit_box.isVisible() and ap.gain.isVisible()
+    assert not ap.spread_box.isVisible()
+    ap.blocks_panel.btn_groups.click()
+    pump(app, 0.05)
+    assert ap.spread_box.isVisible() and ap.page_map.isVisible() and ap.blocks_panel.btn_reset.isVisible()
+
+
 def test_a_units_opacity_reaches_the_charts(app, win):
     ap, raw = _spike_sorting(app, win)
     raw.find()

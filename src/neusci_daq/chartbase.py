@@ -16,6 +16,7 @@ from pyqtgraph.Qt import QtGui, QtWidgets
 from . import analysis as A
 from . import style, theme
 from .helpview import add_help
+from .plotzoom import add_buttons
 from .viewkit import View, show_scale_bar, shrink_combos, style_plot
 
 
@@ -339,6 +340,8 @@ class Chart(View):
         self.stale = False
         self.draw()
         self.show_bars()
+        for pw in self.plots():
+            add_buttons(pw)
 
     def collapse(self, always: bool = False) -> None:
         """Give up its dock's room while it has nothing to show, unless you opened it: a chart

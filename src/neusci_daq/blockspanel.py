@@ -68,8 +68,10 @@ class BlocksPanel(QtWidgets.QWidget):
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
         # On Analysis what's above the blocks opens in a window of its own (self.extras).
-        self.extras = QtWidgets.QWidget()
+        self.extras = QtWidgets.QWidget()         # the Channels window
+        self.group_extras = QtWidgets.QWidget()   # the Groups window
         top = QtWidgets.QVBoxLayout(self.extras) if for_analysis else lay
+        group_top = QtWidgets.QVBoxLayout(self.group_extras) if for_analysis else lay
         # The stimulus channel (also on the Analysis tab): it sorts the blocks into pages.
         top.addWidget(QtWidgets.QLabel("Stimulus channel"))
         self.stim_ch = QtWidgets.QComboBox()
@@ -82,10 +84,22 @@ class BlocksPanel(QtWidgets.QWidget):
         self.btn_reset.setToolTip("Forget the group names and moved trials, and sort the trials into "
                                   "groups again from the stimulus channel")
         self.btn_reset.clicked.connect(lambda: self.later(self.reset_requested.emit))
-        top.addWidget(self.btn_reset)
         self.settings = QtWidgets.QFormLayout()  # what a page adds with add_setting
         self.settings.setContentsMargins(0, 0, 0, 0)
         top.addLayout(self.settings)
+        if for_analysis:
+            top.addStretch(1)
+        self.group_settings = QtWidgets.QFormLayout()
+        self.group_settings.setContentsMargins(0, 0, 0, 0)
+        if for_analysis:
+            group_top.addLayout(self.group_settings)
+        group_top.addWidget(self.btn_reset)
+        if for_analysis:
+            group_top.addStretch(1)
+        self.btn_groups = QtWidgets.QPushButton("Groups…")
+        self.btn_groups.setToolTip("The colours of groups and trials, Spread, and Reset groups")
+        if for_analysis:
+            lay.addWidget(self.btn_groups)
         lay.addSpacing(6)
         self.title = QtWidgets.QLabel("<b>Trials</b>")
         lay.addWidget(self.title)
@@ -152,6 +166,9 @@ class BlocksPanel(QtWidgets.QWidget):
 
     def add_setting(self, label: str, widget: QtWidgets.QWidget) -> None:
         self.settings.addRow(label, widget)
+
+    def add_group_setting(self, label: str, widget: QtWidgets.QWidget) -> None:
+        self.group_settings.addRow(label, widget)
 
     # -- acting once Qt is done with the event ---------------------------------------------
     def later(self, fn) -> None:

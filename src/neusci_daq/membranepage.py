@@ -62,7 +62,15 @@ class MembranePage(QtWidgets.QWidget):
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         self.view.loadFinished.connect(self._on_loaded)
         self.view.setUrl(QtCore.QUrl.fromLocalFile(str(PAGE)))
-        self._lay.addWidget(self.view)
+        self.btn_refresh = QtWidgets.QPushButton("Refresh")
+        self.btn_refresh.setToolTip("Reload the simulation from the start, with every setting back to its default")
+        self.btn_refresh.clicked.connect(self.view.reload)
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(8, 6, 8, 0)
+        row.addStretch(1)
+        row.addWidget(self.btn_refresh)
+        self._lay.addLayout(row)
+        self._lay.addWidget(self.view, 1)
 
     def _fallback(self) -> QtWidgets.QWidget:
         box = QtWidgets.QWidget()

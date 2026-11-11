@@ -48,6 +48,9 @@ from . import config as cfgmod
 from . import matfile
 from . import session
 from . import stim as stimmod
+from . import trials as trialsmod
+from . import simulation as sim
+from . import argusfile
 from . import style, theme
 from .backends import Backend, make_backend
 from . import dsp
@@ -137,6 +140,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Live session: each Record press is one block, like LabChart.
         self.session_dir: Path | None = None
         self.session_saved = False   # False while it lives in data/unsaved/
+        self.argus_path: Path | None = None       # the .argus file this session was saved in or opened from
+        self._argus_folder: Path | None = None    # ...for this session folder
+        self._argus_files: dict | None = None     # what the folder held when it was saved (argusfile.files_of)
         self.blocks: list[Path] = []
         self._exported_n = 0
         # Review session.
@@ -446,8 +452,9 @@ class MainWindow(QtWidgets.QMainWindow):
         m = self.menuBar().addMenu("&File")
         self.act_new = m.addAction("&New", self.new_session)
         self.act_new.setShortcut(QtGui.QKeySequence.StandardKey.New)
-        self.act_open = m.addAction("&Open…", self.open_session_dialog)
+        self.act_open = m.addAction("&Open…", self.open_file_dialog)
         self.act_open.setShortcut(QtGui.QKeySequence.StandardKey.Open)
+        self.act_open_folder = m.addAction("Open Session &Folder…", self.open_session_dialog)
         self.act_open_mat = m.addAction("Open .&mat File…", self.open_mat_dialog)
         self.act_open_mat.setToolTip("Review a LabChart export, or a .mat this app exported. "
                                      "The file itself is never changed.")
@@ -455,8 +462,10 @@ class MainWindow(QtWidgets.QMainWindow):
         m.addSeparator()
         self.act_save = m.addAction("&Save", self.save)
         self.act_save.setShortcut(QtGui.QKeySequence.StandardKey.Save)
-        self.act_save_as = m.addAction("Save &As…", self.save_as_dialog)
+        self.act_save.setToolTip("Save everything in one .argus file, which reopens Argus as it is now")
+        self.act_save_as = m.addAction("Save &As…", self.save_file_dialog)
         self.act_save_as.setShortcut(QtGui.QKeySequence("Ctrl+Shift+S"))
+        self.act_save_folder = m.addAction("Save Session F&older As…", self.save_as_dialog)
         self.act_export = m.addAction("&Export…", self.export_dialog)
         self.act_export.setShortcut(QtGui.QKeySequence("Ctrl+E"))
         m.addSeparator()
@@ -1370,7 +1379,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.set_listen(self._listen)           # back to live: listening again
 
     def _update_title(self):
-        if self.mode == REVIEW and self._review_source is not None:
+        argus = self._argus()
+        if argus is not None:
+            where = f"{argus.name}{'*' if self._has_unsaved() else ''} — {'Review' if self.mode == REVIEW else 'Live'}"
+        elif self.mode == REVIEW and self._review_source is not None:
             where = f"{self._review_source.name} (imported copy) — Review"
         elif self.mode == REVIEW and self.review_dir is not None:
             where = f"{self.review_dir.name} — Review"
@@ -1384,9 +1396,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_menu_state(self):
         recording = self.recorder.recording
-        for a in (self.act_new, self.act_open, self.act_open_mat, self.act_append):
+        for a in (self.act_new, self.act_open, self.act_open_folder, self.act_open_mat, self.act_append):
             a.setEnabled(not recording)
-        self.act_save.setEnabled(self.mode == LIVE and bool(self.blocks) and not recording)
+        self.act_save.setEnabled(bool(self._export_blocks()) and not recording)
+        self.act_save_folder.setEnabled(bool(self._export_blocks()) and not recording)
         self.act_save_as.setEnabled(bool(self._export_blocks()) and not recording)
         self.act_export.setEnabled(bool(self._export_blocks()) and not recording)
 
@@ -1394,7 +1407,14 @@ class MainWindow(QtWidgets.QMainWindow):
         return Path(self.cfg.data_dir) / "unsaved"
 
     def _has_unsaved(self) -> bool:
+        if self._argus() is not None:          # changed since it was saved in its .argus file
+            return argusfile.files_of(self._export_folder()) != self._argus_files
         return self.session_dir is not None and not self.session_saved and bool(self.blocks)
+
+    def _argus(self) -> Path | None:
+        """The .argus file of the session showing, if it has one."""
+        folder = self._export_folder()
+        return self.argus_path if folder is not None and folder == self._argus_folder else None
 
     def _ask_unsaved(self) -> str:
         """Ask what to do with an unsaved session: 'save', 'discard' or 'cancel'."""
@@ -1406,8 +1426,31 @@ class MainWindow(QtWidgets.QMainWindow):
             B.Save | B.Discard | B.Cancel, B.Save)
         return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
 
+    def _ask_unsaved_analysis(self) -> str:
+        """Ask what to do with analysis that isn't saved: 'save', 'discard' or 'cancel'."""
+        B = QtWidgets.QMessageBox.StandardButton
+        r = QtWidgets.QMessageBox.question(
+            self, "Unsaved analysis", "The spikes found, units or DataPad rows have changed since they were saved.\n\n"
+            "Save them with the session?", B.Save | B.Discard | B.Cancel, B.Save)
+        return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
+
+    def _ask_unsaved_file(self) -> str:
+        """Ask what to do with changes not in the .argus file: 'save', 'discard' or 'cancel'."""
+        B = QtWidgets.QMessageBox.StandardButton
+        r = QtWidgets.QMessageBox.question(
+            self, "Unsaved changes", f"{self._argus().name} has changed since it was saved.\n\nSave the changes?",
+            B.Save | B.Discard | B.Cancel, B.Save)
+        return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
+
     def _resolve_unsaved(self) -> bool:
         """True if it's OK to leave the current session."""
+        if self._argus() is not None:
+            if not (self._has_unsaved() or self.analysis_page.has_unsaved_analysis()):
+                return True
+            choice = self._ask_unsaved_file()
+            return self.save() if choice == "save" else choice == "discard"
+        if not self.analysis_page.resolve_unsaved():
+            return False
         if not self._has_unsaved():
             return True
         choice = self._ask_unsaved()
@@ -1667,15 +1710,127 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def save(self) -> bool:
-        """First save asks for a name (Save As). Afterwards, just update the .mat."""
+        """Save everything in the session's .argus file; the first time, ask where."""
         if self.recorder.recording:
             QtWidgets.QMessageBox.information(self, "Recording in progress", "Stop recording before saving.")
             return False
-        if self.mode != LIVE or not self.blocks:
+        argus = self._argus()
+        if argus is None:
+            return self.save_file_dialog()
+        return self._save_file(argus)
+
+    def save_file_dialog(self) -> bool:
+        """Ask where to save the .argus file, and save it there."""
+        if self.recorder.recording:
+            QtWidgets.QMessageBox.information(self, "Recording in progress", "Stop recording before saving.")
             return False
-        if not self.session_saved:
-            return self.save_as_dialog()
-        return self.export() is not None
+        if not self._export_blocks():
+            QtWidgets.QMessageBox.information(self, "Nothing to save", "Record a trial first.")
+            return False
+        src = self._export_folder()
+        name = self._argus().stem if self._argus() is not None else \
+            src.name if (self.session_saved or self.mode == REVIEW) else datetime.now().strftime("session_%Y%m%d_%H%M%S")
+        default = Path(self._start_dir()) / (name + argusfile.SUFFIX)
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save as an Argus file", str(default),
+                                                        f"Argus file (*{argusfile.SUFFIX})")
+        if not path:
+            return False
+        path = Path(path)
+        return self._save_file(path if path.suffix == argusfile.SUFFIX else path.with_name(path.name + argusfile.SUFFIX))
+
+    def _save_file(self, path: Path) -> bool:
+        try:
+            self.save_argus(path)
+            return True
+        except (argusfile.ArgusError, session.SessionError, OSError) as e:
+            QtWidgets.QMessageBox.critical(self, "Could not save", str(e))
+        return False
+
+    def save_argus(self, path: str | Path) -> Path:
+        """Save everything in one .argus file: the session's recordings and the files beside
+        them (analysis included), and what's on screen. Later saves add only what changed."""
+        if self.recorder.recording:
+            raise session.SessionError("Stop recording before saving.")
+        folder = self._export_folder()
+        if folder is None or not self._export_blocks():
+            raise argusfile.ArgusError("Nothing recorded yet: there's nothing to save.")
+        path = Path(path).resolve()
+        self.analysis_page.save_analysis()
+        self._argus_files = argusfile.save(path, folder, self.app_state())
+        self.argus_path, self._argus_folder = path, folder
+        self._remember(path)
+        self._update_title()
+        self.statusBar().showMessage(f"Saved {path.name}", 8000)
+        return path
+
+    def open_file_dialog(self):
+        if not self._leave_live():
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open an Argus file", self._start_dir(),
+                                                        f"Argus file (*{argusfile.SUFFIX});;All files (*)")
+        if path:
+            self._try(lambda: self.open_file(path), "Could not open the file")
+
+    def open_file(self, path: str | Path) -> Path:
+        """Open an .argus file: its session in review, and Argus as it was when saved."""
+        path = Path(path).resolve()
+        folder, state, files = argusfile.open_file(path, self.cfg.data_dir)
+        self.open_session(folder, remember=False)
+        self.argus_path, self._argus_folder, self._argus_files = path, folder, files
+        self.restore_app_state(state)
+        self._remember(path)
+        self._update_title()
+        self.statusBar().showMessage(f"Opened {path.name}", 8000)
+        return folder
+
+    def open_requested(self, path: str) -> None:
+        """A file given to Argus to open (double-clicked, or on the command line)."""
+        if self._leave_live():
+            opener = self.open_file if path.lower().endswith(argusfile.SUFFIX) else \
+                self.open_mat if path.lower().endswith(".mat") else self.open_session
+            self._try(lambda: opener(path), "Could not open it")
+
+    def app_state(self) -> dict:
+        """What's on screen and set, for an .argus file: the tabs, Analysis, the stimulus, the
+        protocol, and the simulated network."""
+        d = {"version": argusfile.VERSION, "tabs": {"shown": list(self.tabs.shown), "layout": self.tabs.layout_mode},
+             "analysis": self.analysis_page.app_state(), "stimulus": self.stimulus.to_dict(),
+             "protocol": self.trials_page.protocol.to_dict()}
+        if self.cfg.backend == "simulated":
+            d["sim"] = dataclasses.asdict(self.cfg.sim_network)
+        return d
+
+    def restore_app_state(self, d: dict) -> None:
+        """Back as an .argus file was saved. A part that can't be put back is skipped, and said."""
+        skipped = []
+
+        def part(name, fn):
+            try:
+                fn()
+            except Exception as e:              # an older or damaged part: the rest still opens
+                skipped.append(f"{name} ({e})")
+        part("the stimulus", lambda: self.set_stimulus(Stimulus.from_dict(d["stimulus"])))
+
+        def protocol():
+            p = trialsmod.Protocol.from_dict(d["protocol"])
+            self.trials_page.protocol = p
+            self.trials_page._load_protocol_into_widgets(p)
+        part("the protocol", protocol)
+        if "sim" in d and self.cfg.backend == "simulated" and self.sim_page is not None:
+            def network():
+                self.cfg.sim_network = sim.network_from_dict(d["sim"])
+                self.sim_page.load()
+            part("the simulation", network)
+        part("Analysis", lambda: self.analysis_page.restore_app_state(d["analysis"]))
+
+        def tabs():
+            shown = [p for p in d["tabs"]["shown"] if p in self.tabs.pages]
+            if len(shown) == 2:
+                self.tabs.shown = shown
+                self.tabs.set_layout(d["tabs"]["layout"])
+        part("the tabs", tabs)
+        if skipped:
+            self.statusBar().showMessage("Couldn't put back " + ", ".join(skipped), 15000)
 
     def save_as(self, path: str | Path) -> Path:
         """Save the current session (live or reviewed) to `path` and continue there.
@@ -2048,6 +2203,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recent_menu.addAction("Clear List", lambda: self.settings.setValue("recent_sessions", []))
 
     def open_recent(self, path: str):
+        if path.lower().endswith(argusfile.SUFFIX):
+            if not Path(path).is_file():
+                self.settings.setValue("recent_sessions", [r for r in self.recent_sessions() if r != path])
+                QtWidgets.QMessageBox.warning(self, "File not found",
+                                              f"{path} no longer exists. It has been removed from the list.")
+            elif self._leave_live():
+                self._try(lambda: self.open_file(path), "Could not open the file")
+            return
         if path.lower().endswith(".mat"):
             if not Path(path).is_file():
                 self.settings.setValue("recent_sessions", [r for r in self.recent_sessions() if r != path])
@@ -3089,20 +3252,57 @@ def app_icon() -> QtGui.QIcon:
     return icon
 
 
+SPLASH_S = 3.0              # the logo shows for at least this long at start-up
 _WINDOWS: list = []        # windows opened by Setup › Input device, kept alive
 
 
-def run(cfg: Config, config_path: str | Path | None = None):
+class _FileOpener(QtCore.QObject):
+    """Files macOS asks Argus to open (a double-clicked .argus file), kept until the window
+    is ready."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.window, self.waiting = None, []
+        app.installEventFilter(self)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QtCore.QEvent.Type.FileOpen and ev.file():
+            if self.window is None:
+                self.waiting.append(ev.file())
+            else:
+                self.window.open_requested(ev.file())
+            return True
+        return False
+
+    def ready(self, window) -> None:
+        self.window = window
+        for path in self.waiting:
+            window.open_requested(path)
+        self.waiting = []
+
+
+def run(cfg: Config, config_path: str | Path | None = None, open_path: str | None = None):
     app = pg.mkQApp("Argus")
+    opener = _FileOpener(app)
     # pyqtgraph sets its own icon and Windows taskbar ID in mkQApp; replace both
     # before the window opens, or the taskbar keeps showing pyqtgraph's icon.
     if sys.platform == "win32":
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("neusci.daq.visualizer")
     app.setWindowIcon(app_icon())
+    splash = QtWidgets.QSplashScreen(QtGui.QIcon(str(ICON_DIR / "icon_512.png")).pixmap(QtCore.QSize(360, 360)))
+    splash.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
+    splash.show()
+    app.processEvents()                                # the logo, while the window is made
+    shown = time.monotonic()
     saved = QtCore.QSettings("neusci", "neusci-daq-visualizer").value("plot_theme", theme.DARK)
     style.apply(app, style.DARK if saved == theme.DARK else style.LIGHT)
     w = MainWindow(cfg, config_path=config_path)
     w.resize(1300, 200 + 180 * len(cfg.channels))    # the size it goes back to if un-maximized
     w.showMaximized()                                  # open filling the screen
+    if open_path:
+        opener.waiting.append(str(Path(open_path).resolve()))
+    QtCore.QTimer.singleShot(0, lambda: opener.ready(w))
+    left = SPLASH_S - (time.monotonic() - shown)       # long enough to see, on a fast computer too
+    QtCore.QTimer.singleShot(max(0, int(left * 1000)), lambda: splash.finish(w))
     return app.exec()

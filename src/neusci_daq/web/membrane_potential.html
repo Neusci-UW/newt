@@ -159,6 +159,10 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
 .seg button{border:0;border-radius:0;font-size:13px;padding:5px 12px}
 .seg button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.gcell{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:14px}
+.gcell label{font-weight:600}
+.gcell select{font:inherit;font-size:14px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);max-width:100%}
+.gcell .caption{flex-basis:100%}
 .gr[hidden]{display:none}
 .gformula{font-family:var(--font-mono);font-size:12.5px;line-height:1.85;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);overflow-x:auto;white-space:nowrap}
 .gformula .res{font-size:14px;font-weight:600}
@@ -325,6 +329,11 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
           <button type="button" id="gModeChord" aria-pressed="false">Chord conductance · G</button>
         </div>
       </div>
+      <div class="gcell">
+        <label for="gCell">Cell</label>
+        <select id="gCell"></select>
+        <p class="caption" id="gCellNote"></p>
+      </div>
       <div class="calc-body">
         <div class="gsliders">
           <div class="gion">
@@ -349,7 +358,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
             <div class="gr"><label for="gClo">[Cl⁻]ₒ</label><input type="range" id="gClo" data-log min="-1" max="3" step="0.005" value="2.1717"><output id="gCloo" for="gClo"></output></div>
           </div>
           <div class="gion">
-            <div class="gr"><label for="gT">T</label><input type="range" id="gT" min="0" max="45" step="1" value="25"><output id="gTo" for="gT"></output></div>
+            <div class="gr"><label for="gT">T</label><input type="range" id="gT" min="0" max="45" step="0.1" value="25"><output id="gTo" for="gT"></output></div>
             <span class="caption" id="gRTF"></span>
           </div>
         </div>
@@ -363,7 +372,6 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
           <div class="btns">
             <button id="gFromSim">Copy from simulation</button>
             <button id="gToSim">Send to simulation</button>
-            <button id="gDefaults">Squid axon defaults</button>
           </div>
         </div>
       </div>
@@ -1377,7 +1385,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     if (!e.hasAttribute('data-log')) return v;
     if (/^g[PG]/.test(id) && v <= parseFloat(e.min) + 1e-9) return 0;
     return Math.pow(10, v); };
-  const fmtCalc = (id, v) => id === 'gT' ? v.toFixed(0) + ' °C'
+  const fmtCalc = (id, v) => id === 'gT' ? (Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1)) + ' °C'
     : id.startsWith('gP') ? (v === 0 ? 'off' : v < 0.1 ? v.toPrecision(2) : v.toFixed(2))
     : id.startsWith('gG') ? (v === 0 ? 'off' : (v < 0.01 ? v.toPrecision(2) : v.toFixed(3)) + ' mS/cm²')
     : (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' mM';
@@ -1524,16 +1532,44 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   gIds.forEach(id => $(id).addEventListener('input', () => calcGHK(undefined, gMode !== 'chord')));
   gGIds.forEach(id => $(id).addEventListener('input', () => calcGHK('G')));
   const setG = (id, v) => { const e = $(id); e.value = e.hasAttribute('data-log') ? Math.log10(Math.max(+v, Math.pow(10, parseFloat(e.min)))).toFixed(4) : +(+v).toFixed(2); };
-  $('gDefaults').addEventListener('click', () => {
-    [['gPK', 1], ['gPNa', 0.04], ['gPCl', 0.45], ['gKi', 400], ['gKo', 20], ['gNai', 50], ['gNao', 440], ['gCli', 52], ['gClo', 560], ['gT', 6.3]].forEach(([i, v]) => setG(i, v));
-    calcGHK('P');
-  });
+  // Cell presets. Concentrations are mM (K, Na, Cl); P values are relative (only their ratios matter).
+  // Only the classic preparations have measured concentrations; for the others they are typical values
+  // and the P ratios are chosen to give the resting potential recorded in those cells (the note says which).
+  const CELLS = [
+    { id: 'squid', name: 'Squid giant axon', T: 6.3, P: [1, 0.04, 0.45], ci: [400, 50, 52], co: [20, 440, 560],
+      note: 'Measured concentrations and Hodgkin and Katz’s (1949) permeability ratios, at the temperature of their experiments. Recorded resting potential about −60 to −65 mV.' },
+    { id: 'mammal', name: 'Mammalian neuron (textbook)', T: 37, P: [1, 0.04, 0.45], ci: DEFAULTS.mammal.cin, co: DEFAULTS.mammal.cout,
+      note: 'Textbook concentrations, the same as the simulation’s Mammal defaults, with the squid permeability ratios.' },
+    { id: 'l4', name: 'Layer 4 pyramidal neuron (rodent cortex)', T: 35, P: [1, 0.05, 0.1], ci: [140, 10, 6], co: [3, 145, 120],
+      note: 'Typical neuron cytoplasm (low Cl⁻ in mature neurons) and cerebrospinal fluid; concentrations aren’t measured cell by cell. P ratios chosen to give the resting potential recorded in brain slices, about −65 to −70 mV, at slice temperature.' },
+    { id: 'frog', name: 'Frog skeletal muscle', T: 20, P: [1, 0.01, 2], ci: [124, 10.4, 1.5], co: [2.25, 109, 77.5],
+      note: 'Classic frog muscle concentrations as tabulated in textbooks (e.g. Hille). At rest Cl⁻ is about twice as permeant as K⁺; resting potential about −90 mV.' },
+    { id: 'cardiac', name: 'Ventricular heart muscle cell (mammal)', T: 37, P: [1, 0.005, 0.01], ci: [140, 10, 30], co: [5.4, 140, 120],
+      note: 'Typical concentrations. K⁺ channels (I_K1) dominate at rest; P ratios chosen to give the recorded resting potential, about −80 to −85 mV.' },
+    { id: 'astro', name: 'Astrocyte', T: 37, P: [1, 0.01, 0.02], ci: [130, 15, 35], co: [3, 145, 120],
+      note: 'Typical concentrations; glia keep more Cl⁻ inside than neurons. Almost all their resting channels pass K⁺, so they sit close to E_K, about −80 to −90 mV.' },
+    { id: 'rbc', name: 'Human red blood cell', T: 37, P: [0.1, 0.05, 10], ci: [140, 12, 80], co: [4.5, 145, 110],
+      note: 'Cl⁻ crosses far more easily than K⁺ or Na⁺ (through the anion exchanger), so the membrane sits near E_Cl, about −10 mV. Typical concentrations.' },
+  ];
+  const cellSel = $('gCell'), cellNote = $('gCellNote');
+  cellSel.innerHTML = '<option value="custom">Custom values</option>' + CELLS.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  function applyCell(id) {
+    const c = CELLS.find(c => c.id === id); if (!c) return;
+    ['gPK', 'gPNa', 'gPCl'].forEach((i, s) => setG(i, c.P[s]));
+    ['gKi', 'gNai', 'gCli'].forEach((i, s) => setG(i, c.ci[s])); ['gKo', 'gNao', 'gClo'].forEach((i, s) => setG(i, c.co[s]));
+    setG('gT', c.T);
+    calcGHK('P');                                   // in the chord model the conductances follow
+    cellSel.value = id; cellNote.textContent = c.note;
+  }
+  const markCustom = () => { cellSel.value = 'custom'; cellNote.textContent = ''; };
+  cellSel.addEventListener('change', () => cellSel.value === 'custom' ? markCustom() : applyCell(cellSel.value));
+  gIds.concat(gGIds).forEach(id => $(id).addEventListener('input', markCustom));
   $('gFromSim').addEventListener('click', () => {
     const pK = nLeak[0], pNa = nLeak[1], pCl = nLeak[2];
     const ref = pK > 0 ? pK : Math.max(pNa, pCl, 1);
     setG('gPK', pK / ref); setG('gPNa', pNa / ref); setG('gPCl', pCl / ref);
     ['gKi', 'gNai', 'gCli'].forEach((id, k) => setG(id, concIn[k])); ['gKo', 'gNao', 'gClo'].forEach((id, k) => setG(id, concOut[k]));
-    setG('gT', 25); calcGHK('P');
+    setG('gT', 25); calcGHK('P'); markCustom();
   });
   $('gToSim').addEventListener('click', () => {
     if (gMode === 'chord') calcGHK('G');   // send the permeabilities that match the conductances shown
@@ -1546,7 +1582,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     syncConcUI(); reset(); refreshAll();
     document.querySelector('.stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
-  calcGHK();
+  applyCell('mammal');
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(calcGHK, 0));
   new MutationObserver(() => setTimeout(calcGHK, 0)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 

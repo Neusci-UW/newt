@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "membrane-web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "18473", "--bind", "127.0.0.1", "--directory", "src/neusci_daq/web"],
+      "port": 18473
+    }
+  ]
+}

@@ -155,6 +155,13 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 .gr input[type=range]{width:100%;accent-color:var(--accent)}
 .gr output{font-family:var(--font-mono);font-size:12.5px;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .calc{display:flex;flex-direction:column;gap:12px}
+.calc-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{border:0;border-radius:0;font-size:13px;padding:5px 12px}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.gr[hidden]{display:none}
+.gformula{font-family:var(--font-mono);font-size:12.5px;line-height:1.85;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);overflow-x:auto;white-space:nowrap}
+.gformula .res{font-size:14px;font-weight:600}
 .calc-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:28px;align-items:start}
 @media (max-width:1000px){.calc-body{grid-template-columns:1fr}}
 .calc-out{display:flex;flex-direction:column;gap:12px}
@@ -311,24 +318,33 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     </div>
 
     <div class="calc card">
-      <span class="sect-title">GHK calculator</span>
+      <div class="calc-head">
+        <span class="sect-title">GHK calculator</span>
+        <div class="seg" role="group" aria-label="Model">
+          <button type="button" id="gModeGHK" aria-pressed="true">GHK · permeability P</button>
+          <button type="button" id="gModeChord" aria-pressed="false">Chord conductance · G</button>
+        </div>
+      </div>
       <div class="calc-body">
         <div class="gsliders">
           <div class="gion">
             <div class="gh"><i class="dot k"></i> K⁺</div>
-            <div class="gr"><label for="gPK">P</label><input type="range" id="gPK" data-log min="-3" max="1" step="0.01" value="0.0000"><output id="gPKo" for="gPK"></output></div>
+            <div class="gr" data-ghk><label for="gPK">P</label><input type="range" id="gPK" data-log min="-3" max="1" step="0.001" value="0.0000"><output id="gPKo" for="gPK"></output></div>
+            <div class="gr" data-chord hidden><label for="gGK">G</label><input type="range" id="gGK" data-log min="-4" max="0.5" step="0.001" value="-0.5229"><output id="gGKo" for="gGK"></output></div>
             <div class="gr"><label for="gKi">[K⁺]ᵢ</label><input type="range" id="gKi" data-log min="-1" max="3" step="0.005" value="2.1461"><output id="gKio" for="gKi"></output></div>
             <div class="gr"><label for="gKo">[K⁺]ₒ</label><input type="range" id="gKo" data-log min="-1" max="3" step="0.005" value="0.6990"><output id="gKoo" for="gKo"></output></div>
           </div>
           <div class="gion">
             <div class="gh"><i class="dot na"></i> Na⁺</div>
-            <div class="gr"><label for="gPNa">P</label><input type="range" id="gPNa" data-log min="-3" max="1" step="0.01" value="-1.3979"><output id="gPNao" for="gPNa"></output></div>
+            <div class="gr" data-ghk><label for="gPNa">P</label><input type="range" id="gPNa" data-log min="-3" max="1" step="0.001" value="-1.3979"><output id="gPNao" for="gPNa"></output></div>
+            <div class="gr" data-chord hidden><label for="gGNa">G</label><input type="range" id="gGNa" data-log min="-4" max="0.5" step="0.001" value="-1.9208"><output id="gGNao" for="gGNa"></output></div>
             <div class="gr"><label for="gNai">[Na⁺]ᵢ</label><input type="range" id="gNai" data-log min="-1" max="3" step="0.005" value="1.1461"><output id="gNaio" for="gNai"></output></div>
             <div class="gr"><label for="gNao">[Na⁺]ₒ</label><input type="range" id="gNao" data-log min="-1" max="3" step="0.005" value="2.1569"><output id="gNaoo" for="gNao"></output></div>
           </div>
           <div class="gion">
             <div class="gh"><i class="dot cl"></i> Cl⁻</div>
-            <div class="gr"><label for="gPCl">P</label><input type="range" id="gPCl" data-log min="-3" max="1" step="0.01" value="-0.3468"><output id="gPClo" for="gPCl"></output></div>
+            <div class="gr" data-ghk><label for="gPCl">P</label><input type="range" id="gPCl" data-log min="-3" max="1" step="0.001" value="-0.3468"><output id="gPClo" for="gPCl"></output></div>
+            <div class="gr" data-chord hidden><label for="gGCl">G</label><input type="range" id="gGCl" data-log min="-4" max="0.5" step="0.001" value="-1.0000"><output id="gGClo" for="gGCl"></output></div>
             <div class="gr"><label for="gCli">[Cl⁻]ᵢ</label><input type="range" id="gCli" data-log min="-1" max="3" step="0.005" value="1.0212"><output id="gClio" for="gCli"></output></div>
             <div class="gr"><label for="gClo">[Cl⁻]ₒ</label><input type="range" id="gClo" data-log min="-1" max="3" step="0.005" value="2.1717"><output id="gCloo" for="gClo"></output></div>
           </div>
@@ -338,11 +354,12 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
           </div>
         </div>
         <div class="calc-out">
-          <div class="out"><span class="big" id="gV">—</span><span class="caption">V<sub>m</sub> from GHK</span></div>
+          <div class="out"><span class="big" id="gV">—</span><span class="caption" id="gVLabel">V<sub>m</sub> from GHK</span></div>
           <div class="es"><span>E<sub>K</sub> <b id="gEK">—</b></span><span>E<sub>Na</sub> <b id="gENa">—</b></span><span>E<sub>Cl</sub> <b id="gECl">—</b></span></div>
-          <canvas id="gChart" aria-label="Current-voltage lines for each ion and their sum"></canvas>
+          <div class="gformula" id="gFormula" aria-live="polite"></div>
+          <canvas id="gChart" aria-label="Current-voltage curves for each ion and their sum"></canvas>
           <p class="caption" id="gWeights"></p>
-          <p class="caption">I/V curves. Each ion's current is a straight line through its Nernst potential (dot), with slope equal to its chord conductance at rest, worked out from GHK. The bold line is their sum; where it crosses zero, no net current flows, which is the GHK resting potential: a conductance-weighted average of the Nernst potentials.</p>
+          <p class="caption" id="gCurveCap"></p>
           <div class="btns">
             <button id="gFromSim">Copy from simulation</button>
             <button id="gToSim">Send to simulation</button>
@@ -394,6 +411,13 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 
       <h3>5. One permeant ion gives Nernst</h3>
       <p>If only K⁺ crosses, the other terms vanish and \(V_m = \frac{RT}{F}\ln\frac{[\mathrm{K}^+]_o}{[\mathrm{K}^+]_i} = E_\mathrm{K}\). With several ions, \(V_m\) is a permeability-weighted compromise between their Nernst potentials, pulled toward the most permeant ion.</p>
+
+      <h3>6. The same answer as a weighted average: the chord conductance formula</h3>
+      <p>Each ion's GHK current is zero at its own Nernst potential \(E_s\), so at any voltage it can be written as a conductance times a driving force:</p>
+      <div class="eq">\[ I_s = g_s\,(V - E_s), \qquad g_s = \frac{I_s(V)}{V - E_s} \]</div>
+      <p>\(g_s\) is the chord conductance: the slope of the straight line (the chord) from \((E_s, 0)\) to the GHK current curve at \(V\). At the resting potential the currents cancel, so</p>
+      <div class="eq">\[ \sum_s g_s\,(V_m - E_s) = 0 \quad\Rightarrow\quad V_m = \frac{g_\mathrm{K}E_\mathrm{K} + g_\mathrm{Na}E_\mathrm{Na} + g_\mathrm{Cl}E_\mathrm{Cl}}{g_\mathrm{K} + g_\mathrm{Na} + g_\mathrm{Cl}} \]</div>
+      <p>With the chord conductances taken at \(V_m\), this is exactly the GHK potential: the same condition, zero net current, written another way. What differs is what is held fixed. GHK currents curve, so each \(g_s\) changes with voltage and with concentrations, and the chord formula with fixed conductances is a straight-line approximation. Change a concentration and the two part: GHK with fixed permeabilities is the better guide when concentrations change a lot, and essential for Ca²⁺, whose 10,000-fold gradient makes its current strongly curved. Fixed conductances work well for Na⁺ and K⁺ during an action potential, which is why the Hodgkin–Huxley model uses them. The toggle on the calculator switches between the two.</p>
 
       <h3>How the simulation maps onto this</h3>
       <p>Inside each channel the potential falls linearly across the membrane, which is assumption 2. Permeability is proportional to the number of channels for that ion, since every channel is always open. The simulation never uses the formula to move ions; it uses the formula only to draw the GHK reference line.</p>
@@ -1344,53 +1368,86 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 
   // ---------- GHK calculator ----------
   const gIds = ['gPK', 'gPNa', 'gPCl', 'gKi', 'gKo', 'gNai', 'gNao', 'gCli', 'gClo', 'gT'];
+  const gPIds = ['gPK', 'gPNa', 'gPCl'], gGIds = ['gGK', 'gGNa', 'gGCl'];
   const gc = $('gChart'), GW = 520, GH = 300;
   gc.width = GW * dpr; gc.height = GH * dpr;
   const gx = gc.getContext('2d'); gx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // sliders: data-log ones hold log10 of the value; the far-left end of a permeability slider means 0
+  // sliders: data-log ones hold log10 of the value; the far-left end of a P or G slider means 0
   const num = id => { const e = $(id); const v = parseFloat(e.value); if (!isFinite(v)) return 0;
     if (!e.hasAttribute('data-log')) return v;
-    if (id.startsWith('gP') && v <= parseFloat(e.min) + 1e-9) return 0;
+    if (/^g[PG]/.test(id) && v <= parseFloat(e.min) + 1e-9) return 0;
     return Math.pow(10, v); };
-  const fmtCalc = (id, v) => id === 'gT' ? v.toFixed(0) + ' °C' : id.startsWith('gP') ? (v === 0 ? 'off' : v < 0.1 ? v.toPrecision(2) : v.toFixed(2)) : (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' mM';
+  const fmtCalc = (id, v) => id === 'gT' ? v.toFixed(0) + ' °C'
+    : id.startsWith('gP') ? (v === 0 ? 'off' : v < 0.1 ? v.toPrecision(2) : v.toFixed(2))
+    : id.startsWith('gG') ? (v === 0 ? 'off' : (v < 0.01 ? v.toPrecision(2) : v.toFixed(3)) + ' mS/cm²')
+    : (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' mM';
   const ghkV = (rtf, P, ci, co) => {
     const n = P[0] * co[0] + P[1] * co[1] + P[2] * ci[2], d = P[0] * ci[0] + P[1] * ci[1] + P[2] * co[2];
     return n > 0 && d > 0 ? rtf * Math.log(n / d) : NaN;
   };
-  function calcGHK() {
-    gIds.forEach(id => { const o = $(id + 'o'); if (o) o.textContent = fmtCalc(id, num(id)); });
+  const Zs = [1, 1, -1];
+  // GHK current per unit permeability, outward positive, common constants dropped
+  const unitI = (rtf, s, V, ci, co) => {
+    const u = Zs[s] * V / rtf, fac = Math.abs(u) < 1e-6 ? 1 : u / (1 - Math.exp(-u));
+    return Zs[s] * fac * (ci[s] - co[s] * Math.exp(-u));
+  };
+  // chord conductance per unit permeability at V: I/(V − E), or the slope when V is at E
+  const chordPerP = (rtf, s, V, E, ci, co) => {
+    const d = V - E;
+    return Math.abs(d) > 0.5 ? unitI(rtf, s, V, ci, co) / d : unitI(rtf, s, V + 0.5, ci, co) - unitI(rtf, s, V - 0.5, ci, co);
+  };
+  // G units: P_K = 1 at the mammal values (25 °C) gives G_K = 0.30 mS/cm², as in the simulation
+  const G_SCALE = (() => {
+    const rtf = 8.314462 * 298.15 / 96485.33 * 1000, ci = [140, 14, 10], co = [5, 145, 110];
+    return 0.30 / chordPerP(rtf, 0, ghkV(rtf, [1, 0.04, 0.45], ci, co), rtf * Math.log(co[0] / ci[0]), ci, co);
+  })();
+  let gMode = 'ghk';   // 'ghk': permeabilities are set and G follows; 'chord': conductances are set and P follows
+  // src: which sliders to take as given, 'P' or 'G' (default: the ones the current model shows).
+  // sync: also move the other model's sliders to match. A concentration change in the chord model leaves
+  // P alone, so switching back to GHK shows how the two models part once G is held fixed.
+  function calcGHK(src, sync = true) {
+    if (src !== 'P' && src !== 'G') src = gMode === 'chord' ? 'G' : 'P';
     const T = num('gT'), rtf = 8.314462 * (T + 273.15) / 96485.33 * 1000;
-    const P = [num('gPK'), num('gPNa'), num('gPCl')];
     const ci = [num('gKi'), num('gNai'), num('gCli')], co = [num('gKo'), num('gNao'), num('gClo')];
-    const V_ = ghkV(rtf, P, ci, co);
-    const ek = rtf * Math.log(co[0] / ci[0]), ena = rtf * Math.log(co[1] / ci[1]), ecl = -rtf * Math.log(co[2] / ci[2]);
+    const Es = [rtf * Math.log(co[0] / ci[0]), rtf * Math.log(co[1] / ci[1]), -rtf * Math.log(co[2] / ci[2])];
+    // Both models meet at V_m: G from P are the GHK chord conductances there; P from G give the same V_m in GHK
+    let P, G, V_;
+    if (src === 'P') {
+      P = gPIds.map(num); V_ = ghkV(rtf, P, ci, co);
+      const Vr = isFinite(V_) ? V_ : 0;
+      G = P.map((p, s) => p > 0 ? G_SCALE * p * chordPerP(rtf, s, Vr, Es[s], ci, co) : 0);
+      G.forEach((v, s) => setG(gGIds[s], v));
+    } else {
+      G = gGIds.map(num);
+      const gs = G[0] + G[1] + G[2];
+      V_ = gs > 0 ? (G[0] * Es[0] + G[1] * Es[1] + G[2] * Es[2]) / gs : NaN;
+      const Vr = isFinite(V_) ? V_ : 0;
+      P = G.map((g, s) => g > 0 ? g / (G_SCALE * chordPerP(rtf, s, Vr, Es[s], ci, co)) : 0);
+      if (sync) P.forEach((v, s) => setG(gPIds[s], v));
+    }
+    gIds.concat(gGIds).forEach(id => { const o = $(id + 'o'); if (o) o.textContent = fmtCalc(id, num(id)); });
     const f = v => isFinite(v) ? fmtSigned(v) : '—';
-    $('gV').textContent = f(V_); $('gEK').textContent = f(ek); $('gENa').textContent = f(ena); $('gECl').textContent = f(ecl);
+    $('gV').textContent = f(V_); $('gEK').textContent = f(Es[0]); $('gENa').textContent = f(Es[1]); $('gECl').textContent = f(Es[2]);
     $('gRTF').textContent = 'RT/F = ' + rtf.toFixed(2) + ' mV';
-    // I/V chart: each ion's current as a straight line I = g·(V − E), with g its chord conductance at the
-    // GHK resting potential (so the lines are exact there); their sum crosses zero at V = Σ g·E / Σ g = V_GHK.
-    const Es = [ek, ena, ecl], Zs = [1, 1, -1], cols = [C.k, C.na, C.cl], names = ['K', 'Na', 'Cl'];
-    const ghkI = (s, V) => {           // GHK current, outward positive, common constants dropped
-      const u = Zs[s] * V / rtf;
-      const fac = Math.abs(u) < 1e-6 ? 1 : u / (1 - Math.exp(-u));
-      return P[s] * Zs[s] * fac * (ci[s] - co[s] * Math.exp(-u));
-    };
+    const cols = [C.k, C.na, C.cl], names = ['K', 'Na', 'Cl'];
+    writeFormula(rtf, P, G, ci, co, Es, V_, cols);
+    // I/V chart. GHK: each ion's GHK current curve, with its chord through V_rest drawn faintly.
+    // Chord conductance: straight lines I = G·(V − E). Either way the sum crosses zero at V_rest.
+    const chord = gMode === 'chord';
     const Vr = isFinite(V_) ? V_ : 0;
-    const g = [0, 1, 2].map(s => {
-      if (P[s] === 0) return 0;
-      const d = Vr - Es[s];
-      if (Math.abs(d) > 0.5) return ghkI(s, Vr) / d;
-      return (ghkI(s, Vr + 0.5) - ghkI(s, Vr - 0.5)) / 1;    // at its own Nernst potential: slope conductance
-    });
-    const gT = g[0] + g[1] + g[2];
+    const lineI = (s, V) => G[s] * (V - Es[s]);
+    const curveI = (s, V) => G_SCALE * P[s] * unitI(rtf, s, V, ci, co);
+    const ionI = chord ? lineI : curveI;
+    const on = s => G[s] > 0 && isFinite(Es[s]);
+    const totI = V => (on(0) ? ionI(0, V) : 0) + (on(1) ? ionI(1, V) : 0) + (on(2) ? ionI(2, V) : 0);
+    const gT = G[0] + G[1] + G[2];
     const L_ = 56, R_ = 14, T_ = 16, B_ = 34, pw = GW - L_ - R_, ph = GH - T_ - B_;
     const VMIN_ = -120, VMAX_ = 80, lx = v => L_ + (v - VMIN_) / (VMAX_ - VMIN_) * pw;
-    const lineI = (s, V) => g[s] * (V - Es[s]);
-    const totI = V => lineI(0, V) + lineI(1, V) + lineI(2, V);
     let imax = 1e-9;
-    for (const V of [VMIN_, VMAX_]) { for (let s = 0; s < 3; s++) if (isFinite(Es[s])) imax = Math.max(imax, Math.abs(lineI(s, V))); imax = Math.max(imax, Math.abs(totI(V))); }
+    for (let V = VMIN_; V <= VMAX_; V += 5) { for (let s = 0; s < 3; s++) if (on(s)) imax = Math.max(imax, Math.abs(ionI(s, V))); imax = Math.max(imax, Math.abs(totI(V))); }
     imax *= 1.08;
     const ly = i => T_ + ph / 2 - (i / imax) * (ph / 2);
+    const trace = fn => { gx.beginPath(); for (let V = VMIN_; V <= VMAX_; V += 2) { const y = ly(fn(V)); V === VMIN_ ? gx.moveTo(lx(V), y) : gx.lineTo(lx(V), y); } gx.stroke(); };
     gx.fillStyle = C.surface; gx.fillRect(0, 0, GW, GH);
     gx.font = '11px "IBM Plex Mono", monospace'; gx.textBaseline = 'middle';
     gx.strokeStyle = C.line; gx.lineWidth = 0.8;
@@ -1400,22 +1457,21 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     gx.save(); gx.translate(14, T_ + ph / 2); gx.rotate(-Math.PI / 2); gx.fillText('I (outward +)', 0, 0); gx.restore();
     gx.save(); gx.beginPath(); gx.rect(L_, T_, pw, ph); gx.clip();
     for (let s = 0; s < 3; s++) {
-      if (g[s] === 0 || !isFinite(Es[s])) continue;
-      gx.strokeStyle = cols[s]; gx.lineWidth = 1.8; gx.beginPath();
-      gx.moveTo(lx(VMIN_), ly(lineI(s, VMIN_))); gx.lineTo(lx(VMAX_), ly(lineI(s, VMAX_))); gx.stroke();
+      if (!on(s)) continue;
+      if (!chord) { gx.globalAlpha = 0.45; gx.setLineDash([4, 4]); gx.strokeStyle = cols[s]; gx.lineWidth = 1.2; trace(V => lineI(s, V)); gx.setLineDash([]); gx.globalAlpha = 1; }
+      gx.strokeStyle = cols[s]; gx.lineWidth = 1.8; trace(V => ionI(s, V));
       gx.fillStyle = cols[s]; gx.beginPath(); gx.arc(lx(Es[s]), ly(0), 3.5, 0, 6.283); gx.fill();
     }
     if (gT > 0) {
-      gx.strokeStyle = C.ink; gx.lineWidth = 3; gx.beginPath();
-      gx.moveTo(lx(VMIN_), ly(totI(VMIN_))); gx.lineTo(lx(VMAX_), ly(totI(VMAX_))); gx.stroke();
+      gx.strokeStyle = C.ink; gx.lineWidth = 3; trace(totI);
       gx.setLineDash([3, 4]); gx.lineWidth = 1; gx.strokeStyle = C.accent; gx.beginPath(); gx.moveTo(lx(Vr), T_); gx.lineTo(lx(Vr), T_ + ph); gx.stroke(); gx.setLineDash([]);
       gx.fillStyle = C.surface; gx.strokeStyle = C.ink; gx.lineWidth = 2; gx.beginPath(); gx.arc(lx(Vr), ly(0), 5, 0, 6.283); gx.fill(); gx.stroke();
     }
     gx.restore();
-    // labels: ion lines at their right ends, total line, E markers
+    // labels: ion curves at their right ends, the sum, V_rest
     gx.textAlign = 'left'; gx.font = '600 11px "IBM Plex Sans", sans-serif';
     const tags = [];
-    for (let s = 0; s < 3; s++) if (g[s] > 0 && isFinite(Es[s])) tags.push({ y: ly(lineI(s, VMAX_)), t: 'I' + names[s], c: cols[s] });
+    for (let s = 0; s < 3; s++) if (on(s)) tags.push({ y: ly(ionI(s, VMAX_)), t: 'I' + names[s], c: cols[s] });
     if (gT > 0) tags.push({ y: ly(totI(VMAX_)), t: 'sum', c: C.ink });
     tags.forEach(t => t.y = Math.max(T_ + 6, Math.min(T_ + ph - 6, t.y)));
     tags.sort((a, b) => a.y - b.y);
@@ -1425,25 +1481,62 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     // conductance weights
     const wEl = document.getElementById('gWeights');
     if (wEl) wEl.innerHTML = gT > 0
-      ? 'V<sub>rest</sub> = (g<sub>K</sub>E<sub>K</sub> + g<sub>Na</sub>E<sub>Na</sub> + g<sub>Cl</sub>E<sub>Cl</sub>) / Σg, with weights ' +
-        [0, 1, 2].map(s => `<b style="color:${cols[s]}">${['K⁺', 'Na⁺', 'Cl⁻'][s]} ${(100 * g[s] / gT).toFixed(0)}%</b>`).join(', ')
-      : 'Turn on at least one permeability.';
+      ? 'Conductance weights at V<sub>rest</sub>: ' +
+        [0, 1, 2].map(s => `<b style="color:${cols[s]}">${['K⁺', 'Na⁺', 'Cl⁻'][s]} ${(100 * G[s] / gT).toFixed(0)}%</b>`).join(', ')
+      : (chord ? 'Turn on at least one conductance.' : 'Turn on at least one permeability.');
+    $('gCurveCap').innerHTML = chord
+      ? 'I/V lines. With fixed conductances each ion’s current is a straight line through its Nernst potential (dot), I = G(V − E). The bold line is their sum; it crosses zero at V<sub>rest</sub>, the conductance-weighted average of the Nernst potentials. Change a concentration, then switch back to GHK: with G held fixed the two models no longer agree.'
+      : 'I/V curves. Each ion’s GHK current (solid) crosses zero at its Nernst potential (dot) and bends because ions are driven harder toward the side with fewer of them. The faint dashed lines are the chords from each Nernst potential to the curve at V<sub>rest</sub>; their slopes are the chord conductances. The bold curve is the sum; where it crosses zero no net current flows, the GHK resting potential.';
     gx.textBaseline = 'alphabetic';
   }
-  gIds.forEach(id => $(id).addEventListener('input', calcGHK));
+  // the written formula above the chart, with the current numbers substituted
+  function writeFormula(rtf, P, G, ci, co, Es, V, cols) {
+    const el = $('gFormula'); if (!el) return;
+    const c = (s, t) => `<span style="color:${cols[s]}">${t}</span>`;
+    const mm = v => v < 10 ? v.toFixed(1) : v.toFixed(0);
+    const res = `<span class="res">${isFinite(V) ? fmtSigned(V) : '—'}</span>`;
+    const ind = '<br>&nbsp;&nbsp;&nbsp;&nbsp;= ';
+    if (gMode === 'chord') {
+      const sym = s => c(s, `G<sub>${['K', 'Na', 'Cl'][s]}</sub>`), gv = s => c(s, fmtCalc('gG', G[s]).replace(' mS/cm²', '').replace('off', '0'));
+      const n = G[0] * Es[0] + G[1] * Es[1] + G[2] * Es[2], d = G[0] + G[1] + G[2];
+      el.innerHTML = `V<sub>m</sub> = (${[0, 1, 2].map(s => sym(s) + `E<sub>${['K', 'Na', 'Cl'][s]}</sub>`).join(' + ')}) / (${[0, 1, 2].map(sym).join(' + ')})` +
+        ind + `(${[0, 1, 2].map(s => gv(s) + '·(' + fmtSigned(Es[s]).replace(' mV', '') + ')').join(' + ')}) / (${[0, 1, 2].map(gv).join(' + ')})` +
+        ind + `${(n >= 0 ? '' : '−') + Math.abs(n).toFixed(3)} / ${d.toFixed(3)} = ${res}`;
+    } else {
+      const sym = s => c(s, `P<sub>${['K', 'Na', 'Cl'][s]}</sub>`), pv = s => c(s, fmtCalc('gP', P[s]).replace('off', '0'));
+      const n = P[0] * co[0] + P[1] * co[1] + P[2] * ci[2], d = P[0] * ci[0] + P[1] * ci[1] + P[2] * co[2];
+      el.innerHTML = `V<sub>m</sub> = (RT/F)·ln( (${sym(0)}[K⁺]ₒ + ${sym(1)}[Na⁺]ₒ + ${sym(2)}[Cl⁻]ᵢ) / (${sym(0)}[K⁺]ᵢ + ${sym(1)}[Na⁺]ᵢ + ${sym(2)}[Cl⁻]ₒ) )` +
+        ind + `${rtf.toFixed(2)}·ln( (${pv(0)}·${mm(co[0])} + ${pv(1)}·${mm(co[1])} + ${pv(2)}·${mm(ci[2])}) / (${pv(0)}·${mm(ci[0])} + ${pv(1)}·${mm(ci[1])} + ${pv(2)}·${mm(co[2])}) )` +
+        ind + `${rtf.toFixed(2)}·ln(${n.toPrecision(3)} / ${d.toPrecision(3)}) = ${res}`;
+    }
+  }
+  function setModel(m) {
+    gMode = m;
+    $('gModeGHK').setAttribute('aria-pressed', String(m === 'ghk'));
+    $('gModeChord').setAttribute('aria-pressed', String(m === 'chord'));
+    document.querySelectorAll('.calc [data-ghk]').forEach(e => { e.hidden = m !== 'ghk'; });
+    document.querySelectorAll('.calc [data-chord]').forEach(e => { e.hidden = m !== 'chord'; });
+    $('gVLabel').innerHTML = m === 'chord' ? 'V<sub>m</sub> from chord conductances' : 'V<sub>m</sub> from GHK';
+    calcGHK();   // the other model's sliders are in step unless a concentration changed under fixed G
+  }
+  $('gModeGHK').addEventListener('click', () => setModel('ghk'));
+  $('gModeChord').addEventListener('click', () => setModel('chord'));
+  gIds.forEach(id => $(id).addEventListener('input', () => calcGHK(undefined, gMode !== 'chord')));
+  gGIds.forEach(id => $(id).addEventListener('input', () => calcGHK('G')));
   const setG = (id, v) => { const e = $(id); e.value = e.hasAttribute('data-log') ? Math.log10(Math.max(+v, Math.pow(10, parseFloat(e.min)))).toFixed(4) : +(+v).toFixed(2); };
   $('gDefaults').addEventListener('click', () => {
     [['gPK', 1], ['gPNa', 0.04], ['gPCl', 0.45], ['gKi', 400], ['gKo', 20], ['gNai', 50], ['gNao', 440], ['gCli', 52], ['gClo', 560], ['gT', 6.3]].forEach(([i, v]) => setG(i, v));
-    calcGHK();
+    calcGHK('P');
   });
   $('gFromSim').addEventListener('click', () => {
     const pK = nLeak[0], pNa = nLeak[1], pCl = nLeak[2];
     const ref = pK > 0 ? pK : Math.max(pNa, pCl, 1);
     setG('gPK', pK / ref); setG('gPNa', pNa / ref); setG('gPCl', pCl / ref);
     ['gKi', 'gNai', 'gCli'].forEach((id, k) => setG(id, concIn[k])); ['gKo', 'gNao', 'gClo'].forEach((id, k) => setG(id, concOut[k]));
-    setG('gT', 25); calcGHK();
+    setG('gT', 25); calcGHK('P');
   });
   $('gToSim').addEventListener('click', () => {
+    if (gMode === 'chord') calcGHK('G');   // send the permeabilities that match the conductances shown
     concIn = [num('gKi'), num('gNai'), num('gCli')].map(v => Math.min(600, Math.max(0.5, v)));
     concOut = [num('gKo'), num('gNao'), num('gClo')].map(v => Math.min(600, Math.max(0.5, v)));
     concIn[2] = Math.min(concIn[2], concIn[0] + concIn[1]); concOut[2] = Math.min(concOut[2], concOut[0] + concOut[1]);

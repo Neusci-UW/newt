@@ -161,6 +161,8 @@ reload doesn't lose them; "Reset answers" clears them. */
   };
   const vm = () => parseFloat((el('gV')?.textContent || '').replace('−', '-'));
   function setCalc(values) {
+    const ghkBtn = el('gModeGHK');                // the questions set permeabilities, so use the GHK model
+    if (ghkBtn && ghkBtn.getAttribute('aria-pressed') !== 'true') ghkBtn.click();
     Object.entries(values).forEach(([id, v]) => {
       const e = el(id); if (!e) return;
       e.value = e.hasAttribute('data-log') ? Math.log10(Math.max(v, Math.pow(10, parseFloat(e.min)))).toFixed(4) : v;

@@ -4,9 +4,10 @@ import warnings
 import numpy as np
 import pytest
 
-from neusci_daq import config
+from neusci_daq import config, trialfile
 from neusci_daq.backends import SimulatedBackend
-from neusci_daq.recorder import Recorder, load_recording
+from neusci_daq.recorder import Recorder
+from neusci_daq.trialfile import load_recording
 
 from test_channels import app, pump, win  # noqa: F401  (fixtures)
 
@@ -81,6 +82,6 @@ def test_blocks_are_labelled_with_the_new_rate_after_a_rate_change(app, win):
     pump(app, 0.5)
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
-    b = session.read_block(win.blocks[-1])
+    b = trialfile.read_block(win.blocks[-1])
     assert b["sample_rate"] == 20000 and win.backend.actual_rate == 20000
     assert 0.3 < b["duration_s"] < 1.5

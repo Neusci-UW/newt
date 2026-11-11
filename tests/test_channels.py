@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pytest
 
-from neusci_daq import config, session
+from neusci_daq import config, session, trialfile
 from neusci_daq.config import Channel
 
 
@@ -144,7 +144,7 @@ def test_changing_channels_after_recording_starts_new_session(win, app):
     win.btn_rec.setChecked(True)
     pump(app, 0.3)
     win.btn_rec.setChecked(False)
-    info = session.block_info(win.blocks[-1])
+    info = trialfile.block_info(win.blocks[-1])
     assert info["physical"] == ["ai0", "ai2"] and info["terminal_config"] == "RSE"
     assert session.list_blocks(first)                          # old blocks untouched
     win.btn_run.setChecked(False)

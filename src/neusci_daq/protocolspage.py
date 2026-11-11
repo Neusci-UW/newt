@@ -1,4 +1,4 @@
-"""The Trials tab: run a stimulus many times while stepping one or two of its
+"""The Protocols tab: run a stimulus many times while stepping one or two of its
 settings, and see the responses lined up, overlaid, averaged and measured.
 
 Left: the protocol (what to vary, repeats, order, timing, window).
@@ -6,7 +6,7 @@ Middle: Plan (the order of trials and the stimulus at each value), Responses
 (one panel per value of b, coloured by a) and Curve (the measurement against a).
 Right: the measurement and a table of every trial; untick a trial to leave it out.
 
-The protocol logic lives in trials.py; this file is the window and the runner.
+The protocol logic lives in protocols.py; this file is the window and the runner.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import stim as stimmod
 from . import style, theme
-from . import trials as T
+from . import protocols as T
 from .plotzoom import AxisGroup, light_curve, plot_widget
 
 ROW_GAP = 8          # px between the parts of a settings row (box, button, label)
@@ -220,7 +220,7 @@ class VarRow(QtWidgets.QWidget):
             w.setToolTip(tip)      # the unit is in the setting's name, e.g. Amplitude (V)
 
 
-class TrialsPage(QtWidgets.QWidget):
+class ProtocolsPage(QtWidgets.QWidget):
     def __init__(self, main):
         super().__init__()
         self.main = main

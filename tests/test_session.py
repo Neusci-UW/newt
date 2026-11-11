@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pytest
 
-from neusci_daq import config, session
+from neusci_daq import config, session, trialfile
 
 
 def make_cfg(tmp_path, n=2, rate=2000, scale=1000.0):
@@ -107,7 +107,7 @@ def test_record_save_open_append_export_recent(tmp_path, app, settings):
     # Open: review mode shows block 1 with its comment
     w.open_session(sess)
     assert w.mode == REVIEW and w.block_combo.count() == 3
-    blk = session.read_block(sess / "block_001.h5")
+    blk = trialfile.read_block(sess / "block_001.h5")
     x, y = w.curves[0].getOriginalDataset()
     assert len(x) == blk["data"].shape[1]
     np.testing.assert_allclose(y, blk["data"][0])
@@ -119,7 +119,7 @@ def test_record_save_open_append_export_recent(tmp_path, app, settings):
     w.window_box.setValue(0.1)
     w.scroll.setValue(w.scroll.maximum())
     lo, hi = w.plots[0].viewRange()[0]
-    assert hi == pytest.approx(blk_dur := session.block_info(sess / "block_002.h5")["duration_s"], abs=0.01)
+    assert hi == pytest.approx(blk_dur := trialfile.block_info(sess / "block_002.h5")["duration_s"], abs=0.01)
 
     # Export from review
     out = w.export(tmp_path / "review.mat")
@@ -306,7 +306,7 @@ def test_blocks_panel_browses_and_returns_to_the_same_session(app, settings, tmp
 
 
 def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_path):
-    from neusci_daq import pages
+    from neusci_daq import groupsfile
     from neusci_daq.gui import MainWindow
     win = MainWindow(make_cfg(tmp_path), settings=settings, config_path=tmp_path / "config.toml")
     win._ask_unsaved = lambda: "discard"
@@ -324,16 +324,16 @@ def test_pages_are_named_blocks_take_their_name_and_can_move(app, settings, tmp_
     win.move_block(2, "Drug")                                        # into a new page
     texts = [it.text(0) for it in win.blocks_panel.items()]
     assert any(t.startswith("Drug  (1)") for t in texts) and any(t.startswith("Drug 1") for t in texts)
-    saved = pages.load(win.session_dir)
+    saved = groupsfile.load(win.session_dir)
     assert saved["renamed"] == {"All trials": "Baseline"} and saved["moved"] == {"block_003": "Drug"}
     win.rename_page("Drug", "Drug A")                                # its block follows
-    assert pages.load(win.session_dir)["moved"] == {"block_003": "Drug A"}
+    assert groupsfile.load(win.session_dir)["moved"] == {"block_003": "Drug A"}
     win.move_block(2, "Baseline")                                    # back home: no longer "moved"
-    assert pages.load(win.session_dir)["moved"] == {}
+    assert groupsfile.load(win.session_dir)["moved"] == {}
     win.move_block(0, "Somewhere")
     assert win.blocks_panel.btn_reset.isEnabled()
     win.reset_pages()                                                # forget names and moves
-    saved = pages.load(win.session_dir)
+    saved = groupsfile.load(win.session_dir)
     assert saved["renamed"] == {} and saved["moved"] == {}
     assert [it.text(0) for it in win.blocks_panel.items()][1].startswith("All trials  (3)")
     assert not win.blocks_panel.btn_reset.isEnabled()

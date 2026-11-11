@@ -59,6 +59,14 @@ _NAMES = {"lowpass": "low-pass", "highpass": "high-pass", "bandpass": "band-pass
           "notch": "no hum", "smooth": "smoothed", "rms": "RMS", "envelope": "envelope", "abs": "rectified",
           "derivative": "derivative", "integral": "integral", "scale": "scaled", "combine": "",
           "rate": "rate", "period": "period", "height": "cyclic height", "count": "count", "custom": "calc"}
+FORMULA_HELP = ("Formulas use the channel names, numbers, + − × ÷ (+ - * /), ** and brackets, and:<br>"
+         "<b>lowpass</b>(x, Hz) · <b>highpass</b>(x, Hz) · <b>bandpass</b>(x, low, high) · "
+         "<b>bandstop</b>(x, low, high) · <b>notch</b>(x, Hz) · <b>smooth</b>(x, ms) · <b>rms</b>(x, ms) · "
+         "<b>envelope</b>(x, ms) · <b>derivative</b>(x) · <b>integral</b>(x) · abs, sqrt, exp, log, sin, cos, "
+         "clip(x, lo, hi), max(a, b), min(a, b).<br>"
+         "A name with spaces goes in quotes: lowpass(\"Channel 1\", 100). Recordings are never changed: "
+         "these are worked out for display and analysis. Recorded trials are filtered without delay; "
+         "live, filters have the small delay any live filter has.")
 _OPS = {"+": "+", "−": "-", "×": "*", "÷": "/"}
 
 
@@ -272,6 +280,9 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
                 w = QtWidgets.QLineEdit(v)
                 w.setPlaceholderText('e.g. rms(highpass(Ch1, 100), 10) or "Ch1 band-pass" * 2')
                 w.textChanged.connect(lambda *_: self._changed())
+                self.formula_help = QtWidgets.QLabel(FORMULA_HELP)
+                self.formula_help.setWordWrap(True)
+                self.formula_help.setStyleSheet("color: gray")
             elif key == "order":
                 w = QtWidgets.QSpinBox(minimum=1, maximum=10, value=int(v))
                 w.valueChanged.connect(lambda *_: self._changed())
@@ -289,6 +300,8 @@ class AnalysisChannelDialog(QtWidgets.QDialog):
                 w.setToolTip(tip)
             self.settings.addRow(label, w)
             self._widgets[key] = w
+            if key == "formula":
+                self.settings.addRow(self.formula_help)
         self.settings_box.setVisible(bool(self._widgets))
         self.source.setEnabled(kind != "custom")
         uses = [k for k in ("level", "dir", "dead") if k in self._widgets and self._sorter_default(k, None) is not None]

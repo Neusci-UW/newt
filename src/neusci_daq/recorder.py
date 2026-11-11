@@ -1,4 +1,4 @@
-"""Write acquired chunks to HDF5 on a background thread.
+"""Write acquired chunks to HDF5 on a background thread (the layout is in trialfile.py).
 
 File layout:
   /raw_volts   (n_channels, N) float32   -- unscaled ADC volts
@@ -11,18 +11,15 @@ File layout:
 from __future__ import annotations
 
 import json
-import queue
 import threading
 from datetime import datetime
 from pathlib import Path
 
 import h5py
-import numpy as np
 
 from .backends import Backend, Chunk
+from .trialfile import COMMENT_DT, decode_comments, write_comments_dataset
 
-_COMMENT_DT = np.dtype([("t", "f8"), ("sample_index", "i8"),
-                        ("text", h5py.string_dtype())])
 
 
 class Recorder:
@@ -54,7 +51,7 @@ class Recorder:
                          chunks=(n, max(1024, cfg.chunk_size)))
         if not self.backend.hardware_timed:
             f.create_dataset("t", shape=(0,), maxshape=(None,), dtype="f8", chunks=(4096,))
-        f.create_dataset("comments", shape=(0,), maxshape=(None,), dtype=_COMMENT_DT)
+        f.create_dataset("comments", shape=(0,), maxshape=(None,), dtype=COMMENT_DT)
         a = f.attrs
         a["sample_rate"] = self.backend.actual_rate
         a["hardware_timed"] = self.backend.hardware_timed
@@ -126,13 +123,13 @@ class Recorder:
         with self._lock:
             if self._file is None:
                 return []
-            return _decode_comments(self._file["comments"][:])
+            return decode_comments(self._file["comments"][:])
 
     def set_comments(self, comments: list[dict]) -> None:
         """Replace the comments of the block being recorded (edit or delete)."""
         with self._lock:
             if self._file is not None:
-                _write_comments(self._file, comments)
+                write_comments_dataset(self._file, comments)
                 self._file.flush()
 
     def add_comment(self, text: str) -> float:
@@ -166,34 +163,3 @@ class Recorder:
                     tds.resize((n0 + k,))
                     tds[n0:] = chunk.t - self._t_offset
                 self.samples_written = n0 + k
-
-
-def _decode_comments(rows) -> list[dict]:
-    out = []
-    for c in rows:
-        text = c["text"]
-        out.append({"t": float(c["t"]), "sample_index": int(c["sample_index"]),
-                    "text": text.decode() if isinstance(text, bytes) else str(text)})
-    return out
-
-
-def _write_comments(f: h5py.File, comments: list[dict]) -> None:
-    """Rewrite a block's comments dataset (sorted by time)."""
-    rows = sorted(comments, key=lambda c: c["t"])
-    if "comments" in f:
-        del f["comments"]
-    ds = f.create_dataset("comments", shape=(len(rows),), maxshape=(None,), dtype=_COMMENT_DT)
-    for i, c in enumerate(rows):
-        ds[i] = (float(c["t"]), int(c["sample_index"]), str(c["text"]))
-
-
-def load_recording(path: str | Path) -> dict:
-    """Read a recording back with scaling applied. Returns dict of arrays + metadata."""
-    with h5py.File(path, "r") as f:
-        a = dict(f.attrs)
-        raw = f["raw_volts"][:].astype("f8")
-        scale = np.asarray(a["scale"])[:, None]
-        offset = np.asarray(a["offset"])[:, None]
-        t = f["t"][:] if "t" in f else np.arange(raw.shape[1]) / a["sample_rate"]
-        return {"t": t, "data": raw * scale + offset, "raw_volts": raw,
-                "comments": f["comments"][:], "attrs": a}

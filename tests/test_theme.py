@@ -1,7 +1,7 @@
 """Dark / light plot backgrounds."""
 from pyqtgraph.Qt import QtCore, QtGui
 
-from neusci_daq import config, theme
+from neusci_daq import config, theme, trialfile
 from neusci_daq import colours
 from neusci_daq.colours import PALETTE
 
@@ -61,7 +61,7 @@ def test_light_mode_changes_drawing_not_the_saved_colour(app, win):
 
 def session_colors(path):
     from neusci_daq import session
-    return session.read_block(path)["colors"]
+    return trialfile.read_block(path)["colors"]
 
 
 def test_comment_markers_follow_the_theme(app, win):

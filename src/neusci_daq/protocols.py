@@ -3,7 +3,7 @@ settings (a, and optionally b), then line up and measure the responses.
 
 Everything here is plain Python and numpy, so it can be tested without a window.
 
-How a protocol runs (see trialspage.py for the window):
+How a protocol runs (see protocolspage.py for the window):
   1. `values()` turns each variable's Range (from / to / step) or List into numbers.
   2. `sequence()` orders every a × b combination, `repeats` times: Blocked,
      Interleaved or Random.

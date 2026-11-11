@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 from scipy.io import savemat
 
-from .recorder import load_recording
+from .trialfile import load_recording
 
 # MATLAB v5 .mat files can't hold a variable over 2 GiB; scipy can't write v7.3.
 _MAX_BYTES = 2**31 - 1

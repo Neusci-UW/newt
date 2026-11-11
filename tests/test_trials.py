@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 import pytest
 
-from neusci_daq import trials as T
+from neusci_daq import protocols as T
 from neusci_daq.stim import Stimulus
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
@@ -405,8 +405,8 @@ def test_range_or_list_for_each_variable_and_b_can_be_added_and_removed(win):
 def test_protocol_is_remembered(win, tmp_path):
     tp = win.trials_page
     tp.repeats.setValue(7)
-    from neusci_daq.trialspage import TrialsPage
-    again = TrialsPage(win)
+    from neusci_daq.protocolspage import ProtocolsPage
+    again = ProtocolsPage(win)
     assert again.protocol.repeats == 7
 
 

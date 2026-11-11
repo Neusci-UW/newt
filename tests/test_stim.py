@@ -6,7 +6,7 @@ import types
 import numpy as np
 import pytest
 
-from neusci_daq import config, session
+from neusci_daq import config, session, trialfile
 from neusci_daq.stim import Stimulus, check_limit, load_wave_file
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
@@ -248,7 +248,7 @@ def test_fired_stimulus_is_recorded_on_the_stim_channel_and_logged(app, win):
     pump(app, 0.4)
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
-    blk = session.read_block(win.blocks[-1])
+    blk = trialfile.read_block(win.blocks[-1])
     stim = blk["data"][2]
     assert stim.max() == pytest.approx(3, abs=0.02)
     assert (stim > 1.5).sum() == pytest.approx(0.1 * win.cfg.sample_rate, abs=3)   # 100 ms at the AI rate
@@ -514,7 +514,7 @@ def test_a_block_saves_the_stimulus_sent(app, win):
     win.btn_rec.setChecked(False)
     pump(app, 0.1)
     win.btn_run.setChecked(False)
-    block = session.read_block(session.list_blocks(win.session_dir)[-1])
+    block = trialfile.read_block(session.list_blocks(win.session_dir)[-1])
     saved = block["stimuli"][0]
     assert saved["rate"] == win.cfg.stim_rate and 0 <= saved["t"] < block["duration_s"] + 0.1
     assert Stimulus.from_dict(saved["settings"]) == s

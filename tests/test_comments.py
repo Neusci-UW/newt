@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from pyqtgraph.Qt import QtCore
 
-from neusci_daq import session, style
+from neusci_daq import session, style, trialfile
 
 from test_channels import app, pump, win  # noqa: F401  (fixtures)
 
@@ -23,7 +23,7 @@ def comment(w, app, text):
 
 
 def texts(path):
-    return [c["text"] for c in session.read_comments(path)]
+    return [c["text"] for c in trialfile.read_comments(path)]
 
 
 def panel_texts(w):
@@ -150,7 +150,7 @@ def recorded_session(app, w, tmp_path, comments=("one", "two")):
 def test_review_add_edit_delete_saves_to_the_block(app, win, tmp_path):
     folder = recorded_session(app, win, tmp_path)
     block = session.list_blocks(folder)[0]
-    data_before = session.read_block(block)["data"].copy()
+    data_before = trialfile.read_block(block)["data"].copy()
     win.open_session(folder)
     assert panel_texts(win) == ["one", "two"] and len(win.markers) == 2
 
@@ -160,9 +160,12 @@ def test_review_add_edit_delete_saves_to_the_block(app, win, tmp_path):
     win.delete_comment(2)
     assert texts(block) == ["early", "ONE"]
     assert len(win.markers) == 2
-    np.testing.assert_array_equal(session.read_block(block)["data"], data_before)
-    c = session.read_comments(block)[0]
+    np.testing.assert_array_equal(trialfile.read_block(block)["data"], data_before)
+    c = trialfile.read_comments(block)[0]
     assert c["sample_index"] == round(0.05 * win.review_block["sample_rate"])
+    import h5py                                          # the recording keeps what was typed while recording
+    with h5py.File(block, "r") as f:
+        assert [r["text"].decode() for r in f["comments"][:]] == ["one", "two"]
 
 
 def test_review_edits_update_the_sessions_mat(app, win, tmp_path):

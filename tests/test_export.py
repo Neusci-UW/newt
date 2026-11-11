@@ -8,7 +8,8 @@ from scipy.io import loadmat
 from neusci_daq import config
 from neusci_daq.backends import SimulatedBackend
 from neusci_daq.export import to_labchart_mat
-from neusci_daq.recorder import Recorder, load_recording
+from neusci_daq.recorder import Recorder
+from neusci_daq.trialfile import load_recording
 
 neuscitk = pytest.importorskip("neuscitk")
 

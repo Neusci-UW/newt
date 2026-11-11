@@ -21,11 +21,10 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import h5py
 import numpy as np
 
 from .colours import next_color, normalize_color
-from .recorder import _COMMENT_DT
+from . import trialfile
 
 MARKER = "imported_from.json"
 
@@ -219,24 +218,7 @@ def import_mat(path: str | Path, dest_root: str | Path) -> tuple[Path, list[str]
 
 
 def _write_block(path: Path, b: dict, colors: list[str], source: Path) -> None:
-    """One block in the same layout the recorder writes, with the data already in its units."""
-    n = len(b["names"])
-    with h5py.File(path, "w") as f:
-        f.create_dataset("raw_volts", data=b["data"].astype(np.float32), maxshape=(n, None),
-                         chunks=(n, max(1, min(4096, b["data"].shape[1]))))
-        rows = np.zeros(len(b["comments"]), dtype=_COMMENT_DT)
-        for k, (t, text) in enumerate(b["comments"]):
-            rows[k] = (float(t), int(round(t * b["rate"])), text)
-        f.create_dataset("comments", data=rows, maxshape=(None,))
-        a = f.attrs
-        a["sample_rate"] = b["rate"]
-        a["hardware_timed"] = True
-        a["device"], a["backend"] = "", "imported"
-        a["start_time"] = b["start_time"] or datetime.fromtimestamp(source.stat().st_mtime).isoformat(timespec="seconds")
-        a["channel_names"] = b["names"]
-        a["physical"] = [""] * n
-        a["units"] = b["units"]
-        a["scale"] = [1.0] * n                 # the .mat holds values already in their units
-        a["offset"] = [0.0] * n
-        a["colors"] = colors
-        a["imported_from"] = f"{source.name}, trial {b['source_block']}"
+    """One imported trial, in the layout the recorder writes."""
+    start = b["start_time"] or datetime.fromtimestamp(source.stat().st_mtime).isoformat(timespec="seconds")
+    trialfile.write_block(path, b["data"], b["rate"], b["names"], b["units"], colors, b["comments"], start,
+                          imported_from=f"{source.name}, trial {b['source_block']}")

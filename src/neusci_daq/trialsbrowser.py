@@ -1,5 +1,5 @@
-"""The Blocks panel: the stimulus channel, Reset pages, and a tree of Live (or Back to
-Live) and the session's blocks on their pages. Acquisition has one to look at blocks;
+"""The Trials browser: the stimulus channel, Reset groups, and a tree of Live (or Back to
+Live) and the session's trials (blocks) in their groups (pages). Acquisition has one to look at blocks;
 Analysis has one to pick the blocks to analyze (`for_analysis`), with its settings.
 
 The panel only shows things and reports what's clicked; the main window decides what
@@ -42,7 +42,7 @@ class GroupTree(QtWidgets.QTreeWidget):
         self.moved.emit(data[1], row)
 
 
-class BlocksPanel(QtWidgets.QWidget):
+class TrialsBrowser(QtWidgets.QWidget):
     activated = QtCore.Signal(object)           # LIVE, BACK or ("block", i)
     selection = QtCore.Signal(list)              # the block indices selected (a page: all its blocks)
     rename_requested = QtCore.Signal(str)        # a page's name

@@ -3,8 +3,8 @@ import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pytest
 
-from neusci_daq import analysis as A
-from neusci_daq import colours as cm, pages, session, simulation as sim
+from neusci_daq import analysis as A, trialfile
+from neusci_daq import colours as cm, groupsfile, session, simulation as sim
 from neusci_daq.channels import ColorButton
 from neusci_daq.gui import REVIEW
 from neusci_daq.canvas import KINDS
@@ -616,7 +616,7 @@ def test_the_lab_recording_sorts_into_its_25_sine_stimuli():
     paths = sorted(glob.glob("data/imported/AU26_Lab1_Data/block_*.h5"))
     if len(paths) != 250:
         pytest.skip("the lab recording isn't on this computer")
-    groups = AnalysisPage._group([session.read_block(p) for p in paths], "Channel 1")
+    groups = AnalysisPage._group([trialfile.read_block(p) for p in paths], "Channel 1")
     assert len(groups) == 25 and all(len(b) == 10 for _, b in groups)
     assert groups[0][1] == list(range(10)) and groups[0][0].startswith("Sine 5 Hz")
 
@@ -1102,7 +1102,7 @@ def test_page_colours_are_editable_and_saved_with_the_session(app, win):
     ap.set_page_color(name, "#123456")
     ap.select_pages([name])
     assert C(raw, "Trials").group_avgs[0].opts["pen"].color() == QtGui.QColor("#123456")
-    assert pages.load(ap._folder())["colors"] == {name: "#123456"}
+    assert groupsfile.load(ap._folder())["colors"] == {name: "#123456"}
     ap.set_page_color(name, None)
     assert ap.group_color(0) != "#123456"
 
@@ -1111,7 +1111,7 @@ def test_colour_maps_run_across_pages_and_trials(app, win):
     ap, raw = _spike_sorting(app, win)
     ap.page_map.setCurrentText("Viridis")
     assert ap.group_color(0) == cm.sample("Viridis", 0).name()
-    assert pages.load(ap._folder())["page_map"] == "Viridis"
+    assert groupsfile.load(ap._folder())["page_map"] == "Viridis"
     ap.select_blocks([0, 1, 2])
     ap.trial_map.setCurrentText("Opacity")
     alphas = sorted(item.opts["pen"].color().alpha() for item in C(raw, "Trials").trial_items)
@@ -1596,14 +1596,14 @@ def test_gain_corrects_every_analysis_and_not_the_recording(app, win):
     assert ap.trace(0, "Ch2") == pytest.approx(before / 2)
     assert np.abs(raw.find().amplitude).mean() == pytest.approx(amplitude / 2, rel=0.02)
     assert ap.blocks[0]["data"][ap.blocks[0]["channel_names"].index("Ch2")] == pytest.approx(stored)
-    saved = pages.load(ap._folder())
+    saved = groupsfile.load(ap._folder())
     assert saved["gains"] == {"Ch2": 2}
     ap.gain_channel.setCurrentText("Stim")
     assert ap.gain.value() == 1                                      # each channel has its own
     ap.gain_channel.setCurrentText("Ch2")
     assert ap.gain.value() == 2
     ap.gain.setValue(1)
-    assert ap.trace(0, "Ch2") == pytest.approx(before) and pages.load(ap._folder())["gains"] == {}
+    assert ap.trace(0, "Ch2") == pytest.approx(before) and groupsfile.load(ap._folder())["gains"] == {}
 
 
 def test_a_stimulus_fit_is_read_everywhere_and_shown_against_the_recording(app, win):
@@ -1613,7 +1613,7 @@ def test_a_stimulus_fit_is_read_everywhere_and_shown_against_the_recording(app, 
     pump(app, 0.2)
     assert np.abs(ap.trace(0, "Stim") - y).max() > 0 and ap.recorded(0, "Stim") == pytest.approx(y)
     assert ap.chart("Stimulus fit").isVisible() and "RMS" in ap.chart("Stimulus fit").resid_plot.getPlotItem().titleLabel.text
-    assert pages.load(ap._folder())["stim_fit"] == "Sine"
+    assert groupsfile.load(ap._folder())["stim_fit"] == "Sine"
     ap.fit_box.setCurrentText("Off")
     pump(app, 0.1)
     assert not ap.chart("Stimulus fit").isVisible() and ap.trace(0, "Stim") == pytest.approx(y)
@@ -1724,7 +1724,7 @@ def test_groups_and_trials_can_be_hidden_and_colour_maps_skip_them(app, win):
     pump(app, 0.1)
     assert not set(ap.raw.chosen_or_none()) & set(ap.shown[0][1])    # gone from everything
     assert ap.group_color(1) != before                               # the map spreads across what's left
-    assert pages.load(ap._folder())["hidden_groups"] == [first]
+    assert groupsfile.load(ap._folder())["hidden_groups"] == [first]
     assert ap.blocks_panel.tree.topLevelItem(0).checkState(0) == QtCore.Qt.CheckState.Unchecked
     one = ap.shown[1][1][0]
     ap.set_hidden(("block", one), True)
@@ -1779,7 +1779,7 @@ def test_groups_can_be_dragged_and_sorted(app, win):
     names = [n for n, _ in ap.shown]
     ap.move_group(names[1], 0)
     assert [n for n, _ in ap.shown] == names[::-1]
-    assert pages.load(ap._folder())["order"] == names[::-1]
+    assert groupsfile.load(ap._folder())["order"] == names[::-1]
     assert ap.blocks_panel.tree.topLevelItem(0).data(0, QtCore.Qt.ItemDataRole.UserRole) == ("page", names[1])
     ap.move_group(names[1], 2)                                       # to the end: back again
     assert [n for n, _ in ap.shown] == names
@@ -1792,9 +1792,9 @@ def test_groups_can_be_dragged_and_sorted(app, win):
 
 def test_saved_order_goes_first_and_new_groups_after():
     shown = [("a", [0]), ("b", [1]), ("c", [2])]
-    assert [n for n, _ in pages.arrange(shown, {"order": ["c", "a"]}, None)] == ["c", "a", "b"]
+    assert [n for n, _ in groupsfile.arrange(shown, {"order": ["c", "a"]}, None)] == ["c", "a", "b"]
     size = {0: (3, 1), 1: (1, 2), 2: (2, 3)}
-    assert [n for n, _ in pages.arrange(shown, {"sort": "frequency"}, lambda b: size[b[0]])] == ["b", "c", "a"]
+    assert [n for n, _ in groupsfile.arrange(shown, {"sort": "frequency"}, lambda b: size[b[0]])] == ["b", "c", "a"]
 
 
 def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):
@@ -1904,3 +1904,12 @@ def test_every_setting_says_what_it_does(app, win):
                             or type(q).__module__.startswith("pyqtgraph") for q in owners)):
                 bare.append(f"{type(page).__name__}: {type(w).__name__} {getattr(w, 'text', str)()!r}")
     assert not bare, bare
+
+
+def test_save_as_takes_the_analysis_with_it(app, win, tmp_path):
+    from neusci_daq import analysisfile
+    ap, raw = _spike_sorting(app, win)
+    raw.find()
+    assert ap.has_unsaved_analysis()
+    folder = win.save_as(tmp_path / "kept")                    # one save step: the analysis goes too
+    assert analysisfile.exists(folder) and not ap.has_unsaved_analysis()

@@ -1,21 +1,20 @@
 """Sessions on disk.
 
-A session is a folder of numbered blocks, `block_001.h5`, `block_002.h5`, ...,
-one per Record press (plus the exported `.mat`, if any). These helpers find the
-blocks, check whether a session can be appended to with the current config,
-and read a block for review.
+A session is a folder of numbered trials (blocks), `block_001.h5`, `block_002.h5`, ...,
+one per Record press, with the files kept beside them (pages.json for the groups,
+trial_edits.json for edited comments and colours, the saved analysis, the exported
+`.mat`). These helpers find the trials and check whether a session can be appended to
+with the current config; trialfile.py reads and writes one trial.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-import h5py
 import numpy as np
 
-from .colours import PALETTE, normalize_color
 from .config import Config
+from .trialfile import block_info
 
 _BLOCK_RE = re.compile(r"block_(\d+)\.h5")
 # Device-coerced rates differ slightly from the requested rate.
@@ -48,42 +47,6 @@ def next_block_path(folder: str | Path) -> Path:
     """Path for the next block. Never reuses a number, even if blocks were deleted."""
     nums = [_block_number(p) for p in list_blocks(folder)]
     return Path(folder) / f"block_{(max(nums) if nums else 0) + 1:03d}.h5"
-
-
-def _colors(attrs, n: int) -> list[str]:
-    """Saved trace colours, or palette colours for blocks recorded before colours were saved."""
-    saved = [str(c) for c in attrs["colors"]] if "colors" in attrs else []
-    out = []
-    for i in range(n):
-        try:
-            out.append(normalize_color(saved[i]))
-        except (IndexError, ValueError):
-            out.append(normalize_color(PALETTE[i % len(PALETTE)]))
-    return out
-
-
-def block_info(path: str | Path) -> dict:
-    """Metadata of one block, without loading its data."""
-    with h5py.File(path, "r") as f:
-        a = f.attrs
-        n = f["raw_volts"].shape[1]
-        fs = float(a["sample_rate"])
-        return {
-            "channel_names": [str(x) for x in a["channel_names"]],
-            "physical": [str(x) for x in a["physical"]],
-            "units": [str(x) for x in a["units"]],
-            "scale": [float(x) for x in a["scale"]],
-            "offset": [float(x) for x in a["offset"]],
-            "colors": _colors(a, len(a["channel_names"])),
-            "sample_rate": fs,
-            "n_samples": int(n),
-            "duration_s": n / fs if fs > 0 else float("nan"),
-            "n_comments": int(f["comments"].shape[0]),
-            "start_time": str(a["start_time"]),
-            "device": str(a["device"]),
-            "backend": str(a["backend"]),
-            "terminal_config": str(a["terminal_config"]) if "terminal_config" in a else None,
-        }
 
 
 def append_check(folder: str | Path, cfg: Config) -> tuple[list[str], list[str]]:
@@ -127,32 +90,6 @@ def append_check(folder: str | Path, cfg: Config) -> tuple[list[str], list[str]]
     return problems, warnings
 
 
-def read_block(path: str | Path) -> dict:
-    """Load one block for review: scaled data as float32 to keep memory down."""
-    with h5py.File(path, "r") as f:
-        a = f.attrs
-        fs = float(a["sample_rate"])
-        raw = f["raw_volts"][:].astype(np.float32, copy=False)
-        scale = np.asarray(a["scale"], dtype=np.float32)[:, None]
-        offset = np.asarray(a["offset"], dtype=np.float32)[:, None]
-        data = raw * scale + offset
-        if "t" in f:
-            t = f["t"][:]
-        else:
-            t = np.arange(raw.shape[1], dtype=np.float64) / fs
-        comments = [(float(c["t"]), c["text"].decode() if isinstance(c["text"], bytes) else str(c["text"]))
-                    for c in f["comments"][:]]
-        return {
-            "t": t, "data": data, "comments": comments, "sample_rate": fs,
-            "channel_names": [str(x) for x in a["channel_names"]],
-            "units": [str(x) for x in a["units"]],
-            "colors": _colors(a, len(a["channel_names"])),
-            "terminal_config": str(a["terminal_config"]) if "terminal_config" in a else None,
-            "duration_s": float(t[-1]) if t.size else 0.0,
-            "stimuli": json.loads(a.get("stimuli", "[]")),      # what was sent (Recorder.add_stimulus)
-        }
-
-
 def session_colors(folder: str | Path) -> dict[str, str]:
     """Channel name -> colour, as last used in this session (later blocks win)."""
     out: dict[str, str] = {}
@@ -163,37 +100,6 @@ def session_colors(folder: str | Path) -> dict[str, str]:
             continue
         out.update(zip(info["channel_names"], info["colors"]))
     return out
-
-
-def recolor_blocks(blocks, colors: dict[str, str]) -> list[Path]:
-    """Set the colour of channels (by name) in recorded blocks. Only metadata is
-    changed, never the data. Returns the blocks that couldn't be updated."""
-    failed = []
-    for b in blocks:
-        try:
-            with h5py.File(b, "r+") as f:
-                names = [str(x) for x in f.attrs["channel_names"]]
-                cur = _colors(f.attrs, len(names))
-                new = [normalize_color(colors[n]) if n in colors else c for n, c in zip(names, cur)]
-                if new != cur or "colors" not in f.attrs:
-                    f.attrs["colors"] = new
-        except Exception:
-            failed.append(Path(b))
-    return failed
-
-
-def read_comments(path: str | Path) -> list[dict]:
-    """A block's comments as [{t, sample_index, text}], in time order."""
-    from .recorder import _decode_comments
-    with h5py.File(path, "r") as f:
-        return sorted(_decode_comments(f["comments"][:]), key=lambda c: c["t"])
-
-
-def write_comments(path: str | Path, comments: list[dict]) -> None:
-    """Replace a recorded block's comments. Only the comments change, never the data."""
-    from .recorder import _write_comments
-    with h5py.File(path, "r+") as f:
-        _write_comments(f, comments)
 
 
 def add_recent(recent: list[str], path: str | Path, limit: int = 8) -> list[str]:

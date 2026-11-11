@@ -1,4 +1,5 @@
-"""Pages: named groups of a session's blocks.
+"""Groups: named groups of a session's trials (called pages in the code and in pages.json,
+the file they've always been saved in).
 
 The blocks are grouped by their stimulus automatically (see analysispage), and each
 group is a page named after its stimulus. You can rename a page, and move a block

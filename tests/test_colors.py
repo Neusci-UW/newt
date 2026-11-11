@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import pytest
 
-from neusci_daq import colours, config, session
+from neusci_daq import colours, config, session, trialfile
 from neusci_daq.colours import PALETTE
 from neusci_daq.config import Channel
 
@@ -27,8 +27,8 @@ def pen_hex(curve):
 
 
 def stored_colors(path):
-    with h5py.File(path, "r") as f:
-        return [str(c) for c in f.attrs["colors"]]
+    """The colours a trial is shown in: the file's, with any changed since beside it."""
+    return trialfile.block_info(path)["colors"]
 
 
 # ---------------------------------------------------------------- config
@@ -113,7 +113,7 @@ def test_review_shows_recorded_colors_and_recolors_whole_session(app, win):
     record_block(app, win)
     win.btn_run.setChecked(False)
     folder, blocks = win.session_dir, list(win.blocks)
-    data_before = [session.read_block(b)["data"].copy() for b in blocks]
+    data_before = [trialfile.read_block(b)["data"].copy() for b in blocks]
 
     win.open_session(folder)
     assert pen_hex(win.curves[1]) == RED and win.review_color_btns[1].color == RED
@@ -122,7 +122,9 @@ def test_review_shows_recorded_colors_and_recolors_whole_session(app, win):
     assert pen_hex(win.curves[0]) == "#123456"
     assert all(stored_colors(b) == ["#123456", RED] for b in blocks)
     for b, d in zip(blocks, data_before):                                 # data untouched
-        np.testing.assert_array_equal(session.read_block(b)["data"], d)
+        np.testing.assert_array_equal(trialfile.read_block(b)["data"], d)
+    assert all(trialfile.file_info(b)["colors"] == [P[0], RED] for b in blocks)   # the files too
+    assert (folder / trialfile.EDITS).exists()
     win.block_combo.setCurrentIndex(1)                                    # other block too
     assert pen_hex(win.curves[0]) == "#123456"
 
@@ -132,8 +134,8 @@ def test_blocks_without_saved_colors_fall_back_to_palette(app, win):
     win.btn_run.setChecked(False)
     with h5py.File(win.blocks[-1], "r+") as f:
         del f.attrs["colors"]                     # like a block from an older version
-    assert session.read_block(win.blocks[-1])["colors"] == P[:2]
-    assert not session.recolor_blocks(win.blocks, {"Ch1": RED})
+    assert trialfile.read_block(win.blocks[-1])["colors"] == P[:2]
+    assert not trialfile.recolor_blocks(win.blocks, {"Ch1": RED})
     assert stored_colors(win.blocks[-1]) == [RED, P[1]]
 
 

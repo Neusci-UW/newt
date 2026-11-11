@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from scipy.io import savemat
 
-from neusci_daq import matfile, session
+from neusci_daq import matfile, session, trialfile
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
 
@@ -115,12 +115,12 @@ def test_import_makes_a_session_and_never_changes_the_file(tmp_path):
     assert folder == tmp_path / "imported" / "lab"
     blocks = session.list_blocks(folder)
     assert [b.name for b in blocks] == ["block_001.h5", "block_002.h5", "block_003.h5"]
-    blk = session.read_block(blocks[0])
+    blk = trialfile.read_block(blocks[0])
     assert blk["channel_names"] == ["Nerve", "Stim"] and blk["units"] == ["mV", "V"]
     assert [c[1] for c in blk["comments"]] == ["start", "on stim only [Stim]"]
-    info = session.block_info(blocks[0])
+    info = trialfile.block_info(blocks[0])
     assert info["backend"] == "imported" and len(set(info["colors"])) == 2
-    assert session.block_info(blocks[1])["colors"][0] == info["colors"][0]   # same colour in every block
+    assert trialfile.block_info(blocks[1])["colors"][0] == info["colors"][0]   # same colour in every block
     assert notes and "Trial 3" in notes[0]
     assert hashlib.md5(src.read_bytes()).hexdigest() == before
 
@@ -128,15 +128,15 @@ def test_import_makes_a_session_and_never_changes_the_file(tmp_path):
 def test_importing_again_reuses_the_copy_unless_the_file_changed(tmp_path):
     src = labchart_like(tmp_path / "lab.mat")
     folder, _ = matfile.import_mat(src, tmp_path / "imp")
-    session.write_comments(session.list_blocks(folder)[0], [{"t": 0.1, "sample_index": 100, "text": "mine"}])
+    trialfile.write_comments(session.list_blocks(folder)[0], [{"t": 0.1, "sample_index": 100, "text": "mine"}])
     again, notes = matfile.import_mat(src, tmp_path / "imp")
     assert again == folder and notes                        # notes remembered too
-    assert session.read_comments(session.list_blocks(again)[0])[0]["text"] == "mine"
+    assert trialfile.read_comments(session.list_blocks(again)[0])[0]["text"] == "mine"
     time.sleep(0.01)
     labchart_like(src, titles=np.array(["A", "B"]))         # a different file under the same name
     newer, _ = matfile.import_mat(src, tmp_path / "imp")
     assert newer == tmp_path / "imp" / "lab_2"
-    assert session.read_block(session.list_blocks(newer)[0])["channel_names"] == ["A", "B"]
+    assert trialfile.read_block(session.list_blocks(newer)[0])["channel_names"] == ["A", "B"]
     assert json.loads((newer / matfile.MARKER).read_text())["path"] == str(src.resolve())
 
 
@@ -159,7 +159,7 @@ def test_our_own_export_opens_back_up_with_the_same_data(app, win, tmp_path):
     pump(app, 0.3)
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
-    original = session.read_block(win.blocks[0])
+    original = trialfile.read_block(win.blocks[0])
     out = win.export(tmp_path / "ours.mat")
     win.open_mat(out)
     blk = win.review_block

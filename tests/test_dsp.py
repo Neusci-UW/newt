@@ -141,21 +141,6 @@ def test_analysis_can_find_spikes_on_a_filtered_channel(app, win):
                                 for i in range(win.analysis_page.stim_channel.count())]
 
 
-def test_dialog_checks_rows(app, win):
-    from neusci_daq.calcdialog import CalcDialog
-    d = CalcDialog(win, [], ["Ch1", "Ch2"], {"Ch1": "V"}, FS)
-    assert d.btn_ok.isEnabled()                                      # nothing yet: fine
-    d.add(*dsp.preset(0, ["Ch1"], {"Ch1": "V"}))
-    assert d.btn_ok.isEnabled() and d.calculations()[0].formula == "bandpass(Ch1, 300, 3000)"
-    d.add("Ch2", "Ch1 * 2", "")                                      # clashes with a channel
-    assert not d.btn_ok.isEnabled() and "already used" in d.message.text()
-    d.table.item(1, 0).setText("Double")
-    d.table.item(1, 1).setText("lowpass(Ch1")                        # half-typed
-    assert not d.btn_ok.isEnabled() and "Can't read" in d.message.text()
-    d.table.item(1, 1).setText("Ch1 * 2")
-    assert d.btn_ok.isEnabled()
-
-
 # ---------------------------------------------------------------- cyclic measurements, chains
 def heartbeat(bpm=72, seconds=10, fs=1000.0):
     t = np.arange(int(seconds * fs)) / fs
@@ -336,3 +321,10 @@ def test_spike_sorting_gives_its_threshold_as_a_level(app, win):
     d = raw.cyclic_defaults()
     assert d["channel"] == "Ch2" and d["dir"] == "below" and d["dead"] == raw.dead.value()
     assert d["level"] == pytest.approx(raw.baseline() - 0.1)
+
+
+def test_custom_formula_shows_how_to_write_one(app, win):
+    from neusci_daq.analysischannel import AnalysisChannelDialog
+    d = AnalysisChannelDialog(win, ["Ch1", "Ch2"], {"Ch1": "V"}, 2000.0)
+    d.kind.setCurrentIndex(d.kind.findData("custom"))
+    assert d.formula_help.isVisibleTo(d) and "lowpass" in d.formula_help.text()

@@ -5,8 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neusci-daq-visualizer"
 version = "0.1.0"
+description = "Newt: the Neuroscience Educational Workflow Toolbox"
 requires-python = ">=3.11"
 dependencies = ["numpy", "scipy", "pyqtgraph>=0.13", "PyQt6", "h5py"]
+
+[project.urls]
+Source = "https://github.com/Neusci-UW/newt"
 
 [project.optional-dependencies]
 nidaqmx = ["nidaqmx>=1.0"]
@@ -16,7 +20,8 @@ web = ["PyQt6-WebEngine"]   # the Membrane potential tab
 dev = ["pytest", "neuscitk", "scikit-learn", "matplotlib"]
 
 [project.scripts]
-neusci-daq = "neusci_daq.__main__:main"
+newt = "neusci_daq.__main__:main"
+neusci-daq = "neusci_daq.__main__:main"      # the old command, still works
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,8 +1,9 @@
-"""Sending a stimulus waveform out of an analog output (ao0/ao1).
+"""Sending a stimulus waveform out of the analog outputs (ao0, ao1, or both).
 
 Each stimulus is one hardware-timed, finite output task, run on a worker
 thread so the window stays responsive. Recording keeps running on its own
-task at the same time.
+task at the same time. With two outputs, both are channels of the one task,
+so they play from the same clock, sample for sample.
 
 Safety: the waveform always ends at 0 V (stim.py), and on Stop, on errors
 and when the program closes the output is set to 0 V.
@@ -26,6 +27,7 @@ class StimOutput:
         self.cfg = cfg
         self.error: BaseException | None = None
         self.fired = 0                          # stimuli started (for tests and the status bar)
+        self.last_channels: list[str] = []      # the outputs the last stimulus went to
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -33,14 +35,21 @@ class StimOutput:
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def fire(self, wave: np.ndarray, rate: float) -> None:
-        """Start sending `wave`. Raises RuntimeError if the previous stimulus is still going."""
+    def fire(self, wave: np.ndarray, rate: float, channels: list[str] | None = None) -> None:
+        """Start sending `wave`: 1-D for one output (the configured one, or channels[0]), or
+        one row per output in `channels` (stim.combine makes it). Raises RuntimeError if the
+        previous stimulus is still going."""
         if self.busy:
             raise RuntimeError("The previous stimulus is still running.")
+        wave = np.asarray(wave, float)
+        channels = list(channels or [self.cfg.stim_output])
+        if (wave.ndim == 2) != (len(channels) > 1) or (wave.ndim == 2 and wave.shape[0] != len(channels)):
+            raise ValueError("One row of the waveform per output.")
         self.error = None
         self._stop.clear()
         self.fired += 1
-        self._thread = threading.Thread(target=self._run, args=(np.asarray(wave, float), float(rate)),
+        self.last_channels = channels
+        self._thread = threading.Thread(target=self._run, args=(wave, float(rate), channels),
                                         daemon=True, name="daq-stim")
         self._thread.start()
 
@@ -55,9 +64,9 @@ class StimOutput:
         except Exception as e:      # reported, but never blocks stopping
             self.error = e
 
-    def _run(self, wave, rate):
+    def _run(self, wave, rate, channels):
         try:
-            self._send(wave, rate)
+            self._send(wave, rate, channels)
         except BaseException as e:
             self.error = e
             try:
@@ -65,31 +74,33 @@ class StimOutput:
             except Exception:
                 pass
 
-    def _send(self, wave, rate): raise NotImplementedError
+    def _send(self, wave, rate, channels): raise NotImplementedError
     def zero(self) -> None: ...
 
 
 class NidaqmxOutput(StimOutput):
     """Hardware-timed finite output with NI's `nidaqmx` package."""
 
-    def _channel(self, task):
-        task.ao_channels.add_ao_voltage_chan(f"{self.cfg.device}/{self.cfg.stim_output}",
-                                             min_val=-10.0, max_val=10.0)
+    def _channels(self, task, channels):
+        for ch in channels:
+            task.ao_channels.add_ao_voltage_chan(f"{self.cfg.device}/{ch}", min_val=-10.0, max_val=10.0)
 
-    def _send(self, wave, rate):
+    def _send(self, wave, rate, channels):
         import nidaqmx
         from nidaqmx.constants import AcquisitionType
         task = nidaqmx.Task()
+        n = wave.shape[-1]
         try:
-            self._channel(task)
-            if len(wave) < 2:
-                task.write(float(wave[0]) if len(wave) else 0.0, auto_start=True)
+            self._channels(task, channels)
+            if n < 2:
+                first = wave[..., 0] if n else np.zeros(wave.shape[:-1])
+                task.write(first.tolist() if wave.ndim == 2 else float(first), auto_start=True)
                 return
             task.timing.cfg_samp_clk_timing(rate=rate, sample_mode=AcquisitionType.FINITE,
-                                            samps_per_chan=len(wave))
-            task.write(wave, auto_start=False)
+                                            samps_per_chan=n)
+            task.write(wave, auto_start=False)          # 2-D: one row per channel, in order
             task.start()
-            deadline = time.monotonic() + len(wave) / rate + 5.0
+            deadline = time.monotonic() + n / rate + 5.0
             while not task.is_task_done():
                 if self._stop.is_set():
                     break
@@ -106,10 +117,12 @@ class NidaqmxOutput(StimOutput):
                 self.zero()
 
     def zero(self) -> None:
+        """Both outputs to 0 V: whichever were used, nothing is left on."""
         import nidaqmx
+        from .stim import AO_CHANNELS
         with nidaqmx.Task() as task:
-            self._channel(task)
-            task.write(0.0, auto_start=True)
+            self._channels(task, AO_CHANNELS)
+            task.write([0.0] * len(AO_CHANNELS), auto_start=True)
 
 
 class SimulatedOutput(StimOutput):
@@ -121,7 +134,10 @@ class SimulatedOutput(StimOutput):
         super().__init__(cfg)
         self.backend = backend
 
-    def _send(self, wave, rate):
+    def _send(self, wave, rate, channels):
+        if wave.ndim == 2:          # the network takes one stimulus: the configured output's
+            row = channels.index(self.cfg.stim_output) if self.cfg.stim_output in channels else 0
+            wave = wave[row]
         self.backend.inject(self.cfg.stim_monitor, wave, rate)
         end = time.monotonic() + len(wave) / rate
         while time.monotonic() < end:

@@ -229,7 +229,7 @@ TOPICS = {
     "spike_sorting": {
         "title": "How Find action potentials works",
         "picture": _spike_sorting_picture,
-        "text": "Argus finds every place the trace passes the <b>threshold</b> and cuts out a short <b>waveform</b> "
+        "text": "Newt finds every place the trace passes the <b>threshold</b> and cuts out a short <b>waveform</b> "
                 "around each peak. Spikes from the same cell look alike, so it reduces each waveform to its 3 "
                 "<b>principal components</b>, which turns each spike into a point, and <b>k-means</b> groups "
                 "nearby points into <b>units</b>.",
@@ -239,14 +239,14 @@ TOPICS = {
             ("Baseline", "The trace's middle level (its median). Thresholds are measured from here."),
             ("Noise SD", "How much the trace wobbles without spikes. 5 SD means 5 times that wobble."),
             ("Threshold", "How far from the baseline the trace must go to count as an event."),
-            ("Method", "Manual: you set the threshold. Bimodal: Argus puts it between noise and spikes."),
+            ("Method", "Manual: you set the threshold. Bimodal: Newt puts it between noise and spikes."),
             ("Direction", "Which way spikes go from the baseline: down, up or either."),
             ("Biphasic", "Keep only events that also swing the other way, as real spikes do."),
             ("Dead time", "After an event, no other can start for this long."),
             ("Waveform before / after", "How much of each spike to cut out around its peak."),
             ("Units", "How many groups to sort spikes into. Auto picks the number that separates best."),
             ("Unit", "A group of spikes with the same shape, likely from one cell."),
-            ("Principal components", "The main ways the spike shapes differ. Argus uses the first 3."),
+            ("Principal components", "The main ways the spike shapes differ. Newt uses the first 3."),
             ("k-means", "Groups points around k centres (the × marks), each point joining its nearest."),
         ),
     },
@@ -273,7 +273,7 @@ TOPICS = {
     "cycles": {
         "title": "How Stimulus cycles work",
         "picture": _cycles_picture,
-        "text": "With a repeating stimulus, Argus cuts the chosen trials into single <b>cycles</b> and overlays them "
+        "text": "With a repeating stimulus, Newt cuts the chosen trials into single <b>cycles</b> and overlays them "
                 "by stimulus <b>phase</b> instead of time. If the trial saved what was sent, it lines that up with the "
                 "recording; otherwise it matches the stimulus's shape against itself, then uses its rises through its "
                 "middle level. Or give the <b>repeat length</b>, or mark one on the Traces or Stimulus chart. Picked "
@@ -284,7 +284,7 @@ TOPICS = {
         "glossary": (
             ("Cycle", "One repeat of the stimulus, from one rise through its middle to the next."),
             ("Phase", "How far through a cycle: 0° at the rise, 180° halfway, 360° at the next rise."),
-            ("Repeat length", "How long one repeat is. 0 lets Argus find it."),
+            ("Repeat length", "How long one repeat is. 0 lets Newt find it."),
             ("Left out", "Repeats too unlike the rest to use, counted in the Stimulus title."),
             ("Skip first", "Leaves out the first cycles of each trial, while the response settles."),
             ("Spikes per phase", "A histogram of when in the cycle spikes happen, per cycle."),

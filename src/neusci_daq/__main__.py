@@ -6,7 +6,7 @@ from . import config
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="neusci-daq", description=__doc__)
-    ap.add_argument("file", nargs="?", help="an .argus file (or session folder, or .mat) to open")
+    ap.add_argument("file", nargs="?", help="an .newt file (or session folder, or .mat) to open")
     ap.add_argument("-c", "--config", default="config.toml")
     ap.add_argument("--backend", choices=["nidaqmx", "multichannelio", "simulated", "audio"],
                     help="override the backend in the config")

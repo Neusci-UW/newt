@@ -421,3 +421,112 @@ def test_settings_rows_have_space_between_their_parts(app, win):
     assert gap(tp.shape, tp.btn_edit_stim) >= 8
     assert gap(tp.before, tp.after) >= 8 + 30          # "before," sits between them
     assert gap(tp.align, tp.btn_monitor) >= 8
+
+
+# ---------------------------------------------------------------- a second output
+from neusci_daq import stim  # noqa: E402
+
+RATE = 5000.0
+
+
+def test_settings_of_two_outputs_name_the_second_after_its_output():
+    two = ("pulse", "step", "ao0", "ao1")
+    keys = [k for k, _, _ in T.settings_of(two)]
+    assert keys[:2] == ["amplitude_v", "width_ms"] and "ao1:amplitude_v" in keys and "ao1:duration_ms" in keys
+    assert T.setting_info(two, "ao1:amplitude_v") == ("ao1 · Level", "V")
+    assert T.setting_info(two, "amplitude_v") == ("ao0 · Amplitude", "V")
+    assert T.setting_info("pulse", "amplitude_v") == ("Amplitude", "V")       # one output: as before
+    assert T.default_range("ao1:delay_ms") == T.DEFAULT_RANGES["delay_ms"]
+
+
+def test_a_trial_steps_the_output_its_setting_belongs_to():
+    s1 = Stimulus(shape="pulse", amplitude_v=1, width_ms=2)
+    s2 = Stimulus(shape="step", amplitude_v=-1, duration_ms=10, delay_ms=4)
+    p = T.Protocol(a=T.Variable("ao1:amplitude_v", "list", text="-2, -3"),
+                   b=T.Variable("amplitude_v", "list", text="1, 2"))
+    t = T.make_trial(s1, p, -3, 2, RATE, s2, ("ao0", "ao1"))
+    assert t.channels == ["ao0", "ao1"] and t.wave.shape[0] == 2
+    assert t.wave[0].max() == pytest.approx(2) and t.wave[1].min() == pytest.approx(-3)
+    assert t.wave[1][:stim.samples(4, RATE)].max() == 0                        # ao1's own delay
+    np.testing.assert_array_equal(t.first, t.wave[0][:len(t.first)])          # lined up on ao0
+    assert (t.stimulus.amplitude_v, t.stimulus2.amplitude_v) == (2, -3)
+    assert t.wave[0][-1] == 0 and t.wave[1][-1] == 0                           # both end at 0 V
+    with pytest.raises(ValueError, match="ao1, which isn't in use"):
+        T.make_trial(s1, p, -3, 2, RATE)                                        # no second output
+
+
+def test_check_finds_a_setting_of_an_output_not_in_use_and_both_limits():
+    s1, s2 = Stimulus(amplitude_v=1), Stimulus(shape="step", amplitude_v=1, duration_ms=10)
+    p = T.Protocol(a=T.Variable("ao1:amplitude_v", "range", 1, 3, 1), gap_s=1)
+    assert any("ao1, which isn't in use" in e for e in T.check(p, s1, RATE, 10).errors)
+    assert T.check(p, s1, RATE, 10, s2, ("ao0", "ao1")).ok
+    over = T.check(p, s1, RATE, 2.5, s2, ("ao0", "ao1"))                     # ao1 reaches 3 V
+    assert not over.ok and any("limit" in e for e in over.errors)
+
+
+def test_old_protocols_and_stimulus_files_still_load(tmp_path):
+    old = T.Protocol(a=T.Variable("amplitude_v", "range", 0.5, 1, 0.5))
+    assert T.Protocol.loads(old.dumps()).a.key == "amplitude_v"                # plain key: the first output
+    one = tmp_path / "one.json"
+    Stimulus(amplitude_v=2).save(one)
+    assert Stimulus.load_pair(one)[1] is None and Stimulus.load(one).amplitude_v == 2
+    two = tmp_path / "two.json"
+    Stimulus(amplitude_v=2).save(two, second=Stimulus(shape="step", amplitude_v=-3))
+    s1, s2 = Stimulus.load_pair(two)
+    assert s1.amplitude_v == 2 and s2.shape == "step" and s2.amplitude_v == -3
+    assert Stimulus.load(two).amplitude_v == 2                                 # as Argus, before the rename, reads it
+
+
+def test_a_protocol_on_two_outputs_runs_lines_up_and_saves_both(app, win, tmp_path):
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=1, width_ms=2))
+    win.set_stimulus2(Stimulus(shape="step", amplitude_v=-1, duration_ms=10))
+    p = T.Protocol(name="two", a=T.Variable("ao1:amplitude_v", "list", text="-1, -2"),
+                   repeats=2, gap_s=0.3, before_ms=5, after_ms=20)
+    tp = _ready(app, win, p)
+    assert [tp.row_a.setting.itemData(i) for i in range(tp.row_a.setting.count())][-1].startswith("ao1:")
+    assert tp.row_a.setting.currentText().startswith("ao1 · Level")
+    win.btn_rec.setChecked(True)
+    pump(app, 0.1)
+    assert tp.run_protocol()
+    _run_to_end(app, tp)
+    assert len(tp.results) == 4 and all(r.found for r in tp.results.values()), tp.message.text()
+    assert win.stim_out.last_channels == ["ao0", "ao1"]
+    path = win.recorder.path
+    win.btn_rec.setChecked(False)
+    with h5py.File(path) as f:
+        saved = json.loads(f.attrs["trials"])
+        sent = json.loads(f.attrs["stimuli"])
+    assert saved["second"]["output"] == "ao1" and saved["second"]["stimulus"]["shape"] == "step"
+    assert sent[0]["output"] == "ao0" and sent[0]["second"]["settings"]["amplitude_v"] in (-1, -2)
+    win.set_stimulus2(None)
+
+
+def test_check_builds_each_outputs_stimulus_once(monkeypatch):
+    """It runs on every edit: with a stepping only ao1, ao0's stimulus is the same in every
+    trial and is built once, not once per trial."""
+    built = []
+    real = Stimulus.waveform
+    monkeypatch.setattr(Stimulus, "waveform", lambda self, rate: built.append(self.shape) or real(self, rate))
+    s1, s2 = Stimulus(amplitude_v=1), Stimulus(shape="step", amplitude_v=1, duration_ms=10)
+    p = T.Protocol(a=T.Variable("ao1:amplitude_v", "range", 1, 6, 1), repeats=3, gap_s=1)
+    assert T.check(p, s1, RATE, 10, s2, ("ao0", "ao1")).ok
+    assert built.count("pulse") == 1 and built.count("step") == 6
+
+
+def test_a_preview_builds_only_the_output_it_shows(monkeypatch):
+    built = []
+    real = Stimulus.waveform
+    monkeypatch.setattr(Stimulus, "waveform", lambda self, rate: built.append(self.shape) or real(self, rate))
+    s1, s2 = Stimulus(amplitude_v=1), Stimulus(shape="step", amplitude_v=1, duration_ms=10)
+    p = T.Protocol(a=T.Variable("ao1:amplitude_v", "list", text="-2"))
+    w = T.output_wave(s1, p, -2, None, RATE, s2, second=True)
+    assert built == ["step"] and w.min() == pytest.approx(-2)
+
+
+def test_showing_a_stimulus_in_the_stimulator_does_not_recheck_the_protocol_twice(app, win, monkeypatch):
+    calls = []
+    real = win.trials_page.stimulus_changed
+    monkeypatch.setattr(win.trials_page, "stimulus_changed", lambda: calls.append(1) or real())
+    win.set_stimulus2(Stimulus(shape="step", amplitude_v=2))
+    assert len(calls) == 1                        # not again when the fields load it
+    win.set_stimulus2(None)

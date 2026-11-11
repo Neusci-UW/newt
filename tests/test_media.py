@@ -267,5 +267,5 @@ def test_the_list_keeps_the_camera_picked_and_notices_it_unplugged(app, win, mon
     assert panel.camera_box.currentData() == "" and "unplugged" in panel.message.text()
 
 
-def test_window_title_says_argus(win):
-    assert "Argus" in win.windowTitle() and "neusci-daq-visualizer" not in win.windowTitle()
+def test_window_title_says_newt(win):
+    assert "Newt" in win.windowTitle() and "neusci-daq-visualizer" not in win.windowTitle()

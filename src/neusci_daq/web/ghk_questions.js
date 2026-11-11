@@ -171,7 +171,7 @@ reload doesn't lose them; "Reset answers" clears them. */
   }
 
   // ---------- saved answers ----------
-  const KEY = 'argus.ghkQuestions.v1';
+  const KEY = 'argus.ghkQuestions.v1';   // named before the rename to Newt; kept so saved answers stay
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* private window */ } };

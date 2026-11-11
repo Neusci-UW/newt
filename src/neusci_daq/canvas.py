@@ -349,14 +349,14 @@ class ChartCanvas(QtWidgets.QWidget):
             self.reset()
 
     def app_state(self) -> dict:
-        """Every layout opened, and the one showing, for an .argus file."""
+        """Every layout opened, and the one showing, for an .newt file."""
         self.save()
         return {"layout": self.space.name if self.space is not None else BOARD,
                 "layouts": {name: self.state_of(space) for name, space in self.spaces.items()},
                 "own": self.own_layouts(), "lock": self.lock.isChecked(), "bars": self.bars.isChecked()}
 
     def restore_app_state(self, s: dict) -> None:
-        """The layouts of an .argus file, in place of what's on screen. Your own layouts stay
+        """The layouts of an .newt file, in place of what's on screen. Your own layouts stay
         in the menu; one of the same name as the file's takes the file's charts."""
         own = self.own_layouts()
         self.settings.setValue("analysis/layouts", json.dumps(own + [n for n in s["own"] if n not in own]))

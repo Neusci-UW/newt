@@ -108,13 +108,19 @@ class Recorder:
                 self._file.attrs[key] = value
                 self._file.flush()
 
-    def add_stimulus(self, settings: dict, rate: float) -> None:
+    def add_stimulus(self, settings: dict, rate: float, output: str = "", second: dict | None = None) -> None:
         """Save what was just sent with the block being recorded, at the latest acquired
-        sample, so analysis can line up the known waveform with the recording."""
+        sample, so analysis can line up the known waveform with the recording. `second`
+        is what went to the other output at the same time: {"output", "settings"}."""
         with self._lock:
             if self._file is not None:
                 sent = json.loads(self._file.attrs.get("stimuli", "[]"))
-                sent.append({"t": self.last_t - (self._t_offset or 0.0), "rate": rate, "settings": settings})
+                entry = {"t": self.last_t - (self._t_offset or 0.0), "rate": rate, "settings": settings}
+                if output:
+                    entry["output"] = output
+                if second:
+                    entry["second"] = second
+                sent.append(entry)
                 self._file.attrs["stimuli"] = json.dumps(sent)
                 self._file.flush()
 

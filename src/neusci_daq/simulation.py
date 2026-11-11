@@ -343,7 +343,7 @@ def copy_network(net: Network) -> Network:
 
 
 def network_from_dict(d: dict) -> Network:
-    """A network from asdict(network), as saved in an .argus file."""
+    """A network from asdict(network), as saved in an .newt file."""
     return Network([Cell(**c) for c in d["cells"]], d["synapse_delay_ms"], d["synapse_tau_ms"],
                    [Recording(**r) for r in d["recordings"]])
 

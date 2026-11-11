@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 
 from . import stim as stimmod
 from .channels import ChannelRow, ChannelStrip
@@ -16,12 +17,59 @@ from .mainparts import LIVE
 
 class StimulatorMixin:
     # -- stimulator ----------------------------------------------------------
-    def _saved_stimulus(self) -> Stimulus:
-        import json
+    def _saved_stimulus(self, key: str = "stimulus") -> Stimulus | None:
+        """The stimulus remembered under `key`: "stimulus" (always one) or "stimulus2"
+        (None when only one output is used)."""
         try:
-            return Stimulus.from_dict(json.loads(self.settings.value("stimulus", "") or "{}"))
+            d = json.loads(self.settings.value(key, "") or "{}")
+            return Stimulus.from_dict(d) if (d or key == "stimulus") else None
         except Exception:
-            return Stimulus()
+            return Stimulus() if key == "stimulus" else None
+
+    # -- a second output ---------------------------------------------------------
+    @property
+    def second_output(self) -> str:
+        """The output a second stimulus goes to: the one the first isn't on."""
+        return stimmod.other_output(self.cfg.stim_output)
+
+    def set_stimulus2(self, s: Stimulus | None) -> None:
+        """A stimulus for the other output too (sent with the first, from the same start),
+        or None for one output only."""
+        if self.stim_out is not None and self.stim_out.busy:
+            self.stop_stimulus()
+        self._stimulus2_edited(s)
+        if hasattr(self, "stim_page"):
+            self.stim_page.outputs_changed()
+
+    def _stimulus2_edited(self, s: Stimulus | None) -> None:
+        self.stimulus2 = s
+        self.settings.setValue("stimulus2", json.dumps(s.to_dict()) if s is not None else "")
+        if hasattr(self, "trials_page"):
+            self.trials_page.stimulus_changed()
+
+    def stimulus_waves(self) -> tuple[list[str], np.ndarray]:
+        """(outputs, waveform) Fire sends: the first stimulus on its output and the second,
+        if any, on the other. Raises ValueError, naming the output when there are two."""
+        cfg = self.cfg
+        streams = [(cfg.stim_output, self.stimulus)]
+        if self.stimulus2 is not None:
+            streams.append((self.second_output, self.stimulus2))
+        waves = {}
+        for out, s in streams:
+            try:
+                waves[out] = s.waveform(cfg.stim_rate)
+            except ValueError as e:
+                raise ValueError(f"{out}: {e}" if len(streams) > 1 else str(e)) from None
+        return stimmod.combine(waves)
+
+    def describe_stimuli(self) -> str:
+        """What Fire sends, for comments and messages: with two outputs, each by name."""
+        cfg = self.cfg
+        text = self.stimulus.describe(cfg.stim_units, cfg.stim_scale)
+        if self.stimulus2 is not None:
+            text = (f"{cfg.stim_output}: {text}; {self.second_output}: "
+                    + self.stimulus2.describe(cfg.stim_units, cfg.stim_scale))
+        return text
 
     def set_stimulus(self, s: Stimulus) -> None:
         """Use stimulus `s` for Fire and Repeat, and show it in the Stimulator tab."""
@@ -31,7 +79,6 @@ class StimulatorMixin:
 
     def _stimulus_edited(self, s: Stimulus) -> None:
         """The stimulus that Fire and Repeat send (remembered between runs)."""
-        import json
         self.stimulus = s
         self.settings.setValue("stimulus", json.dumps(s.to_dict()))
         if hasattr(self, "trials_page"):
@@ -63,15 +110,19 @@ class StimulatorMixin:
             self._stim_message("A protocol is running (Acquisition › Protocols); stop it first.", error=True)
             return False
         try:
-            wave = self.stimulus.waveform(self.cfg.stim_rate)
+            chans, wave = self.stimulus_waves()
         except ValueError as e:
             self._stim_message(str(e), error=True)
             return False
-        return self.send_wave(wave, self.stimulus.describe(self.cfg.stim_units, self.cfg.stim_scale), self.stimulus)
+        return self.send_wave(wave, self.describe_stimuli(), self.stimulus, channels=chans,
+                              stimulus2=self.stimulus2)
 
-    def send_wave(self, wave, desc: str, stimulus: Stimulus | None = None) -> bool:
-        """Send `wave` (volts at the output rate), and note it as a comment and save the
-        `stimulus` it came from with the block while recording."""
+    def send_wave(self, wave, desc: str, stimulus: Stimulus | None = None,
+                  channels: list[str] | None = None, stimulus2: Stimulus | None = None) -> bool:
+        """Send `wave` (volts at the output rate; one row per output in `channels` for
+        two), and note it as a comment and save the `stimulus` (and `stimulus2`, on the
+        other output) it came from with the block while recording."""
+        channels = channels or [self.cfg.stim_output]
         if self.stim_out is None:
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
@@ -80,15 +131,18 @@ class StimulatorMixin:
             return False
         try:
             stimmod.check_limit(wave, self.cfg.stim_max_v)
-            self.stim_out.fire(wave, self.cfg.stim_rate)
+            self.stim_out.fire(wave, self.cfg.stim_rate, channels)
         except (ValueError, RuntimeError) as e:
             self._stim_message(str(e), error=True)
             return False
         if self.recorder.recording:
             self._log_comment(f"Stim: {desc}" if not desc.startswith("Stimulus ") else desc)
             if stimulus is not None:
-                self.recorder.add_stimulus(stimulus.to_dict(), self.cfg.stim_rate)
-        self._stim_message(f"Stimulus sent on {self.cfg.stim_output}: {desc}")
+                second = ({"output": self.second_output, "settings": stimulus2.to_dict()}
+                          if stimulus2 is not None and len(channels) > 1 else None)
+                self.recorder.add_stimulus(stimulus.to_dict(), self.cfg.stim_rate,
+                                           output=self.cfg.stim_output, second=second)
+        self._stim_message(f"Stimulus sent on {' and '.join(channels)}: {desc}")
         self._update_stim_chip()
         return True
 
@@ -138,10 +192,14 @@ class StimulatorMixin:
         self.settings.setValue("stim_on_start", self.stim_on_start)
 
     def set_stim_output(self, ch: str) -> None:
+        """The first stimulus's output. A second stimulus moves to the other one."""
         if self.stim_out is not None and self.stim_out.busy:
             self.stop_stimulus()
         self.cfg.stim_output = ch
         self.stim_page.sync()
+        self.stim_page.outputs_changed()
+        if hasattr(self, "trials_page"):
+            self.trials_page.stimulus_changed()
         self.statusBar().showMessage(f"Stimulator output: {ch}", 6000)
 
     def monitor_choices(self) -> list[tuple[str, str, bool, str]]:

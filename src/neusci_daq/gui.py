@@ -91,9 +91,9 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # Live session: each Record press is one block, like LabChart.
         self.session_dir: Path | None = None
         self.session_saved = False   # False while it lives in data/unsaved/
-        self.argus_path: Path | None = None       # the .argus file this session was saved in or opened from
-        self._argus_folder: Path | None = None    # ...for this session folder
-        self._argus_files: dict | None = None     # what the folder held when it was saved (argusfile.files_of)
+        self.newt_path: Path | None = None       # the .newt file this session was saved in or opened from
+        self._newt_folder: Path | None = None    # ...for this session folder
+        self._newt_files: dict | None = None     # what the folder held when it was saved (newtfile.files_of)
         self.blocks: list[Path] = []
         self._exported_n = 0
         # Review session.
@@ -126,6 +126,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # Stimulator
         self.stim_out = make_output(cfg, self.backend)
         self.stimulus = self._saved_stimulus()
+        self.stimulus2: Stimulus | None = self._saved_stimulus("stimulus2")   # on the other output
         self.stim_repeat_s = float(self.settings.value("stim_repeat_s", 1.0))
         # What pressing Start does to the stimulator: "" nothing, "once", or "repeat".
         on_start = self.settings.value("stim_on_start", "")
@@ -266,7 +267,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         cl2.addWidget(self.btn_theme)
         self.logo = QtWidgets.QLabel()
         self.logo.setPixmap(app_icon().pixmap(QtCore.QSize(26, 26)))
-        self.logo.setToolTip("Argus")
+        self.logo.setToolTip("Newt")
         cl2.addWidget(self.logo)
         self._tb_corner = A(self.tab_corner)
         self._update_theme_button()
@@ -410,7 +411,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         m.addSeparator()
         self.act_save = m.addAction("&Save", self.save)
         self.act_save.setShortcut(QtGui.QKeySequence.StandardKey.Save)
-        self.act_save.setToolTip("Save everything in one .argus file, which reopens Argus as it is now")
+        self.act_save.setToolTip("Save everything in one .newt file, which reopens Newt as it is now")
         self.act_save_as = m.addAction("Save &As…", self.save_file_dialog)
         self.act_save_as.setShortcut(QtGui.QKeySequence("Ctrl+Shift+S"))
         self.act_save_folder = m.addAction("Save Session F&older As…", self.save_as_dialog)
@@ -677,7 +678,7 @@ _WINDOWS: list = []        # windows opened by Setup › Input device, kept aliv
 
 
 class _FileOpener(QtCore.QObject):
-    """Files macOS asks Argus to open (a double-clicked .argus file), kept until the window
+    """Files macOS asks Newt to open (a double-clicked .newt file), kept until the window
     is ready."""
 
     def __init__(self, app):
@@ -702,7 +703,7 @@ class _FileOpener(QtCore.QObject):
 
 
 def run(cfg: Config, config_path: str | Path | None = None, open_path: str | None = None):
-    app = pg.mkQApp("Argus")
+    app = pg.mkQApp("Newt")
     opener = _FileOpener(app)
     # pyqtgraph sets its own icon and Windows taskbar ID in mkQApp; replace both
     # before the window opens, or the taskbar keeps showing pyqtgraph's icon.

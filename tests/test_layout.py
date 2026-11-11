@@ -877,7 +877,7 @@ def test_tall_tabs_fit_a_short_laptop_screen(app, tmp_path, tab, scale):
     force it to 1,158 × 935 (one long message and a tall settings column); now the
     settings scroll and the messages wrap. `scale` widens the font as macOS's is: the
     Analysis Blocks panel once left 4 px to spare here and didn't fit on the Mac runner.
-    Built as Argus starts (font and stylesheet first, then the window): styling a window
+    Built as Newt starts (font and stylesheet first, then the window): styling a window
     that already exists leaves some sizes as they were, and hid that."""
     from pyqtgraph.Qt import QtCore
     from neusci_daq.gui import MainWindow

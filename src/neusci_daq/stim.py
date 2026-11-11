@@ -177,7 +177,6 @@ class Stimulus:
                 notes.append(f"{name} {ms:g} ms rounds to {got:g} ms (output steps are {dt:g} ms).")
         return notes
 
-    # -- files ---------------------------------------------------------------
     def repeat(self) -> tuple[float, float, int]:
         """How it repeats: (one repeat in s, where the first starts in s, how many). No
         repeats: all 0."""
@@ -195,17 +194,49 @@ class Stimulus:
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in known})
 
-    def save(self, path: str | Path) -> Path:
+    # -- files ---------------------------------------------------------------
+    def save(self, path: str | Path, second: "Stimulus | None" = None) -> Path:
+        """Save as JSON. A second output's stimulus goes under "second": older versions
+        (Argus, before the rename) ignore it and load the first."""
         path = Path(path)
-        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        d = self.to_dict()
+        if second is not None:
+            d["second"] = second.to_dict()
+        path.write_text(json.dumps(d, indent=2), encoding="utf-8")
         return path
 
     @classmethod
     def load(cls, path: str | Path) -> "Stimulus":
+        return cls.load_pair(path)[0]
+
+    @classmethod
+    def load_pair(cls, path: str | Path) -> "tuple[Stimulus, Stimulus | None]":
+        """(first output's stimulus, second's or None) from a saved file."""
         try:
-            return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, TypeError) as e:
+            d = json.loads(Path(path).read_text(encoding="utf-8"))
+            second = d.get("second")
+            return cls.from_dict(d), (cls.from_dict(second) if isinstance(second, dict) else None)
+        except (json.JSONDecodeError, TypeError, AttributeError) as e:
             raise ValueError(f"{Path(path).name} isn't a saved stimulus: {e}") from e
+
+
+def other_output(ch: str) -> str:
+    """The analog output that isn't `ch`: where a second stimulus goes."""
+    return AO_CHANNELS[1] if ch == AO_CHANNELS[0] else AO_CHANNELS[0]
+
+
+def combine(waves: dict[str, np.ndarray]) -> tuple[list[str], np.ndarray]:
+    """Waveforms for several outputs as one array to send together: (outputs in order,
+    array of one row per output). The shorter ones are padded with 0 V at the end, so
+    every output starts at the same sample and ends at 0 V. One output: a 1-D array."""
+    chans = sorted(waves)
+    if len(chans) == 1:
+        return chans, np.asarray(waves[chans[0]], float)
+    n = max(len(waves[c]) for c in chans)
+    out = np.zeros((len(chans), n))
+    for i, c in enumerate(chans):
+        out[i, :len(waves[c])] = waves[c]
+    return chans, out
 
 
 def check_limit(wave: np.ndarray, max_v: float) -> None:

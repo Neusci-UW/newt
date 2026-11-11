@@ -1,6 +1,6 @@
-"""The main window's sessions and files: live and review, New, Open, Save (one .argus file),
+"""The main window's sessions and files: live and review, New, Open, Save (one .newt file),
 Save As, Append, Export, recent files, asking before anything unsaved is left, and what's
-on screen for an .argus file (app_state)."""
+on screen for an .newt file (app_state)."""
 from __future__ import annotations
 
 import dataclasses
@@ -17,7 +17,7 @@ from . import session
 from . import trialfile
 from . import protocols as protocolsmod
 from . import simulation as sim
-from . import argusfile
+from . import newtfile
 from .channels import ChannelRow
 from .config import Channel, valid_inputs
 from .export import to_labchart_mat
@@ -53,9 +53,9 @@ class SessionFilesMixin:
             self.set_listen(self._listen)           # back to live: listening again
 
     def _update_title(self):
-        argus = self._argus()
-        if argus is not None:
-            where = f"{argus.name}{'*' if self._has_unsaved() else ''} — {'Review' if self.mode == REVIEW else 'Live'}"
+        newt = self._newt()
+        if newt is not None:
+            where = f"{newt.name}{'*' if self._has_unsaved() else ''} — {'Review' if self.mode == REVIEW else 'Live'}"
         elif self.mode == REVIEW and self._review_source is not None:
             where = f"{self._review_source.name} (imported copy) — Review"
         elif self.mode == REVIEW and self.review_dir is not None:
@@ -66,7 +66,7 @@ class SessionFilesMixin:
             where = "Untitled session* — Live"
         else:
             where = "Untitled session — Live"
-        self.setWindowTitle(f"{where} — Argus ({self.cfg.device}, {self.cfg.backend})")
+        self.setWindowTitle(f"{where} — Newt ({self.cfg.device}, {self.cfg.backend})")
 
     def _update_menu_state(self):
         recording = self.recorder.recording
@@ -81,14 +81,14 @@ class SessionFilesMixin:
         return Path(self.cfg.data_dir) / "unsaved"
 
     def _has_unsaved(self) -> bool:
-        if self._argus() is not None:          # changed since it was saved in its .argus file
-            return argusfile.files_of(self._export_folder()) != self._argus_files
+        if self._newt() is not None:          # changed since it was saved in its .newt file
+            return newtfile.files_of(self._export_folder()) != self._newt_files
         return self.session_dir is not None and not self.session_saved and bool(self.blocks)
 
-    def _argus(self) -> Path | None:
-        """The .argus file of the session showing, if it has one."""
+    def _newt(self) -> Path | None:
+        """The .newt file of the session showing, if it has one."""
         folder = self._export_folder()
-        return self.argus_path if folder is not None and folder == self._argus_folder else None
+        return self.newt_path if folder is not None and folder == self._newt_folder else None
 
     def _ask_unsaved(self) -> str:
         """Ask what to do with an unsaved session: 'save', 'discard' or 'cancel'."""
@@ -109,16 +109,16 @@ class SessionFilesMixin:
         return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
 
     def _ask_unsaved_file(self) -> str:
-        """Ask what to do with changes not in the .argus file: 'save', 'discard' or 'cancel'."""
+        """Ask what to do with changes not in the .newt file: 'save', 'discard' or 'cancel'."""
         B = QtWidgets.QMessageBox.StandardButton
         r = QtWidgets.QMessageBox.question(
-            self, "Unsaved changes", f"{self._argus().name} has changed since it was saved.\n\nSave the changes?",
+            self, "Unsaved changes", f"{self._newt().name} has changed since it was saved.\n\nSave the changes?",
             B.Save | B.Discard | B.Cancel, B.Save)
         return {B.Save: "save", B.Discard: "discard"}.get(r, "cancel")
 
     def _resolve_unsaved(self) -> bool:
         """True if it's OK to leave the current session."""
-        if self._argus() is not None:
+        if self._newt() is not None:
             if not (self._has_unsaved() or self.analysis_page.has_unsaved_analysis()):
                 return True
             choice = self._ask_unsaved_file()
@@ -384,17 +384,17 @@ class SessionFilesMixin:
         return True
 
     def save(self) -> bool:
-        """Save everything in the session's .argus file; the first time, ask where."""
+        """Save everything in the session's .newt file; the first time, ask where."""
         if self.recorder.recording:
             QtWidgets.QMessageBox.information(self, "Recording in progress", "Stop recording before saving.")
             return False
-        argus = self._argus()
-        if argus is None:
+        newt = self._newt()
+        if newt is None:
             return self.save_file_dialog()
-        return self._save_file(argus)
+        return self._save_file(newt)
 
     def save_file_dialog(self) -> bool:
-        """Ask where to save the .argus file, and save it there."""
+        """Ask where to save the .newt file, and save it there."""
         if self.recorder.recording:
             QtWidgets.QMessageBox.information(self, "Recording in progress", "Stop recording before saving.")
             return False
@@ -402,21 +402,21 @@ class SessionFilesMixin:
             QtWidgets.QMessageBox.information(self, "Nothing to save", "Record a trial first.")
             return False
         src = self._export_folder()
-        name = self._argus().stem if self._argus() is not None else \
+        name = self._newt().stem if self._newt() is not None else \
             src.name if (self.session_saved or self.mode == REVIEW) else datetime.now().strftime("session_%Y%m%d_%H%M%S")
-        default = Path(self._start_dir()) / (name + argusfile.SUFFIX)
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save as an Argus file", str(default),
-                                                        f"Argus file (*{argusfile.SUFFIX})")
+        default = Path(self._start_dir()) / (name + newtfile.SUFFIX)
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save as an Newt file", str(default),
+                                                        f"Newt file (*{newtfile.SUFFIX})")
         if not path:
             return False
         path = Path(path)
-        return self._save_file(path if path.suffix == argusfile.SUFFIX else path.with_name(path.name + argusfile.SUFFIX))
+        return self._save_file(path if path.suffix == newtfile.SUFFIX else path.with_name(path.name + newtfile.SUFFIX))
 
     def _save_file(self, path: Path) -> bool:
         try:
-            self.save_argus(path)
+            self.save_newt(path)
             return True
-        except (argusfile.ArgusError, session.SessionError, OSError) as e:
+        except (newtfile.NewtError, session.SessionError, OSError) as e:
             QtWidgets.QMessageBox.critical(self, "Could not save", str(e))
         return False
 
@@ -433,18 +433,18 @@ class SessionFilesMixin:
         self._flush_review_mat()
         return folder
 
-    def save_argus(self, path: str | Path) -> Path:
-        """Save everything in one .argus file: the session's recordings and the files beside
+    def save_newt(self, path: str | Path) -> Path:
+        """Save everything in one .newt file: the session's recordings and the files beside
         them (analysis included), and what's on screen. Later saves add only what changed."""
         if self.recorder.recording:
             raise session.SessionError("Stop recording before saving.")
         folder = self._export_folder()
         if folder is None or not self._export_blocks():
-            raise argusfile.ArgusError("Nothing recorded yet: there's nothing to save.")
+            raise newtfile.NewtError("Nothing recorded yet: there's nothing to save.")
         path = Path(path).resolve()
         self.save_session_files()
-        self._argus_files = argusfile.save(path, folder, self.app_state())
-        self.argus_path, self._argus_folder = path, folder
+        self._newt_files = newtfile.save(path, folder, self.app_state())
+        self.newt_path, self._newt_folder = path, folder
         self._remember(path)
         self._update_title()
         self.statusBar().showMessage(f"Saved {path.name}", 8000)
@@ -453,17 +453,17 @@ class SessionFilesMixin:
     def open_file_dialog(self):
         if not self._leave_live():
             return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open an Argus file", self._start_dir(),
-                                                        f"Argus file (*{argusfile.SUFFIX});;All files (*)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open an Newt file", self._start_dir(),
+                                                        f"Newt file (*{newtfile.SUFFIX} *.argus);;All files (*)")
         if path:
             self._try(lambda: self.open_file(path), "Could not open the file")
 
     def open_file(self, path: str | Path) -> Path:
-        """Open an .argus file: its session in review, and Argus as it was when saved."""
+        """Open an .newt file: its session in review, and Newt as it was when saved."""
         path = Path(path).resolve()
-        folder, state, files = argusfile.open_file(path, self.cfg.data_dir)
+        folder, state, files = newtfile.open_file(path, self.cfg.data_dir)
         self.open_session(folder, remember=False)
-        self.argus_path, self._argus_folder, self._argus_files = path, folder, files
+        self.newt_path, self._newt_folder, self._newt_files = path, folder, files
         self.restore_app_state(state)
         self._remember(path)
         self._update_title()
@@ -471,16 +471,16 @@ class SessionFilesMixin:
         return folder
 
     def open_requested(self, path: str) -> None:
-        """A file given to Argus to open (double-clicked, or on the command line)."""
+        """A file given to Newt to open (double-clicked, or on the command line)."""
         if self._leave_live():
-            opener = self.open_file if path.lower().endswith(argusfile.SUFFIX) else \
+            opener = self.open_file if newtfile.is_session_file(path) else \
                 self.open_mat if path.lower().endswith(".mat") else self.open_session
             self._try(lambda: opener(path), "Could not open it")
 
     def app_state(self) -> dict:
-        """What's on screen and set, for an .argus file: the tabs, Analysis, the stimulus, the
+        """What's on screen and set, for an .newt file: the tabs, Analysis, the stimulus, the
         protocol, and the simulated network."""
-        d = {"version": argusfile.VERSION, "tabs": {"shown": list(self.tabs.shown), "layout": self.tabs.layout_mode},
+        d = {"version": newtfile.VERSION, "tabs": {"shown": list(self.tabs.shown), "layout": self.tabs.layout_mode},
              "analysis": self.analysis_page.app_state(), "stimulus": self.stimulus.to_dict(),
              "protocol": self.trials_page.protocol.to_dict()}
         if self.cfg.backend == "simulated":
@@ -488,7 +488,7 @@ class SessionFilesMixin:
         return d
 
     def restore_app_state(self, d: dict) -> None:
-        """Back as an .argus file was saved. A part that can't be put back is skipped, and said."""
+        """Back as an .newt file was saved. A part that can't be put back is skipped, and said."""
         skipped = []
 
         def part(name, fn):
@@ -706,7 +706,7 @@ class SessionFilesMixin:
         self.recent_menu.addAction("Clear List", lambda: self.settings.setValue("recent_sessions", []))
 
     def open_recent(self, path: str):
-        if path.lower().endswith(argusfile.SUFFIX):
+        if newtfile.is_session_file(path):
             if not Path(path).is_file():
                 self.settings.setValue("recent_sessions", [r for r in self.recent_sessions() if r != path])
                 QtWidgets.QMessageBox.warning(self, "File not found",

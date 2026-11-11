@@ -3,4 +3,5 @@ data/
 __pycache__/
 *.egg-info/
 .venv/
+Newt.app/
 Argus.app/

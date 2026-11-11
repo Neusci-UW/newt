@@ -151,8 +151,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.measure = MeasureTool(self)
         self.canvas = ChartCanvas(self)
         self.btn_save = QtWidgets.QPushButton("Save")
-        self.btn_save.setToolTip("Save everything in one .argus file: the recordings, the spikes found and units, "
-                                 "the measure windows, and how Argus looks now, so it all comes back when it's opened")
+        self.btn_save.setToolTip("Save everything in one .newt file: the recordings, the spikes found and units, "
+                                 "the measure windows, and how Newt looks now, so it all comes back when it's opened")
         self.btn_save.clicked.connect(self.main.save)
         self.canvas.toolbar.layout().insertWidget(0, self.btn_save)
         top.addWidget(self.canvas.toolbar)
@@ -342,7 +342,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self._saved = self._digest()
 
     def app_state(self) -> dict:
-        """What Analysis shows, for an .argus file."""
+        """What Analysis shows, for an .newt file."""
         stems = self._stems()
         return {"stim_channel": self.stim_channel.currentData() or "", "current": self.index(),
                 "picked": [stems[i] for i in self.picked if i < len(stems)], "picked_pages": list(self.picked_pages),

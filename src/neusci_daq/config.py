@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import simulation
+from .colours import fill_colors
 from .dsp import Calculation
 
 # USB-6003 limits (NI spec): one multiplexed ADC, 100 kS/s aggregate,
@@ -19,51 +20,6 @@ USB6003_RANGE = (-10.0, 10.0)
 RATE_PRESETS = (100, 200, 500, 1000, 2000, 5000, 10000, 20000, 25000, 50000, 100000)
 # When the rate is changed in the app, read about this much data at a time.
 READ_INTERVAL_S = 0.05
-
-
-# Trace colours, in the order new channels get them. Based on the Okabe-Ito
-# colour-blind-safe palette, ordered so the first few are bright on black.
-PALETTE = ("#E69F00", "#56B4E9", "#009E73", "#F0E442",
-           "#D55E00", "#CC79A7", "#FFFFFF", "#3D8FD1")
-PALETTE_NAMES = ("Orange", "Sky blue", "Green", "Yellow", "Red-orange", "Pink", "White", "Blue")
-
-
-def normalize_color(c: str) -> str:
-    """'#abc', 'abcdef' or '#ABCDEF' -> '#abcdef'. Raises ValueError otherwise."""
-    h = c.strip().lstrip("#")
-    if len(h) == 3:
-        h = "".join(ch * 2 for ch in h)
-    if len(h) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in h):
-        raise ValueError(f"{c!r} isn't a colour; use #rrggbb, e.g. #e69f00.")
-    return "#" + h.lower()
-
-
-def color_label(c: str) -> str:
-    """'Orange' for palette colours, otherwise the hex code, for messages."""
-    c = normalize_color(c)
-    for p, name in zip(PALETTE, PALETTE_NAMES):
-        if normalize_color(p) == c:
-            return name.lower()
-    return c
-
-
-def next_color(used) -> str:
-    """First palette colour not already used; cycles once all are taken."""
-    used = {normalize_color(u) for u in used if u}
-    for c in PALETTE:
-        if normalize_color(c) not in used:
-            return normalize_color(c)
-    return normalize_color(PALETTE[len(used) % len(PALETTE)])
-
-
-def fill_colors(channels) -> None:
-    """Give every channel without a colour the next unused palette colour, in order."""
-    for ch in channels:
-        if ch.color:
-            ch.color = normalize_color(ch.color)
-    for ch in channels:
-        if not ch.color:
-            ch.color = next_color(c.color for c in channels)
 
 
 def auto_chunk_size(rate: float) -> int:
@@ -133,22 +89,6 @@ def valid_inputs(cfg: Config) -> list[str]:
         from . import audio
         return audio.input_names(audio.max_inputs(cfg.audio_device))
     return [f"ai{i}" for i in range(4 if cfg.terminal_config == "DIFF" else 8)]
-
-
-def use_audio_channels(cfg: Config) -> None:
-    """Switching to an audio device: its inputs (in1, in2) as the channels unless they
-    already are, at a rate it records at, and no stimulus input (it has no outputs here)."""
-    from . import audio
-    dev = audio.find(cfg.audio_device, "input")
-    n = min(2, dev["channels"]) if dev else 2
-    if not all(c.physical.startswith("in") for c in cfg.channels):
-        cfg.spare_channels = []
-        cfg.channels = [Channel(f"in{i + 1}", f"Audio {i + 1}") for i in range(n)]
-        fill_colors(cfg.channels)
-    if cfg.sample_rate not in audio.RATES:
-        cfg.sample_rate = dev["rate"] if dev else 48000.0
-    cfg.chunk_size = auto_chunk_size(cfg.sample_rate)
-    cfg.stim_monitor = ""
 
 
 def load(path: str | Path) -> Config:

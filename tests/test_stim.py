@@ -373,7 +373,7 @@ def test_stimulator_fields_show_units_but_stimulus_stays_in_volts(win):
 
 # ---------------------------------------------------------------- typed units
 def test_parse_quantity_and_unit_factor():
-    from neusci_daq.stimwindow import _same_kind, parse_quantity, unit_factor
+    from neusci_daq.units import _same_kind, parse_quantity, unit_factor
     assert unit_factor("s", "ms") == 1000 and unit_factor("us", "ms") == pytest.approx(0.001)
     assert unit_factor("mV", "V") == pytest.approx(0.001) and unit_factor("mA", "µA") == pytest.approx(1000)
     assert unit_factor("V", "ms") is None

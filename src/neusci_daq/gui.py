@@ -73,6 +73,7 @@ from .membranepage import MembranePage   # imports QtWebEngine, which must come 
 from .stimwindow import StimPage
 from .trialspage import TrialsPage
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
+from . import colours
 
 LIVE, REVIEW = "live", "review"
 _SI_BASE = {"V", "A", "s", "Hz", "Ω", "ohm", "N", "Pa", "W", "m", "g", "T"}
@@ -169,7 +170,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._block_on_screen = False      # is the last block's data in this run?
         self._popup = None
         # The channel setup the user edits in the strips next to each plot.
-        cfgmod.fill_colors(cfg.channels + cfg.spare_channels)
+        colours.fill_colors(cfg.channels + cfg.spare_channels)
         self.rows = [ChannelRow(c) for c in cfg.channels + cfg.spare_channels]
 
         # Stimulator
@@ -715,7 +716,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._calcs = [(c, f, f"Can't calculate: {why}" if why else "")
                        for c, f, why in zip(self._chain.calcs, self._chain.formulas, self._chain.problems)]
         for k, (c, f, problem) in enumerate(self._calcs):
-            color = cfgmod.PALETTE[(len(names) + k) % len(cfgmod.PALETTE)]
+            color = colours.PALETTE[(len(names) + k) % len(colours.PALETTE)]
             pw = self._new_plot(c.name, c.unit, color, 1.0)
             if live:
                 row = ChannelRowWidget(CalcStrip(c.name, c.formula, problem,
@@ -906,7 +907,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_curve_color(self, k: int, color: str) -> None:
         """Draw trace k in `color` (adjusted for contrast on the current background)."""
         self.curve_colors[k] = color
-        self.curves[k].setPen(pg.mkPen(theme.display_color(color, self.plot_mode), width=self.curve_widths[k]))
+        self.curves[k].setPen(pg.mkPen(colours.display_color(color, self.plot_mode), width=self.curve_widths[k]))
 
     def _channel_width(self, strip: ChannelStrip, width: float) -> None:
         self.set_channel_width(self.rows.index(strip.row), width)
@@ -1076,7 +1077,7 @@ class MainWindow(QtWidgets.QMainWindow):
         n = len(self.rows) + 1
         while f"Ch{n}" in names:
             n += 1
-        color = cfgmod.next_color(r.ch.color for r in self.rows)
+        color = colours.next_color(r.ch.color for r in self.rows)
         return self.apply_channels(self._copy_rows() + [ChannelRow(Channel(free[0], f"Ch{n}", color=color))])
 
     # -- colours (display only: allowed while recording, never restarts) ----
@@ -1090,7 +1091,7 @@ class MainWindow(QtWidgets.QMainWindow):
         this channel, asks whether to recolour them too (or uses
         `recolor_recorded` if given). The block being recorded always follows.
         """
-        color = cfgmod.normalize_color(color)
+        color = colours.normalize_color(color)
         ch = self.rows[index].ch
         ch.color = color
         strip = self.strips[index] if index < len(self.strips) else None
@@ -1114,7 +1115,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if recolor_recorded:
                 self._recolor(older, {ch.name: color})
                 return
-        self.statusBar().showMessage(f"{ch.name}: colour {cfgmod.color_label(color)}", 6000)
+        self.statusBar().showMessage(f"{ch.name}: colour {colours.color_label(color)}", 6000)
 
     def _block_color(self, block: Path, name: str) -> str | None:
         """Colour of channel `name` in a recorded block, or None if it isn't there."""
@@ -1151,7 +1152,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Recolour one channel in every block of the session being reviewed."""
         if self.mode != REVIEW or self.review_block is None:
             return
-        color = cfgmod.normalize_color(color)
+        color = colours.normalize_color(color)
         name = self.review_block["channel_names"][index]
         self.review_block["colors"][index] = color
         self._set_curve_color(index, color)
@@ -1656,7 +1657,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "Channels are matched by name, so don't rename a channel while appending.",
         ]
         used = session.session_colors(path)
-        changed = [f"{r.ch.name} → {cfgmod.color_label(used[r.ch.name])}" for r in self.rows
+        changed = [f"{r.ch.name} → {colours.color_label(used[r.ch.name])}" for r in self.rows
                    if r.ch.name in used and used[r.ch.name] != r.ch.color]
         if changed:
             notes.append("To match the session, these channels will switch colour: " + ", ".join(changed) + ".")
@@ -2753,7 +2754,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if any(r.ch.name == "Stim" for r in rows):
                 self._channel_message("Another channel is already named Stim; rename it first.")
                 return False
-            color = cfgmod.next_color(r.ch.color for r in rows)
+            color = colours.next_color(r.ch.color for r in rows)
             rows.append(ChannelRow(Channel(phys, "Stim", units="V", color=color)))
         # an existing channel just becomes the stimulus channel: no restart unless one goes away
         same = [(r.ch.physical, r.ch.name) for r in rows] == [(r.ch.physical, r.ch.name) for r in self.rows]
@@ -3183,7 +3184,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "channels": [dataclasses.asdict(c) for c in cfg.channels], "sample_rate": cfg.sample_rate}))
         cfg.backend, cfg.audio_device = backend, device
         if backend == "audio":
-            cfgmod.use_audio_channels(cfg)
+            from . import audio
+            audio.use_audio_channels(cfg)
         elif self.cfg.backend == "audio":
             saved = json.loads(self.settings.value("daq_setup", "") or "{}")
             chans = [Channel(**{k: (tuple(v) if k == "range" else v) for k, v in c.items()})
@@ -3191,7 +3193,7 @@ class MainWindow(QtWidgets.QMainWindow):
             cfg.channels = chans or [Channel("ai0", "Ch1"), Channel("ai1", "Ch2")]
             cfg.sample_rate = float(saved.get("sample_rate", 20000))
             cfg.chunk_size = cfgmod.auto_chunk_size(cfg.sample_rate)
-            cfgmod.fill_colors(cfg.channels)
+            colours.fill_colors(cfg.channels)
         try:
             cfgmod.validate(cfg)
         except ValueError as e:

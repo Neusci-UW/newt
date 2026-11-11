@@ -24,7 +24,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from .config import next_color, normalize_color
+from .colours import next_color, normalize_color
 from .recorder import _COMMENT_DT
 
 MARKER = "imported_from.json"

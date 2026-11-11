@@ -11,11 +11,12 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
-from . import config as cfgmod
 from . import simulation as sim
 from . import style, theme
-from .stimwindow import UnitSpinBox, _same_kind, parse_quantity
+from .unitbox import UnitSpinBox
+from .units import _same_kind, parse_quantity
 from .viewkit import scroll_column
+from . import colours
 
 # Cells table: (heading, Cell field, unit, tooltip)
 _CELL_COLUMNS = (
@@ -493,7 +494,7 @@ class SimPage(QtWidgets.QWidget):
         cap.setPos(stim_at[0], stim_at[1] - 0.14)
         d.addItem(cap)
         d.addItem(pg.ScatterPlotItem(pos[:, 0], pos[:, 1], size=46, pen=pg.mkPen(th.foreground, width=2),
-                                     brush=pg.mkBrush(cfgmod.PALETTE[1])))
+                                     brush=pg.mkBrush(colours.PALETTE[1])))
         for i in range(n):
             label = pg.TextItem(str(i + 1), color="#000000", anchor=(0.5, 0.5))
             label.setPos(*pos[i])

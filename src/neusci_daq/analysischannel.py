@@ -16,7 +16,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import dsp
 from .plotzoom import TraceCurve, plot_widget
-from .stimwindow import UnitSpinBox
+from .unitbox import UnitSpinBox
 from .units import unit_factor
 
 # setting: (label, default, unit shown, tooltip)

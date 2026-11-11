@@ -28,7 +28,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
 from . import analysisfile
-from . import colormaps as cm
+from . import colours
 from . import dsp
 from . import pages
 from . import style
@@ -38,9 +38,9 @@ from .channels import ColorButton
 from .datapadview import DataPadView
 from .helpview import add_help
 from .stim import Stimulus
-from .stimwindow import UnitSpinBox
+from .unitbox import UnitSpinBox
 from .units import best_prefix
-from .viewkit import View, scroll_column, shrink_combos, unit_color
+from .viewkit import View, scroll_column, shrink_combos
 
 
 class AnalysisPage(QtWidgets.QWidget):
@@ -113,12 +113,12 @@ class AnalysisPage(QtWidgets.QWidget):
                                    "across the trials (trials or stimuli) it's made of")
         self.spread_box.currentIndexChanged.connect(lambda *_: self.spread_changed())
         self.page_map = QtWidgets.QComboBox()
-        self.page_map.addItems(cm.PAGE_STYLES)
+        self.page_map.addItems(colours.PAGE_STYLES)
         self.page_map.setToolTip("Colours every group at once. Palette: a different colour each; a colour map: "
                                  "from the first group to the last. A colour you give a group (right-click it) "
                                  "stays. Saved with the session")
         self.trial_map = QtWidgets.QComboBox()
-        self.trial_map.addItems(cm.TRIAL_STYLES)
+        self.trial_map.addItems(colours.TRIAL_STYLES)
         self.trial_map.setToolTip("How a group's trials are drawn. Solid: all in the group's colour; Opacity: "
                                   "faint to solid, first to last; a colour map: across its colours, first to "
                                   "last. Saved with the session")
@@ -719,12 +719,11 @@ class AnalysisPage(QtWidgets.QWidget):
         given = looks["colors"].get(names[g]) if g < len(names) else None
         if given:
             return given
-        if looks["page_map"] in cm.MAPS:           # across the pages left showing
+        if looks["page_map"] in colours.MAPS:           # across the pages left showing
             left = [n for n in names if n not in looks["hidden_groups"]]
             place = left.index(names[g]) if g < len(names) and names[g] in left else g
-            return cm.sample(looks["page_map"], place / max(1, len(left) - 1)).name()
-        palette = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#999999")
-        return palette[g % len(palette)]
+            return colours.sample(looks["page_map"], place / max(1, len(left) - 1)).name()
+        return colours.group_color(g)
 
     def plan(self, chosen: list[int], picked: list[int] | None = None, pages_picked: list[str] | None = None
              ) -> tuple[list[tuple[int, str, list[int]]], list[int]]:
@@ -754,13 +753,13 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def trial_colors(self, blocks: list[int]) -> dict[int, QtGui.QColor]:
         """How each of these trials is drawn: in order within its page, by the Trials setting."""
-        style_ = self._looks["trial_map"] or cm.SOLID
+        style_ = self._looks["trial_map"] or colours.SOLID
         out: dict[int, QtGui.QColor] = {}
         for g, (_, members) in enumerate(self.shown):
             rows = [i for i in blocks if i in members]
-            out.update(zip(rows, cm.spread(style_, self.group_color(g), len(rows))))
+            out.update(zip(rows, colours.spread(style_, self.group_color(g), len(rows))))
         rest = [i for i in blocks if i not in out]
-        out.update(zip(rest, cm.spread(style_, self.group_color(0), len(rest))))
+        out.update(zip(rest, colours.spread(style_, self.group_color(0), len(rest))))
         return out
 
     def group_of(self, i: int) -> int | None:
@@ -1183,7 +1182,7 @@ class SpikeFinder(View):
 
     def color_of(self, u: int) -> str:
         """Unit u's colour (0-based): the one picked for it, else its place in the palette."""
-        return self.unit_colors.get(int(u), unit_color(u))
+        return self.unit_colors.get(int(u), colours.unit_color(u))
 
     def opacity_of(self, u: int) -> float:
         return self.unit_opacity.get(int(u), 1.0)

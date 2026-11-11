@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
-from .config import PALETTE, PALETTE_NAMES, Channel, normalize_color
+from .colours import PALETTE, PALETTE_NAMES, normalize_color
+from .config import Channel
 
 STRIP_WIDTH = 180
 OFF_COLOR = "#9aa0a6"

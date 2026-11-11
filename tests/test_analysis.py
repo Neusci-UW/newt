@@ -4,7 +4,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pytest
 
 from neusci_daq import analysis as A
-from neusci_daq import pages, colormaps as cm, pages, session, simulation as sim
+from neusci_daq import colours as cm, pages, session, simulation as sim
 from neusci_daq.channels import ColorButton
 from neusci_daq.gui import REVIEW
 from neusci_daq.canvas import KINDS

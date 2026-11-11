@@ -14,7 +14,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from .config import Config, PALETTE, normalize_color
+from .colours import PALETTE, normalize_color
+from .config import Config
 
 _BLOCK_RE = re.compile(r"block_(\d+)\.h5")
 # Device-coerced rates differ slightly from the requested rate.

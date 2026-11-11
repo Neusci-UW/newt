@@ -8,11 +8,11 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
-from . import config as cfgmod
 from .chartbase import Chart, dot_size
 from .plotzoom import OverlayCurve, TraceCurve, plot_widget
-from .stimwindow import UnitSpinBox
+from .unitbox import UnitSpinBox
 from .viewkit import label_axis
+from . import colours
 
 MAX_WAVES = 150                    # per unit in the waveform plot
 MAX_MARKED = 2000                  # spikes drawn over the blocks when a unit is highlighted
@@ -386,7 +386,7 @@ class RasterChart(SpikeChart):
 
     def apply_theme(self, mode: str) -> None:
         super().apply_theme(mode)
-        band = QtGui.QColor(cfgmod.PALETTE[1])
+        band = QtGui.QColor(colours.PALETTE[1])
         band.setAlpha(45)
         self.cur_band.setBrush(pg.mkBrush(band))
         for line in self.cur_band.lines:

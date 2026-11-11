@@ -2,14 +2,15 @@
 from pyqtgraph.Qt import QtCore, QtGui
 
 from neusci_daq import config, theme
-from neusci_daq.config import PALETTE
+from neusci_daq import colours
+from neusci_daq.colours import PALETTE
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
 from test_colors import pen_hex, record_block
 
 
 def contrast(a: str, b: str) -> float:
-    la, lb = theme._luminance(QtGui.QColor(a)), theme._luminance(QtGui.QColor(b))
+    la, lb = colours._luminance(QtGui.QColor(a)), colours._luminance(QtGui.QColor(b))
     hi, lo = max(la, lb), min(la, lb)
     return (hi + 0.05) / (lo + 0.05)
 
@@ -39,13 +40,13 @@ def test_choice_is_remembered(win, tmp_path, app):
 
 def test_every_palette_colour_is_visible_on_both_backgrounds():
     for c in PALETTE:
-        assert contrast(theme.display_color(c, theme.LIGHT), "#ffffff") >= 3, c
-        assert contrast(theme.display_color(c, theme.DARK), "#000000") >= 3, c
-    assert contrast(theme.display_color("#000000", theme.DARK), "#000000") >= 3
+        assert contrast(colours.display_color(c, theme.LIGHT), "#ffffff") >= 3, c
+        assert contrast(colours.display_color(c, theme.DARK), "#000000") >= 3, c
+    assert contrast(colours.display_color("#000000", theme.DARK), "#000000") >= 3
 
 
 def test_dark_colours_are_left_alone_on_black():
-    assert theme.display_color("#e69f00", theme.DARK) == "#e69f00"
+    assert colours.display_color("#e69f00", theme.DARK) == "#e69f00"
 
 
 def test_light_mode_changes_drawing_not_the_saved_colour(app, win):

@@ -25,10 +25,11 @@ from . import datapad as D
 from . import fitting as FIT
 from . import style, theme
 from .plotzoom import MultiAxis, TraceCurve, plot_widget
-from .stimwindow import UnitSpinBox
+from .unitbox import UnitSpinBox
 from .units import best_prefix
 from .helpview import add_help
-from .viewkit import View, label_axis, shrink_combos, style_plot, unit_color
+from .viewkit import View, label_axis, shrink_combos, style_plot
+from . import colours
 
 SOURCES = (("The highlighted trial", "current"), ("Each chosen trial", "blocks"),
            ("Each stimulus group's average trace", "avg"),
@@ -250,7 +251,7 @@ class DataPadView(View):
         self.legend.clear()
         for k, n in enumerate(names):
             b = QtWidgets.QCheckBox(n)
-            color = unit_color(k)
+            color = colours.unit_color(k)
             b.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: 600; }}")
             b.setChecked(n in was if was & set(names) else k == 0)
             b.toggled.connect(lambda *_: self.redraw())

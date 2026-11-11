@@ -8,13 +8,12 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
-from . import colormaps as cm
-from . import config as cfgmod
+from . import colours
 from . import style, theme
 from .chartbase import Chart, dot_size
 from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, plot_widget
 from .spikecharts import draw_band
-from .stimwindow import UnitSpinBox
+from .unitbox import UnitSpinBox
 from .viewkit import label_axis, style_plot, with_unit
 
 SERIES = (("V", 0), ("dV/dt", 1), ("d²V/dt²", 2))
@@ -160,7 +159,7 @@ class TracesChart(Chart):
             return
         n = max(len(y) for s in series for y in s[2].values())
         th = theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT]
-        colors = [cfgmod.PALETTE[(k + 1) % len(cfgmod.PALETTE)] for k in range(len(series))]
+        colors = [colours.PALETTE[(k + 1) % len(colours.PALETTE)] for k in range(len(series))]
         overlaid = self.layout_mode.currentData() == "overlaid"
         if overlaid:
             pw = plot_widget()
@@ -526,7 +525,7 @@ class CycleChart(Chart):
         self.cycle_each.setToolTip("Draw every cycle behind the average")
         self.field("each", "", self.cycle_each)
         self.cycle_map = QtWidgets.QComboBox()
-        self.cycle_map.addItems(cm.TRIAL_STYLES)
+        self.cycle_map.addItems(colours.TRIAL_STYLES)
         self.cycle_map.setCurrentText("Viridis")
         self.cycle_map.setToolTip("How to colour the cycles, from the first of a trial to the last: a colour "
                                   "map shows how the response changes through the stimulus")
@@ -556,7 +555,7 @@ class CycleChart(Chart):
         return cycles, sets + [(f"Trial {k + 1}", QtGui.QColor(colors[k].rgb()), [k]) for k in trials]
 
     def _shades(self, color: QtGui.QColor, number: np.ndarray) -> list:
-        shades = cm.spread(self.cycle_map.currentText(), color, int(number.max()) + 1)
+        shades = colours.spread(self.cycle_map.currentText(), color, int(number.max()) + 1)
         for c in shades:
             c.setAlpha(min(c.alpha(), 150))
         return shades

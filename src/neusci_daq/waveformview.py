@@ -10,7 +10,7 @@ from pyqtgraph.Qt import QtGui, QtWidgets
 from . import analysis as A
 from .chartbase import Chart
 from .plotzoom import plot_widget
-from .stimwindow import UnitSpinBox
+from .unitbox import UnitSpinBox
 from .viewkit import label_axis
 
 MAX_SHOWN = 150                    # spikes of each unit drawn behind its average

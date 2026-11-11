@@ -112,7 +112,7 @@ def test_resample_carries_on_across_chunks():
 
 def test_an_audio_device_is_an_input_with_channels_in1_in2(sd):
     cfg = config.Config(backend="audio", audio_device="Fake", channels=[config.Channel("ai0", "Ch1")])
-    config.use_audio_channels(cfg)
+    audio.use_audio_channels(cfg)
     config.validate(cfg)
     assert [c.physical for c in cfg.channels] == ["in1", "in2"] and cfg.sample_rate == 48000
     assert config.valid_inputs(cfg) == ["in1", "in2"]

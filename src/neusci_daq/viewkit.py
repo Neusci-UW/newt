@@ -6,7 +6,6 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-from . import config as cfgmod
 from . import style, theme
 from .units import best_prefix
 
@@ -145,10 +144,6 @@ def show_scale_bar(pw: pg.PlotWidget, on: bool, color, y_unit: str | None = None
     p.layout.setContentsMargins(*((BAR_LEFT, 1, 1, BAR_BOTTOM if x_unit else 10) if on else (1, 1, 1, 1)))
     if on and (y_unit or x_unit):
         p._scale_bar = ScaleBar(p, y_unit, x_unit, color, *([old.gap] if old is not None else []))
-
-
-def unit_color(u: int) -> str:
-    return cfgmod.PALETTE[u % len(cfgmod.PALETTE)]
 
 
 def style_plot(pw: pg.PlotWidget, th) -> None:

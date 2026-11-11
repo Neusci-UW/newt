@@ -20,6 +20,7 @@ import time
 
 import numpy as np
 
+from . import colours, config
 from .backends import Backend, Chunk
 
 try:
@@ -241,3 +242,18 @@ class Player:
             self._t0 = None
             return None
         return p
+
+
+def use_audio_channels(cfg) -> None:
+    """Switching to an audio device: its inputs (in1, in2) as the channels unless they
+    already are, at a rate it records at, and no stimulus input (it has no outputs here)."""
+    dev = find(cfg.audio_device, "input")
+    n = min(2, dev["channels"]) if dev else 2
+    if not all(c.physical.startswith("in") for c in cfg.channels):
+        cfg.spare_channels = []
+        cfg.channels = [config.Channel(f"in{i + 1}", f"Audio {i + 1}") for i in range(n)]
+        colours.fill_colors(cfg.channels)
+    if cfg.sample_rate not in RATES:
+        cfg.sample_rate = dev["rate"] if dev else 48000.0
+    cfg.chunk_size = config.auto_chunk_size(cfg.sample_rate)
+    cfg.stim_monitor = ""

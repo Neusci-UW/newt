@@ -1,8 +1,7 @@
 """Dark or light plot backgrounds, and the moon/sun toggle icon.
 
 Only the plots change; the rest of the window follows the operating system.
-Trace colours are stored as chosen, but very light ones (white, yellow) are
-drawn darker on a white background so they stay visible.
+How a trace's colour is kept visible on either is in colours.py.
 """
 from __future__ import annotations
 
@@ -24,27 +23,6 @@ THEMES = {
     DARK: Theme(background="#000000", foreground="#c8c8c8", marker="#ffff00"),
     LIGHT: Theme(background="#ffffff", foreground="#303030", marker="#c05000"),
 }
-
-
-def _luminance(c: QtGui.QColor) -> float:
-    """Relative luminance (0 = black, 1 = white), as used for contrast ratios."""
-    def lin(v):
-        v /= 255
-        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
-    return 0.2126 * lin(c.red()) + 0.7152 * lin(c.green()) + 0.0722 * lin(c.blue())
-
-
-def display_color(color: str, mode: str) -> str:
-    """The colour to draw a trace in. On white, too-light colours are darkened
-    until they reach about 3:1 contrast; on black, too-dark ones are lightened."""
-    c = QtGui.QColor(color)
-    if mode == LIGHT:
-        while _luminance(c) > 0.30:            # (1.05)/(L+0.05) >= 3
-            c = c.darker(115)
-    else:
-        while _luminance(c) < 0.02 and c.lightness() < 250:   # pure black etc.
-            c = c.lighter(150) if c.lightness() else QtGui.QColor("#606060")
-    return c.name()
 
 
 def _draw_symbol(p: QtGui.QPainter, rect: QtCore.QRectF, mode: str, ink: QtGui.QColor) -> None:

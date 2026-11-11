@@ -32,7 +32,8 @@ def main(argv=None):
     if args.backend:
         cfg.backend = args.backend
         if cfg.backend == "audio":
-            config.use_audio_channels(cfg)
+            from . import audio
+            audio.use_audio_channels(cfg)
         config.validate(cfg)
     from .gui import run
     return run(cfg, config_path=args.config, open_path=args.file)

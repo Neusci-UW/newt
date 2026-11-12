@@ -7,7 +7,7 @@ amcam.dll, which AmScope's software installs, or toupcam.dll from ToupTek's Toup
 Both have the same functions, named Amcam_… or Toupcam_….
 
 Where the library is looked for, in order:
-  the NEWT_CAMERA_SDK environment variable (the full path of amcam.dll or toupcam.dll)
+  the NEWT_CAMERA_SDK environment variable (or ARGUS_CAMERA_SDK, its name before the rename) (the full path of amcam.dll or toupcam.dll)
   C:\\Program Files\\AmScope\\AmScope\\x64\\amcam.dll (or x86, for 32-bit Python)
   C:\\Program Files\\ToupTek\\ToupView\\x64\\toupcam.dll
   amcam / toupcam on the library path (libamcam.so, libtoupcam.dylib, …)

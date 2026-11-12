@@ -57,9 +57,36 @@ LONG_PROTOCOL_S = 600     # warn above 10 minutes
 MATCH_THRESHOLD = 0.6     # how closely the recorded stimulus must match the one sent (0–1)
 
 
-def setting_info(shape: str, key: str) -> tuple[str, str]:
+# With a second output, `shape` is (first shape, second shape, first output, second
+# output), e.g. ("pulse", "step", "ao0", "ao1"), and the second output's settings are
+# named after it: "ao1:amplitude_v". Plain names are the first output's, as before, so
+# protocols saved with one output still load.
+Shape = "str | tuple[str, str, str, str]"
+
+
+def split_key(key: str) -> tuple[str, str]:
+    """('ao1', 'amplitude_v') for the second output's setting; ('', key) for the first's."""
+    out, sep, base = key.partition(":")
+    return (out, base) if sep else ("", key)
+
+
+def settings_of(shape) -> list[tuple[str, str, str]]:
+    """The settings that can be stepped: (key, label, unit). With two outputs, both
+    outputs' settings, each label saying which output, e.g. 'ao1 · Level'."""
+    if isinstance(shape, str):
+        return SETTINGS.get(shape, [])
+    s1, s2, o1, o2 = shape
+    return ([(k, f"{o1} · {label}", u) for k, label, u in SETTINGS.get(s1, [])]
+            + [(f"{o2}:{k}", f"{o2} · {label}", u) for k, label, u in SETTINGS.get(s2, [])])
+
+
+def default_range(key: str) -> tuple[float, float, float]:
+    return DEFAULT_RANGES.get(split_key(key)[1], (1, 5, 1))
+
+
+def setting_info(shape, key: str) -> tuple[str, str]:
     """(label, unit) of a setting."""
-    for k, label, unit in SETTINGS.get(shape, []) + [("scale", "Scale", "×")]:
+    for k, label, unit in settings_of(shape) + [("scale", "Scale", "×")]:
         if k == key:
             return label, unit
     return key, ""
@@ -207,23 +234,66 @@ def apply(s: Stimulus, key: str, value: float) -> tuple[Stimulus, float]:
     return replace(s, **{key: float(value)}), 1.0
 
 
-def trial_stimulus(s: Stimulus, p: Protocol, a: float, b: float | None) -> Stimulus:
-    """The stimulus of one trial, for saving with the block (its overall size aside)."""
-    s = apply(s, p.a.key, a)[0]
-    return apply(s, p.b.key, b)[0] if p.b is not None and b is not None else s
+@dataclass
+class TrialWave:
+    """What one trial sends."""
+    channels: list[str]           # the outputs, in the order of the wave's rows
+    wave: np.ndarray              # 1-D for one output, one row per output for two
+    first: np.ndarray             # the first output's waveform: what's recorded and lined up on
+    delay_ms: float               # the first output's delay, rounded to output samples
+    stimulus: Stimulus            # each output's stimulus with a (and b) applied
+    stimulus2: Stimulus | None
+
+
+def applied(s: Stimulus, p: Protocol, a: float, b: float | None, s2: Stimulus | None = None
+            ) -> tuple[Stimulus, float, Stimulus | None, float]:
+    """(first output's stimulus, its scale, second's, its scale) with a and b applied, each
+    to whichever output's setting it steps. Raises ValueError."""
+    k1 = k2 = 1.0
+    for var, v in ((p.a, a), (p.b, b)):
+        if var is None or v is None:
+            continue
+        out, base = split_key(var.key)
+        if out:
+            if s2 is None:
+                raise ValueError(f"This steps a setting of {out}, which isn't in use: add it on the "
+                                 "Stimulator, or pick another setting.")
+            s2, k = apply(s2, base, v)
+            k2 *= k
+        else:
+            s, k = apply(s, base, v)
+            k1 *= k
+    return s, k1, s2, k2
+
+
+def make_trial(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float,
+               s2: Stimulus | None = None, outs: tuple[str, str] = ("ao0", "ao1")) -> TrialWave:
+    """One trial's waveforms: a and b applied to whichever output's setting each
+    steps. `s2` is the second output's stimulus, on outs[1]. Raises ValueError."""
+    s, k1, s2, k2 = applied(s, p, a, b, s2)
+    first = s.waveform(rate) * k1
+    waves = {outs[0]: first}
+    if s2 is not None:
+        waves[outs[1]] = s2.waveform(rate) * k2
+    chans, wave = stimmod.combine(waves)
+    return TrialWave(chans, wave, first, stimmod.samples(s.delay_ms, rate) * 1000.0 / rate, s, s2)
+
+
+def output_wave(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float,
+                s2: Stimulus | None = None, second: bool = False) -> np.ndarray:
+    """One output's waveform for one trial (the second's if `second`): for previews,
+    which show one output, without building the other. Raises ValueError."""
+    s, k1, s2, k2 = applied(s, p, a, b, s2)
+    return s2.waveform(rate) * k2 if second else s.waveform(rate) * k1
 
 
 def make_wave(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float) -> tuple[np.ndarray, float]:
-    """(waveform, delay in ms) for one trial. Raises ValueError."""
-    s, scale_a = apply(s, p.a.key, a)
-    scale_b = 1.0
-    if p.b is not None and b is not None:
-        s, scale_b = apply(s, p.b.key, b)
-    wave = s.waveform(rate) * (scale_a * scale_b)
-    return wave, stimmod.samples(s.delay_ms, rate) * 1000.0 / rate
+    """(waveform, delay in ms) for one trial on one output. Raises ValueError."""
+    t = make_trial(s, p, a, b, rate)
+    return t.wave, t.delay_ms
 
 
-def describe(p: Protocol, shape: str, a: float, b: float | None) -> str:
+def describe(p: Protocol, shape, a: float, b: float | None) -> str:
     """'a = 1.5 V, b = 0.4 ms' for comments and the chip."""
     la, ua = setting_info(shape, p.a.key)
     out = f"a = {fmt(a, ua)}"
@@ -248,16 +318,25 @@ class Check:
         return not self.errors
 
 
-def check(p: Protocol, s: Stimulus, rate: float, max_v: float) -> Check:
-    """Everything that would stop a protocol, found before it starts."""
+def check(p: Protocol, s: Stimulus, rate: float, max_v: float, s2: Stimulus | None = None,
+          outs: tuple[str, str] = ("ao0", "ao1")) -> Check:
+    """Everything that would stop a protocol, found before it starts. `s2`: the second
+    output's stimulus, on outs[1]."""
     c = Check()
-    keys = {k for k, _, _ in SETTINGS.get(s.shape, [])}
+    shape = s.shape if s2 is None else (s.shape, s2.shape, *outs)
+    keys = {k for k, _, _ in settings_of(shape)}
     for name, var in (("a", p.a), ("b", p.b)):
         if var is None:
             continue
         if var.key not in keys:
-            c.errors.append(f"{name}: {setting_info(s.shape, var.key)[0]} isn't a setting of a "
-                            f"{stimmod.SHAPES.get(s.shape, s.shape).lower()} stimulus.")
+            out, base = split_key(var.key)
+            if out and (s2 is None or out != outs[1]):
+                c.errors.append(f"{name}: steps a setting of {out}, which isn't in use. Add it on the "
+                                "Stimulator, or pick another setting.")
+            else:
+                which = s2 if out else s
+                c.errors.append(f"{name}: {setting_info(which.shape, base)[0]} isn't a setting of a "
+                                f"{stimmod.SHAPES.get(which.shape, which.shape).lower()} stimulus.")
             continue
         try:
             vals = var.values()
@@ -268,7 +347,7 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float) -> Check:
             c.a_vals = vals
         else:
             c.b_vals = vals
-        if var.key in TIME_SETTINGS:              # values the output can't tell apart
+        if split_key(var.key)[1] in TIME_SETTINGS:      # values the output can't tell apart
             got: dict[int, float] = {}
             for v in vals:
                 k = stimmod.samples(v, rate)
@@ -289,17 +368,42 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float) -> Check:
     if c.n_trials > MAX_TRIALS:
         c.errors.append(f"{c.n_trials} stimuli is too many (the most is {MAX_TRIALS}).")
         return c
+    # Each output's peak and length. A stimulus that several trials share (all of ao0's,
+    # when a only steps ao1) is built once: this runs on every edit on the Protocols page.
+    built: dict[str, tuple[float, int] | ValueError] = {}
+
+    def measure(st: Stimulus) -> tuple[float, int]:
+        key = json.dumps(st.to_dict(), sort_keys=True)
+        if key not in built:
+            try:
+                w = st.waveform(rate)
+                built[key] = (float(np.max(np.abs(w))) if w.size else 0.0, len(w))
+            except ValueError as e:
+                built[key] = e
+        got = built[key]
+        if isinstance(got, ValueError):
+            raise got
+        return got
+
     bad = []
     for b in (c.b_vals or [None]):
         for a in c.a_vals:
             try:
-                wave, _ = make_wave(s, p, a, b, rate)
-                stimmod.check_limit(wave, max_v)
+                s1, k1, t2, k2 = applied(s, p, a, b, s2)
+                streams = [(outs[0], s1, k1)] + ([(outs[1], t2, k2)] if t2 is not None else [])
+                peak, n = 0.0, 0
+                for out, st, k in streams:
+                    try:
+                        pk, m = measure(st)
+                    except ValueError as e:
+                        raise ValueError(f"{out}: {e}" if len(streams) > 1 else str(e)) from None
+                    peak, n = max(peak, pk * abs(k)), max(n, m)
+                stimmod.check_limit(np.array([peak]), max_v)
             except ValueError as e:
-                bad.append(f"{describe(p, s.shape, a, b)}: {e}")
+                bad.append(f"{describe(p, shape, a, b)}: {e}")
                 continue
-            c.peak_v = max(c.peak_v, float(np.max(np.abs(wave))) if wave.size else 0.0)
-            c.longest_s = max(c.longest_s, len(wave) / rate)
+            c.peak_v = max(c.peak_v, peak)
+            c.longest_s = max(c.longest_s, n / rate)
     if bad:
         c.errors += bad[:3] + ([f"…and {len(bad) - 3} more."] if len(bad) > 3 else [])
         return c

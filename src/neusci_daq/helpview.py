@@ -110,7 +110,7 @@ def _spike_sorting_picture() -> QtGui.QPixmap:
                    d.fg, 0.8, 90)
     peak = d.xs[1] + 12 + (0 - t[0]) / np.ptp(t) * (w - 24)
     d.dashed(peak, 8, peak, ph - 8, d.muted, QtCore.Qt.PenStyle.DotLine)
-    # 3 and 4: the same points, then in their units with k-means' centeres
+    # 3 and 4: the same points, then in their units with k-means' centers
     a = np.clip(rng.normal((-0.5, 0.25), (0.14, 0.13), (40, 2)), -0.8, 0.6)
     b = np.clip(rng.normal((0.5, -0.25), (0.14, 0.13), (40, 2)), -0.6, 0.8)
     for k, (ca, cb) in ((2, (d.fg, d.fg)), (3, (U1, U2))):
@@ -247,7 +247,7 @@ TOPICS = {
             ("Units", "How many groups to sort spikes into. Auto picks the number that separates best."),
             ("Unit", "A group of spikes with the same shape, likely from one cell."),
             ("Principal components", "The main ways the spike shapes differ. NEWT uses the first 3."),
-            ("k-means", "Groups points around k centeres (the × marks), each point joining its nearest."),
+            ("k-means", "Groups points around k centers (the × marks), each point joining its nearest."),
         ),
     },
     "comparison": {

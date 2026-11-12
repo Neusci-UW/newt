@@ -75,7 +75,7 @@ def test_lesson_only_uses_what_its_page_offers(path):
         assert re.search(rf"\b{re.escape(k)}:", adapter), k
 
 
-def test_argus_saves_lessons_into_the_lessons_folder(tmp_path, monkeypatch):
+def test_newt_saves_lessons_into_the_lessons_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(membranepage, "LESSONS", tmp_path / "lessons")
     bridge = membranepage.LessonBridge()
     text = 'ArgusLesson.define({"id": "intro", "questions": [], "regions": []});\n'
@@ -84,7 +84,7 @@ def test_argus_saves_lessons_into_the_lessons_folder(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("name", ["../escape", "Intro", "a b", "", "x" * 65, "intro.js"])
-def test_argus_refuses_lesson_names_outside_the_folder(tmp_path, monkeypatch, name):
+def test_newt_refuses_lesson_names_outside_the_folder(tmp_path, monkeypatch, name):
     monkeypatch.setattr(membranepage, "LESSONS", tmp_path)
     assert membranepage.LessonBridge().save(name, "ArgusLesson.define({});") != ""
     assert not any(tmp_path.iterdir())
@@ -99,7 +99,7 @@ def wait_for(app, ok, s=20.0):
 
 
 @pytest.mark.skipif(not membranepage.available(), reason="needs PyQt6-WebEngine")
-def test_the_page_in_argus_offers_the_editor_and_saves_through_it(app, tmp_path, monkeypatch):
+def test_the_page_in_newt_offers_the_editor_and_saves_through_it(app, tmp_path, monkeypatch):
     monkeypatch.setattr(membranepage, "LESSONS", tmp_path)
     page = membranepage.MembranePage()
     page.resize(1200, 800)
@@ -128,7 +128,7 @@ def test_the_page_in_argus_offers_the_editor_and_saves_through_it(app, tmp_path,
         page.close()
 
 
-def test_argus_saves_only_lesson_files(tmp_path, monkeypatch):
+def test_newt_saves_only_lesson_files(tmp_path, monkeypatch):
     monkeypatch.setattr(membranepage, "LESSONS", tmp_path)
     assert membranepage.LessonBridge().save("intro", "alert('hi')") != ""
     assert not any(tmp_path.iterdir())

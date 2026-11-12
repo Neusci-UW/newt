@@ -91,9 +91,9 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # Live session: each Record press is one block, like LabChart.
         self.session_dir: Path | None = None
         self.session_saved = False   # False while it lives in data/unsaved/
-        self.argus_path: Path | None = None       # the .newt file this session was saved in or opened from
-        self._argus_folder: Path | None = None    # ...for this session folder
-        self._argus_files: dict | None = None     # what the folder held when it was saved (argusfile.files_of)
+        self.newt_path: Path | None = None       # the .newt file this session was saved in or opened from
+        self._newt_folder: Path | None = None    # ...for this session folder
+        self._newt_files: dict | None = None     # what the folder held when it was saved (newtfile.files_of)
         self.blocks: list[Path] = []
         self._exported_n = 0
         # Review session.
@@ -126,6 +126,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # Stimulator
         self.stim_out = make_output(cfg, self.backend)
         self.stimulus = self._saved_stimulus()
+        self.stimulus2: Stimulus | None = self._saved_stimulus("stimulus2")   # on the other output
         self.stim_repeat_s = float(self.settings.value("stim_repeat_s", 1.0))
         # What pressing Start does to the stimulator: "" nothing, "once", or "repeat".
         on_start = self.settings.value("stim_on_start", "")

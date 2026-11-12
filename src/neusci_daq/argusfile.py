@@ -1,12 +1,12 @@
-"""The .newt file: a whole session in one file, to save, share or hand in, that reopens
-NEWT as it was left.
+"""The .argus file: a whole session in one file, to save, share or hand in, that reopens
+Argus as it was left.
 
 It's a zip. session/ holds the session folder's files (the recordings, block_NNN.h5, and
 pages.json, analysis.json, analysis_spikes.npz, videos...), state.json what was on screen
 (tabs, layouts, charts, windows, stimulus, protocol, simulation), and manifest.json which
 files are current, with their sizes and times.
 
-NEWT never records into the zip, where a crash could lose it: it records into a working
+Argus never records into the zip, where a crash could lose it: it records into a working
 folder, and Save packs that folder. An opened .argus is unpacked into a working folder in
 data/open/. Saving again only adds what changed since the last save; a file replaced that
 way leaves its old copy behind, unused, and once those take up half the file it's written
@@ -22,8 +22,7 @@ import warnings
 import zipfile
 from pathlib import Path
 
-SUFFIX = ".newt"
-SUFFIXES = (SUFFIX, ".argus")     # .argus: saved when NEWT was called Argus
+SUFFIX = ".argus"
 STATE, MANIFEST, FILES = "state.json", "manifest.json", "session/"
 SOURCE = ".argus-source.json"      # in a working folder: the file it came from, and what was in it
 STORED = {".h5", ".npz", ".mp4", ".avi", ".mov", ".mkv", ".png", ".jpg"}   # already packed: not compressed again
@@ -49,7 +48,7 @@ def files_of(folder: str | Path) -> dict[str, list[int]]:
 
 
 def working_folder(data_dir: str | Path, path: str | Path) -> Path:
-    """Where a .newt file is unpacked: data/open/<its name>-<a tag of where it is>."""
+    """Where an .argus file is unpacked: data/open/<its name>-<a tag of where it is>."""
     path = Path(path).resolve()
     tag = hashlib.sha1(str(path).encode()).hexdigest()[:8]
     return Path(data_dir) / "open" / f"{path.stem}-{tag}"
@@ -111,20 +110,20 @@ def save(path: str | Path, folder: str | Path, state: dict) -> dict:
 
 
 def open_file(path: str | Path, data_dir: str | Path) -> tuple[Path, dict, dict]:
-    """Unpack a .newt file into its working folder (unless it's there already, unchanged).
+    """Unpack an .argus file into its working folder (unless it's there already, unchanged).
     Returns (the folder, the app's state, the manifest's files)."""
     path = Path(path)
     try:
         z = zipfile.ZipFile(path)
     except (OSError, zipfile.BadZipFile) as e:
-        raise ArgusError(f"{path.name} isn't a NEWT file it can read: {e}") from None
+        raise ArgusError(f"{path.name} isn't an Argus file it can read: {e}") from None
     with z:
         try:
             manifest, state = _read_json(z, MANIFEST), _read_json(z, STATE)
         except (KeyError, ValueError):
-            raise ArgusError(f"{path.name} isn't a NEWT file: it has no {MANIFEST}.") from None
+            raise ArgusError(f"{path.name} isn't an Argus file: it has no {MANIFEST}.") from None
         if manifest.get("version", 0) > VERSION:
-            raise ArgusError(f"{path.name} was saved by a newer NEWT. Update NEWT to open it.")
+            raise ArgusError(f"{path.name} was saved by a newer Argus. Update Argus to open it.")
         folder = working_folder(Path(data_dir), path)
         source = folder / SOURCE
         try:

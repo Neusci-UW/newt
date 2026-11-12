@@ -63,7 +63,7 @@ class Config:
     # Stimulator (analog output)
     stim_output: str = "ao0"      # "ao0" | "ao1"
     stim_rate: float = 5000.0     # output samples per second (USB-6003 max 5,000)
-    stim_max_v: float = 5.0       # safety limit: stimuli above this are refused
+    stim_max_v: float = 10.0      # safety limit: stimuli above this are refused (the USB-6003's range)
     stim_monitor: str = ""        # input that records the stimulus (wired from the output), or ""
     stim_units: str = "V"         # units the Stimulator shows levels in, e.g. "µA" behind an isolator
     stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
@@ -114,7 +114,7 @@ def load(path: str | Path) -> Config:
         data_dir=rec.get("directory", "data"),
         stim_output=str(st.get("output", "ao0")).lower(),
         stim_rate=float(st.get("rate", 5000)),
-        stim_max_v=float(st.get("max_voltage", 5.0)),
+        stim_max_v=float(st.get("max_voltage", 10.0)),
         stim_monitor=str(st.get("monitor", "")).lower(),
         stim_units=str(st.get("units", "V")).strip() or "V",
         stim_scale=float(st.get("scale", 1.0)),

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
 from .plotzoom import plot_widget
@@ -26,10 +26,28 @@ def _spin(lo, hi, decimals=4, unit="", step=1.0):
     return UnitSpinBox(lo, hi, unit, decimals=decimals, step=step)
 
 
+# The preview's line colour for the first and second output: (light mode, dark mode).
+OUTPUT_COLORS = {False: ("#1a5fd0", "#b36b00"), True: ("#4d8dff", "#e69f00")}
+
+
+def _dot(color: str) -> QtGui.QIcon:
+    pix = QtGui.QPixmap(20, 20)
+    pix.setDevicePixelRatio(2.0)
+    pix.fill(QtCore.Qt.GlobalColor.transparent)
+    p = QtGui.QPainter(pix)
+    p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+    p.setPen(QtCore.Qt.PenStyle.NoPen)
+    p.setBrush(QtGui.QColor(color))
+    p.drawEllipse(QtCore.QRectF(1, 1, 8, 8))
+    p.end()
+    return QtGui.QIcon(pix)
+
+
 class StimPage(QtWidgets.QWidget):
     def __init__(self, main):
         super().__init__()
         self.main = main
+        self._colors = OUTPUT_COLORS[False]
         self._loading = False
         self._units = None                 # (units, scale) the level fields currently show
         self._mode = style.LIGHT
@@ -37,9 +55,23 @@ class StimPage(QtWidgets.QWidget):
         outer.setContentsMargins(14, 14, 14, 14)
         outer.setSpacing(16)
 
-        # ---- left: shape and its settings -------------------------------
+        # ---- left: which output, then its shape and settings ----------------
         left = QtWidgets.QVBoxLayout()
         left.setSpacing(10)
+        self.editing = 0                   # 0: the first output's stimulus, 1: the second's
+        outs = QtWidgets.QHBoxLayout()
+        outs.setSpacing(8)
+        self.out_tabs = QtWidgets.QTabBar()
+        self.out_tabs.setDrawBase(False)
+        self.out_tabs.setExpanding(False)
+        self.out_tabs.setToolTip("Each output has its own stimulus; Fire sends them together")
+        self.btn_add_out = QtWidgets.QPushButton("+ Add second output")
+        self.btn_add_out.setToolTip("Send a second stimulus on the other analog output, from the same start")
+        self.btn_remove_out = None         # the ✕ on the second tab: made with the tab (Qt deletes it with it)
+        outs.addWidget(self.out_tabs)
+        outs.addWidget(self.btn_add_out)
+        outs.addStretch(1)
+        left.addLayout(outs)
         top = QtWidgets.QFormLayout()
         self.shape = QtWidgets.QComboBox()
         self.shape.setToolTip("The kind of stimulus: its settings are shown below")
@@ -135,7 +167,7 @@ class StimPage(QtWidgets.QWidget):
         bottom = QtWidgets.QFormLayout()
         self.output = QtWidgets.QComboBox()
         self.output.addItems(list(stimmod.AO_CHANNELS))
-        self.output.setToolTip("Which analog output sends the stimulus")
+        self.output.setToolTip("Which analog output sends the first stimulus (a second one uses the other)")
         self.monitor = QtWidgets.QComboBox()
         self.monitor.setToolTip("Record the stimulus on a spare input (wire the output to it). "
                                 "This adds a channel named Stim with exact timing.")
@@ -182,6 +214,7 @@ class StimPage(QtWidgets.QWidget):
         p.setLabel("bottom", "time", units="s")
         p.showGrid(x=True, y=True, alpha=0.25)
         self.curve = p.plot(stepMode=None)
+        self.curve2 = p.plot(stepMode=None)             # the second output's stimulus
         right.addWidget(self.preview, 1)
         self.info = QtWidgets.QLabel()
         self.info.setWordWrap(True)
@@ -220,10 +253,64 @@ class StimPage(QtWidgets.QWidget):
         self.apply_theme(style.LIGHT)
         self.btn_save.clicked.connect(self._save)
         self.btn_load.clicked.connect(self._load)
-        self._update_preview()
+        self.out_tabs.currentChanged.connect(self._output_picked)
+        self.btn_add_out.clicked.connect(self._add_output)
+        self.outputs_changed()
+
+    # -- which output ----------------------------------------------------------
+    def _current(self) -> Stimulus:
+        """The stimulus the fields edit: the first output's, or the second's."""
+        return self.main.stimulus2 if self.editing == 1 and self.main.stimulus2 is not None else self.main.stimulus
+
+    def outputs_changed(self) -> None:
+        """Show a tab per output in use, and the add / remove buttons to match."""
+        main = self.main
+        two = main.stimulus2 is not None
+        if not two:
+            self.editing = 0
+        labels = [main.cfg.stim_output] + ([main.second_output] if two else [])
+        self.out_tabs.blockSignals(True)
+        while self.out_tabs.count():
+            self.out_tabs.removeTab(0)
+        for name, color in zip(labels, (self._colors[0], self._colors[1])):
+            self.out_tabs.addTab(_dot(color), name)          # the colour of its line in the preview
+        self.btn_remove_out = None
+        if two:
+            btn = QtWidgets.QToolButton(text="✕")
+            btn.setAutoRaise(True)
+            btn.setToolTip("Stop using the second output")
+            btn.setAccessibleName("Remove the second output")
+            btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, lambda: self.main.set_stimulus2(None)))
+            self.out_tabs.setTabButton(1, QtWidgets.QTabBar.ButtonPosition.RightSide, btn)
+            self.btn_remove_out = btn
+        self._show_sim_note()
+        self.out_tabs.setCurrentIndex(self.editing)
+        self.out_tabs.blockSignals(False)
+        self.btn_add_out.setVisible(not two)
+        self.btn_add_out.setText(f"+ Add second output ({main.second_output})")
+        self.btn_fire.setText("Fire both" if two else "Fire")
+        self._load_fields(self._current())
+
+    def _output_picked(self, i: int) -> None:
+        if i < 0 or i == self.editing:
+            return
+        self.editing = i
+        self._load_fields(self._current())
+
+    def _add_output(self) -> None:
+        self.editing = 1
+        self.main.set_stimulus2(Stimulus())       # calls outputs_changed
 
     # -- widgets <-> Stimulus ------------------------------------------------
     def set_stimulus(self, s: Stimulus) -> None:
+        """The first output's stimulus changed elsewhere (a protocol, Load): show it if
+        that's the one being edited."""
+        if self.editing == 0 or self.main.stimulus2 is None:
+            self._load_fields(s)
+        else:
+            self._update_preview()
+
+    def _load_fields(self, s: Stimulus) -> None:
         self._loading = True
         self.shape.setCurrentIndex(max(0, self.shape.findData(s.shape)))
         self.pages.setCurrentIndex(self.shape.currentIndex())
@@ -259,7 +346,7 @@ class StimPage(QtWidgets.QWidget):
             s.freq_hz, s.duration_ms = self.n_freq.value(), self.n_dur.value()
         elif shape == "file":
             s.file, s.file_rate = self.f_path.text().strip(), self.f_rate.value()
-        s.segments = self._segments() if shape == "custom" else self.main.stimulus.segments
+        s.segments = self._segments() if shape == "custom" else self._current().segments
         return s
 
     def _segments(self) -> list[dict]:
@@ -292,30 +379,50 @@ class StimPage(QtWidgets.QWidget):
         except ValueError as e:
             self._show_problem(str(e))
             return
-        self.main._stimulus_edited(s)
+        # Loading fields from a stimulus gives the same stimulus back: only a real change is
+        # passed on (each one re-checks the whole protocol on the Protocols page).
+        if s != self._current():
+            if self.editing == 1 and self.main.stimulus2 is not None:
+                self.main._stimulus2_edited(s)
+            else:
+                self.main._stimulus_edited(s)
         self._update_preview()
 
     def _update_preview(self):
-        cfg, s = self.main.cfg, self.main.stimulus
+        cfg, main = self.main.cfg, self.main
         units, k = self._unit_label, self._scale
         in_units = f" ({cfg.stim_max_v * k:g} {units})" if self._converted else ""
-        self.info.setText(f"Output {cfg.stim_output} · {cfg.stim_rate:,.0f} samples/s · "
+        two = main.stimulus2 is not None
+        where = f"{cfg.stim_output} + {main.second_output} together" if two else f"Output {cfg.stim_output}"
+        self.info.setText(f"{where} · {cfg.stim_rate:,.0f} samples/s{' each' if two else ''} · "
                           f"limit ±{cfg.stim_max_v:g} V{in_units} (set in the config)")
-        try:
-            wave = s.waveform(cfg.stim_rate)
-            stimmod.check_limit(wave, cfg.stim_max_v)
-        except ValueError as e:
-            self.curve.setData([], [])
-            self._show_problem(str(e))
-            return
-        t = np.arange(len(wave)) / cfg.stim_rate
-        # draw each sample as a flat step, which is what the output really does
-        self.curve.setData(np.repeat(t, 2)[1:], np.repeat(wave * k, 2)[:-1])
+        streams = [(cfg.stim_output, main.stimulus, self.curve)] + (
+            [(main.second_output, main.stimulus2, self.curve2)] if two else [])
+        if not two:
+            self.curve2.setData([], [])
+        lines, waves = [], []
+        for name, s, curve in streams:
+            try:
+                wave = s.waveform(cfg.stim_rate)
+                stimmod.check_limit(wave, cfg.stim_max_v)
+            except ValueError as e:
+                curve.setData([], [])
+                self._show_problem(f"{name}: {e}" if two else str(e))
+                return
+            t = np.arange(len(wave)) / cfg.stim_rate
+            # draw each sample as a flat step, which is what the output really does
+            curve.setData(np.repeat(t, 2)[1:], np.repeat(wave * k, 2)[:-1])
+            peak = float(np.max(np.abs(wave))) * k
+            label = f"{name}: " if two else ""
+            lines.append(f"{label}{s.describe(units, k)}" + ("" if two else
+                         f"\nPeak {peak:g} {units} · {len(wave) / cfg.stim_rate * 1000:g} ms · {len(wave):,} samples"))
+            lines += [f"{label}{n}" for n in s.rounding_notes(cfg.stim_rate)]
+            waves.append(wave)
         self.preview.getPlotItem().enableAutoRange()      # a new stimulus can change the scale
-        peak = float(np.max(np.abs(wave))) * k
-        notes = s.rounding_notes(cfg.stim_rate)
-        self.show_message(f"{s.describe(units, k)}\nPeak {peak:g} {units} · {len(wave) / cfg.stim_rate * 1000:g} ms · "
-                          f"{len(wave):,} samples" + ("".join("\n" + n for n in notes)))
+        if two:
+            n = max(len(w) for w in waves)
+            lines.append(f"Together {n / cfg.stim_rate * 1000:g} ms · {n:,} samples per output")
+        self.show_message("\n".join(lines))
 
     def _show_problem(self, text: str):
         self.show_message(text, error=True)
@@ -331,7 +438,7 @@ class StimPage(QtWidgets.QWidget):
         cfg = self.main.cfg
         if self._units != (cfg.stim_units, cfg.stim_scale):
             self._apply_units()
-            self.set_stimulus(self.main.stimulus)
+            self._load_fields(self._current())
         self.output.setCurrentText(cfg.stim_output)
         self.monitor.blockSignals(True)
         self.monitor.clear()
@@ -362,6 +469,8 @@ class StimPage(QtWidgets.QWidget):
         driven = [f"cell {i + 1} ({c.stimulus:g} mV)" for i, c in enumerate(cfg.sim_network.cells) if c.stimulus]
         what = ("⚡ Simulated: the stimulus is injected into " + ", ".join(driven) + "."
                 if driven else "⚡ Simulated: <b>no cell</b> receives the stimulus yet.")
+        if self.main.stimulus2 is not None:
+            what += f" Only {cfg.stim_output}'s: {self.main.second_output} isn't simulated."
         self.sim_note.setText(f"{what} <a href='sim'>Choose cells on the Simulation tab</a>")
 
     def _monitor_picked(self):
@@ -377,7 +486,12 @@ class StimPage(QtWidgets.QWidget):
         for ax in ("left", "bottom"):
             self.preview.getPlotItem().getAxis(ax).setPen(th.foreground)
             self.preview.getPlotItem().getAxis(ax).setTextPen(th.foreground)
-        self.curve.setPen(pg.mkPen("#4d8dff" if mode == style.DARK else "#1a5fd0", width=2))
+        self._colors = OUTPUT_COLORS[mode == style.DARK]
+        self.curve.setPen(pg.mkPen(self._colors[0], width=2))
+        self.curve2.setPen(pg.mkPen(self._colors[1], width=2))
+        if hasattr(self, "out_tabs"):
+            for i in range(self.out_tabs.count()):
+                self.out_tabs.setTabIcon(i, _dot(self._colors[i]))
         self._update_preview()
 
     # -- units ---------------------------------------------------------------
@@ -468,7 +582,7 @@ class StimPage(QtWidgets.QWidget):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save stimulus", "stimulus.json",
                                                         "Stimulus (*.json)")
         if path:
-            self.main.stimulus.save(path)
+            self.main.stimulus.save(path, second=self.main.stimulus2)
             self.show_message(f"Saved to {Path(path).name}")
 
     def _load(self):
@@ -476,11 +590,13 @@ class StimPage(QtWidgets.QWidget):
         if not path:
             return
         try:
-            s = Stimulus.load(path)
+            s, s2 = Stimulus.load_pair(path)      # files from before two outputs: s2 is None
         except ValueError as e:
             self.show_message(str(e), error=True)
             return
-        self.set_stimulus(s)
+        self.editing = 0
+        self.main.set_stimulus(s)
+        self.main.set_stimulus2(s2)
 
 
 StimWindow = StimPage   # older name

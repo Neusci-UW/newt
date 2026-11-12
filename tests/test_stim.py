@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 
 from neusci_daq import config, session, trialfile
+from neusci_daq import stim as stimmod
+from pyqtgraph.Qt import QtWidgets
 from neusci_daq.stim import Stimulus, check_limit, load_wave_file
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
@@ -179,7 +181,7 @@ def test_nidaqmx_stop_cuts_it_short_and_sets_zero(fake_nidaqmx, tmp_path):
     out.stop()
     assert time.time() - t0 < 1 and not out.busy
     writes = [e for e in fake_nidaqmx if e[0] == "write"]
-    assert writes[-1][1].tolist() == [0.0] and writes[-1][2] is True     # left at 0 V
+    assert writes[-1][1].tolist() == [0.0, 0.0] and writes[-1][2] is True  # both outputs left at 0 V
 
 
 def test_nidaqmx_error_is_reported_and_output_zeroed(fake_nidaqmx, tmp_path, monkeypatch):
@@ -189,7 +191,7 @@ def test_nidaqmx_error_is_reported_and_output_zeroed(fake_nidaqmx, tmp_path, mon
     out.fire(Stimulus().waveform(RATE), RATE)
     out._thread.join(2)
     assert "200xxx" in str(out.error)
-    assert [e for e in fake_nidaqmx if e[0] == "write"][-1][1].tolist() == [0.0]
+    assert [e for e in fake_nidaqmx if e[0] == "write"][-1][1].tolist() == [0.0, 0.0]
 
 
 # ---------------------------------------------------------------- the menu, simulated
@@ -258,6 +260,7 @@ def test_fired_stimulus_is_recorded_on_the_stim_channel_and_logged(app, win):
 
 
 def test_limit_and_busy_are_refused_with_a_message(app, win):
+    win.cfg.stim_max_v = 5                                  # an instructor's lower limit
     win.btn_run.setChecked(True)
     pump(app, 0.2)
     win.set_stimulus(Stimulus(amplitude_v=9))
@@ -318,7 +321,8 @@ def test_window_custom_table_and_errors(app, win):
     assert "must be a number" in sw.message.text()
     sw.table.item(0, 0).setText("5")
     sw.shape.setCurrentIndex(sw.shape.findData("pulse"))
-    sw.p_amp.setValue(8)                                   # over the 5 V limit
+    win.cfg.stim_max_v = 5
+    sw.p_amp.setValue(8)                                   # over a 5 V limit
     assert "limit" in sw.message.text()
 
 
@@ -356,6 +360,7 @@ def test_units_setting_is_saved_and_checked(tmp_path):
 
 def test_stimulator_fields_show_units_but_stimulus_stays_in_volts(win):
     win.cfg.stim_units, win.cfg.stim_scale = "µA", 100
+    win.cfg.stim_max_v = 5
     page = win.stim_page
     page.sync()                                            # picks up the new units
     win.set_stimulus(Stimulus(shape="pulse", amplitude_v=2, width_ms=1))
@@ -521,3 +526,79 @@ def test_a_block_saves_the_stimulus_sent(app, win):
     assert s.repeat() == (0.05, 0.0, 4)
     assert Stimulus(shape="pulse", count=3, interval_ms=100, delay_ms=20).repeat() == (0.1, 0.02, 3)
     assert Stimulus(shape="step").repeat() == (0.0, 0.0, 0)
+
+
+# ---------------------------------------------------------------- a second output
+def test_both_outputs_go_in_one_task_from_one_clock(fake_nidaqmx, tmp_path):
+    from neusci_daq.stimout import NidaqmxOutput
+    out = NidaqmxOutput(make_cfg(tmp_path))
+    chans, wave = stimmod.combine({"ao1": Stimulus(shape="step", amplitude_v=-2, duration_ms=4).waveform(RATE),
+                                   "ao0": Stimulus(amplitude_v=3, width_ms=1).waveform(RATE)})
+    assert chans == ["ao0", "ao1"] and wave.shape[0] == 2 and wave[:, -1].tolist() == [0, 0]
+    out.fire(wave, RATE, chans)
+    out._thread.join(2)
+    assert out.error is None
+    assert [e[1] for e in fake_nidaqmx if e[0] == "chan"][:2] == ["Dev1/ao0", "Dev1/ao1"]
+    assert sum(1 for e in fake_nidaqmx if e[0] == "task") == 1                  # one task: one clock
+    sent = next(e for e in fake_nidaqmx if e[0] == "write")[1]
+    assert sent.shape == wave.shape and sent[0].max() == 3 and sent[1].min() == -2
+    with pytest.raises(ValueError, match="One row"):
+        out.fire(wave, RATE, ["ao0"])
+
+
+def test_default_limit_is_the_outputs_ten_volts(tmp_path):
+    assert config.Config().stim_max_v == 10
+    c = config.Config(backend="simulated", channels=[config.Channel("ai0", "A")], stim_max_v=5)
+    assert config.load(config.save(c, tmp_path / "c.toml")).stim_max_v == 5   # a saved limit stays
+
+
+def test_add_a_second_output_edit_it_fire_both_and_remove_it(app, win):
+    page = win.open_stim_window()
+    assert page.out_tabs.count() == 1 and page.btn_add_out.isVisibleTo(page)
+    assert page.btn_add_out.text() == "+ Add second output (ao1)"
+    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=4, width_ms=2))
+    page.btn_add_out.click()
+    assert win.stimulus2 is not None and page.editing == 1 and page.out_tabs.count() == 2
+    assert [page.out_tabs.tabText(i) for i in range(2)] == ["ao0", "ao1"] and page.btn_fire.text() == "Fire both"
+    page.shape.setCurrentIndex(page.shape.findData("step"))
+    page.s_amp.setValue(-3)
+    assert win.stimulus2.shape == "step" and win.stimulus2.amplitude_v == -3
+    assert win.stimulus.shape == "pulse" and win.stimulus.amplitude_v == 4    # ao0 untouched
+    page.out_tabs.setCurrentIndex(0)
+    assert page.shape.currentData() == "pulse" and page.p_amp.value() == 4     # the fields follow the tab
+    assert "ao0:" in page.message.text() and "ao1:" in page.message.text()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    assert win.fire_stimulus() and win.stim_out.last_channels == ["ao0", "ao1"]
+    win.stop_stimulus()
+    win.btn_run.setChecked(False)
+    page.btn_remove_out.click()
+    pump(app, 0.05)                                         # removed once the click has finished
+    assert win.stimulus2 is None and page.out_tabs.count() == 1 and page.btn_fire.text() == "Fire"
+
+
+def test_second_output_follows_the_first_and_both_are_saved(app, win, tmp_path, monkeypatch):
+    page = win.open_stim_window()
+    win.set_stimulus2(Stimulus(shape="step", amplitude_v=2))
+    win.set_stim_output("ao1")                               # the first moves: the second takes ao0
+    assert win.second_output == "ao0" and page.out_tabs.tabText(1) == "ao0"
+    path = tmp_path / "pair.json"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+    page._save()
+    win.set_stimulus2(None)
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName", lambda *a, **k: (str(path), ""))
+    page._load()
+    assert win.stimulus2 is not None and win.stimulus2.shape == "step" and page.out_tabs.count() == 2
+    win.set_stimulus2(None)
+    win.set_stim_output("ao0")
+
+
+def test_a_second_output_over_the_limit_is_refused_with_its_name(app, win):
+    win.cfg.stim_max_v = 5
+    win.set_stimulus2(Stimulus(shape="step", amplitude_v=8))
+    assert "ao1:" in win.stim_page.message.text() and "limit" in win.stim_page.message.text()
+    win.btn_run.setChecked(True)
+    pump(app, 0.2)
+    assert not win.fire_stimulus() and "limit" in win.statusBar().currentMessage()
+    win.btn_run.setChecked(False)
+    win.set_stimulus2(None)

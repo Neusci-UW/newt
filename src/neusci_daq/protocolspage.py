@@ -143,19 +143,20 @@ class VarRow(QtWidgets.QWidget):
         self._list_text = ""
 
     # -- in and out ------------------------------------------------------------
-    def set_shape(self, shape: str, avoid: str = "") -> None:
-        """Offer the settings of `shape`; keep the current one if it still applies."""
+    def set_shape(self, shape, avoid: str = "") -> None:
+        """Offer the settings of `shape` (with a second output, of both: see
+        trials.settings_of); keep the current one if it still applies."""
         self._shape = shape
         cur = self.setting.currentData()
         self.setting.blockSignals(True)
         self.setting.clear()
-        for key, label, unit in T.SETTINGS.get(shape, []):
+        for key, label, unit in T.settings_of(shape):
             self.setting.addItem(f"{label} ({unit})" if unit and unit != "×" else label, key)
-        keys = [k for k, _, _ in T.SETTINGS.get(shape, [])]
+        keys = [k for k, _, _ in T.settings_of(shape)]
         if cur not in keys:
             cur = next((k for k in keys if k != avoid), keys[0] if keys else "")
             if cur:
-                self._set_range(*T.DEFAULT_RANGES.get(cur, (1, 5, 1)))
+                self._set_range(*T.default_range(cur))
         self.setting.setCurrentIndex(max(0, self.setting.findData(cur)))
         self.setting.blockSignals(False)
         self._update_units()
@@ -196,7 +197,7 @@ class VarRow(QtWidgets.QWidget):
 
     def _setting_picked(self, *_):
         key = self.setting.currentData()
-        self._set_range(*T.DEFAULT_RANGES.get(key, (1, 5, 1)))
+        self._set_range(*T.default_range(key))
         self._update_units()
         self.changed.emit()
 
@@ -315,7 +316,8 @@ class ProtocolsPage(QtWidgets.QWidget):
         self.btn_edit_stim.setToolTip("Open the Stimulator page to change the other settings")
         shape_row.addWidget(self.shape, 1)
         shape_row.addWidget(self.btn_edit_stim)
-        form.addRow("Shape", shape_row)
+        self.shape_label = QtWidgets.QLabel("Shape")
+        form.addRow(self.shape_label, shape_row)
         self.stim_info = QtWidgets.QLabel()
         self.stim_info.setWordWrap(True)
         form.addRow("", self.stim_info)
@@ -586,15 +588,14 @@ class ProtocolsPage(QtWidgets.QWidget):
                 return T.Protocol.loads(text)
             except ValueError:
                 pass
-        shape = self.main.stimulus.shape
-        keys = [k for k, _, _ in T.SETTINGS.get(shape, [])]
+        keys = [k for k, _, _ in T.settings_of(self._shapes())]
         key = keys[0] if keys else "amplitude_v"
-        f, t, s = T.DEFAULT_RANGES.get(key, (0.5, 3.0, 0.5))
+        f, t, s = T.default_range(key)
         return T.Protocol(name="Protocol", a=T.Variable(key=key, start=f, stop=t, step=s))
 
     def _load_protocol_into_widgets(self, p: T.Protocol) -> None:
         self._loading = True
-        shape = self.main.stimulus.shape
+        shape = self._shapes()
         self.name.setText(p.name)
         self.row_a.set_shape(shape)
         self.row_a.set_var(p.a)
@@ -629,13 +630,25 @@ class ProtocolsPage(QtWidgets.QWidget):
 
     def _set_b(self, on: bool) -> None:
         if on:
-            self.row_b.set_shape(self.main.stimulus.shape, avoid=self.row_a.var().key)
-            if self.row_b.var().key == self.row_a.var().key:
-                keys = [k for k, _, _ in T.SETTINGS.get(self.main.stimulus.shape, []) if k != self.row_a.var().key]
-                if keys:
-                    self.row_b.set_var(T.Variable(keys[0], "range", *T.DEFAULT_RANGES.get(keys[0], (1, 5, 1))))
+            a_key = self.row_a.var().key
+            self.row_b.set_shape(self._shapes(), avoid=a_key)
+            if self.row_b.var().key == a_key:
+                keys = [k for k, _, _ in T.settings_of(self._shapes()) if k != a_key]
+                # with two outputs, b starts on the other output's first setting
+                other = [k for k in keys if bool(T.split_key(k)[0]) != bool(T.split_key(a_key)[0])]
+                pick = (other or keys or [""])[0]
+                if pick:
+                    self.row_b.set_var(T.Variable(pick, "range", *T.default_range(pick)))
         self._show_b(on)
         self._settings_changed()
+
+    def _shapes(self):
+        """The stimulus shape, or with a second output, (first shape, second shape, first
+        output, second output): what trials.settings_of and setting_info take."""
+        m = self.main
+        if m.stimulus2 is None:
+            return m.stimulus.shape
+        return (m.stimulus.shape, m.stimulus2.shape, m.cfg.stim_output, m.second_output)
 
     def _shape_picked(self, *_):
         key = self.shape.currentData()
@@ -646,10 +659,10 @@ class ProtocolsPage(QtWidgets.QWidget):
         """The Stimulator tab's stimulus changed (here or there)."""
         if self.running:
             return
-        shape = self.main.stimulus.shape
         self.shape.blockSignals(True)
-        self.shape.setCurrentIndex(max(0, self.shape.findData(shape)))
+        self.shape.setCurrentIndex(max(0, self.shape.findData(self.main.stimulus.shape)))
         self.shape.blockSignals(False)
+        shape = self._shapes()
         self.row_a.set_shape(shape)
         self.row_b.set_shape(shape, avoid=self.row_a.var().key)
         self._settings_changed()
@@ -662,17 +675,23 @@ class ProtocolsPage(QtWidgets.QWidget):
             return
         self.protocol = self.protocol_from_widgets()
         self.main.settings.setValue("trials_protocol", self.protocol.dumps())
-        cfg = self.main.cfg
-        s = self.main.stimulus
-        self.stim_info.setText(s.describe(cfg.stim_units, cfg.stim_scale) + f" · on {cfg.stim_output}")
-        self.chk = T.check(self.protocol, s, cfg.stim_rate, cfg.stim_max_v)
+        cfg, main = self.main.cfg, self.main
+        s = main.stimulus
+        # with two outputs, the Shape box is the first output's (the second's: Edit…)
+        self.shape_label.setText("Shape" if main.stimulus2 is None else f"{cfg.stim_output} shape")
+        if main.stimulus2 is None:
+            self.stim_info.setText(s.describe(cfg.stim_units, cfg.stim_scale) + f" · on {cfg.stim_output}")
+        else:
+            self.stim_info.setText(main.describe_stimuli().replace("; ", "\n"))
+        self.chk = T.check(self.protocol, s, cfg.stim_rate, cfg.stim_max_v, main.stimulus2,
+                           (cfg.stim_output, main.second_output))
         self._show_counts()
         self._update_summary()
         if not self.running:
             self._update_plan()
 
     def _show_counts(self):
-        shape = self.main.stimulus.shape
+        shape = self._shapes()
         for row, var in ((self.row_a, self.protocol.a), (self.row_b, self.protocol.b)):
             if var is None:
                 continue
@@ -751,7 +770,7 @@ class ProtocolsPage(QtWidgets.QWidget):
     # ======================================================================
     def _update_plan(self):
         c, p = self.chk, self.protocol
-        shape = self.main.stimulus.shape
+        shape = self._shapes()
         self.grid.clear()
         if not c or not c.a_vals:
             self.grid.setRowCount(0)
@@ -808,13 +827,16 @@ class ProtocolsPage(QtWidgets.QWidget):
         if not c or not c.a_vals:
             return
         b = c.b_vals[self._plan_row] if c.b_vals else None
-        shape = self.main.stimulus.shape
-        self.preview_title.setText("Stimulus at each a" + (
+        shape = self._shapes()
+        main = self.main
+        out = T.split_key(p.a.key)[0]                   # show the output a steps
+        where = f" on {out or cfg.stim_output}" if main.stimulus2 is not None else ""
+        self.preview_title.setText(f"Stimulus{where} at each a" + (
             f", for b = {T.fmt(b, T.setting_info(shape, p.b.key)[1])} (click a row above to change)" if b is not None else ""))
         colors = self._a_colors(len(c.a_vals))
         for ia, a in enumerate(c.a_vals):
             try:
-                wave, _ = T.make_wave(self.main.stimulus, p, a, b, cfg.stim_rate)
+                wave = T.output_wave(main.stimulus, p, a, b, cfg.stim_rate, main.stimulus2, second=bool(out))
             except ValueError:
                 continue
             t = np.arange(len(wave)) / cfg.stim_rate
@@ -856,7 +878,8 @@ class ProtocolsPage(QtWidgets.QWidget):
         keep = max(10.0, 3 * (p.gap_s + c.longest_s + p.after_ms / 1000.0) + 2)
         self.capture = T.Capture(rate, mon_row, to_units, keep, read_s=cfg.chunk_size / max(rate, 1e-9))
         self._q = main.backend.subscribe()
-        self._run = {"protocol": p, "stimulus": main.stimulus, "shape": main.stimulus.shape,
+        self._run = {"protocol": p, "stimulus": main.stimulus, "shape": self._shapes(),
+                     "stimulus2": main.stimulus2, "outs": (cfg.stim_output, main.second_output),
                      "a_vals": c.a_vals, "b_vals": c.b_vals, "channels": [ch.name for ch in chans],
                      "units": [ch.units for ch in chans], "out_rate": cfg.stim_rate,
                      "block": main.recorder.path.name if main.recorder.recording and main.recorder.path else ""}
@@ -963,16 +986,19 @@ class ProtocolsPage(QtWidgets.QWidget):
                 return                        # too soon after the last one; try again shortly
             tr = self.trials[self.next_i]
             try:
-                wave, delay = T.make_wave(self._run["stimulus"], p, tr.a, tr.b, self._run["out_rate"])
+                t = T.make_trial(self._run["stimulus"], p, tr.a, tr.b, self._run["out_rate"],
+                                 self._run["stimulus2"], self._run["outs"])
             except ValueError as e:
                 self.stop_protocol(f"Stopped at stimulus {tr.n}: {e}")
                 return
             label = (f"Stimulus {tr.n}/{len(self.trials)}: "
                      + T.describe(p, self._run["shape"], tr.a, tr.b))
-            if not self.main.send_wave(wave, label, T.trial_stimulus(self._run["stimulus"], p, tr.a, tr.b)):
+            if not self.main.send_wave(t.wave, label, t.stimulus, channels=t.channels,
+                                       stimulus2=t.stimulus2):
                 self.stop_protocol(f"Stopped at stimulus {tr.n}")
                 return
-            self.capture.sent(tr, wave, self._run["out_rate"], delay)
+            # lined up on the first output's waveform: that's the one recorded (Line up on)
+            self.capture.sent(tr, t.first, self._run["out_rate"], t.delay_ms)
             self._set_row_status(tr.n, "sent")
             self.next_i += 1
             self._next_fire = max(self._next_fire + p.gap_s, now + 0.05)
@@ -1010,7 +1036,7 @@ class ProtocolsPage(QtWidgets.QWidget):
     def _fill_table(self):
         self.table.blockSignals(True)
         self.table.setRowCount(len(self.trials))
-        shape = self._run["shape"] if self._run else self.main.stimulus.shape
+        shape = self._run["shape"] if self._run else self._shapes()
         p = self._run["protocol"] if self._run else self.protocol
         ua = T.setting_info(shape, p.a.key)[1]
         ub = T.setting_info(shape, p.b.key)[1] if p.b else ""
@@ -1370,9 +1396,12 @@ class ProtocolsPage(QtWidgets.QWidget):
             trials.append({"n": tr.n, "rep": tr.rep, "a": tr.a, "b": tr.b,
                            "found": bool(r and r.found), "use": bool(r and r.use),
                            "t": (r.t0 - rec.block_start) if (r and r.found) else None})
-        rec.set_attr("trials", json.dumps({"protocol": self._run["protocol"].to_dict(),
-                                           "stimulus": self._run["stimulus"].to_dict(),
-                                           "trials": trials}))
+        saved = {"protocol": self._run["protocol"].to_dict(), "stimulus": self._run["stimulus"].to_dict(),
+                 "trials": trials}
+        if self._run.get("stimulus2") is not None:
+            saved["output"] = self._run["outs"][0]
+            saved["second"] = {"output": self._run["outs"][1], "stimulus": self._run["stimulus2"].to_dict()}
+        rec.set_attr("trials", json.dumps(saved))
 
     def _export(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export stimuli", "trials.csv", "CSV (*.csv)")

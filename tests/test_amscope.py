@@ -183,3 +183,12 @@ def test_amscope_video_is_recorded_with_the_block_and_lined_up(app, win, amscope
     assert 0 <= meta["offset_s"] < 0.5                               # first frame soon after t0
     assert out.exists() and out.stat().st_size > 1000
     panel.set_camera("")
+
+
+def test_the_camera_library_variable_has_its_new_and_old_names(tmp_path, monkeypatch):
+    new, old = tmp_path / "toupcam.dll", tmp_path / "amcam.dll"
+    monkeypatch.delenv("NEWT_CAMERA_SDK", raising=False)
+    monkeypatch.setenv("ARGUS_CAMERA_SDK", str(old))                  # set before the rename: still used
+    assert amscope._candidates()[0] == (old, "Amcam_")
+    monkeypatch.setenv("NEWT_CAMERA_SDK", str(new))                   # the new name wins
+    assert amscope._candidates()[0] == (new, "Toupcam_")

@@ -514,3 +514,29 @@ class SimPage(QtWidgets.QWidget):
         self.diagram.setBackground(th.background)
         self.diagram.getPlotItem().setTitle("Network", color=th.foreground)
         self._redraw()
+
+
+class SimOffPage(QtWidgets.QWidget):
+    """Data Simulation with a real input device: the simulators need the simulated
+    backend, so this says so and offers to switch."""
+
+    def __init__(self, main):
+        super().__init__()
+        self.main = main
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(24, 24, 24, 24)
+        v.setSpacing(12)
+        title = QtWidgets.QLabel("<b>The simulators record instead of a real input device</b>")
+        text = QtWidgets.QLabel(
+            "The Neural network simulator and the Breadboard simulator make the data Acquisition records, "
+            "in place of the DAQ or an audio input. To use them, switch the input device to Simulated cells "
+            "(Setup › Input device › Simulated cells). Your channel setup is remembered, so you can switch back.")
+        text.setWordWrap(True)
+        text.setMaximumWidth(720)
+        btn = QtWidgets.QPushButton("Switch to Simulated cells")
+        btn.setToolTip("Reopen NEWT on the simulated input device (stop recording first)")
+        btn.clicked.connect(lambda: self.main.switch_input("simulated"))
+        v.addWidget(title)
+        v.addWidget(text)
+        v.addWidget(btn, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+        v.addStretch(1)

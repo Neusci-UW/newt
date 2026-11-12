@@ -52,7 +52,7 @@ from .analysispage import AnalysisPage
 from .trialsbrowser import TrialsBrowser
 from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
-from .simpage import SimPage
+from .simpage import SimOffPage, SimPage
 from .breadpage import BreadboardPage
 from .membranepage import RC_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
@@ -373,6 +373,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # What the fake recording contains: only with the simulated backend.
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
         self.board_page = BreadboardPage(self) if self.cfg.backend == "simulated" else None
+        # Data Simulation always shows: with a real input device, a note on switching to the simulators
+        self.simoff_page = None if self.sim_page else SimOffPage(self)
         # Ions crossing a membrane, Nernst and GHK: a teaching page, always available.
         self.membrane_page = MembranePage(self)
         # The membrane as an RC circuit, then the same charging done by ions.
@@ -387,11 +389,12 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("analysis", "Analysis", self.analysis_page),
         ] + ([("sim", "Neural network simulator", self.sim_page)] if self.sim_page else [])
           + ([("board", "Breadboard simulator", self.board_page)] if self.board_page else [])
+          + ([("simoff", "Simulators", self.simoff_page)] if self.simoff_page else [])
           + [("membrane", "Membrane potential", self.membrane_page),
              ("rc", "RC circuit", self.rc_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
             ("analysis", "Analysis", ["analysis"]),
-            ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
+            ("datasim", "Data Simulation", ["sim", "board", "simoff"]),   # data sources Acquisition can record
             ("lessons", "Lessons", ["membrane", "rc"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)

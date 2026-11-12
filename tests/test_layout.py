@@ -23,7 +23,7 @@ def tab_texts(bar):
 def test_starts_on_acquisition_record_with_sub_pages(win):
     assert shown(win) == ["acq"]
     pane = win.tabs.panes[0]
-    assert tab_texts(pane.bar) == ["Acquisition", "Analysis"] + (["Data Simulation"] if win.sim_page else []) + ["Lessons"]
+    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "Data Simulation", "Lessons"]
     assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Protocols"]
     assert pane.sub_bar.currentIndex() == 0 and not pane.sub_head.isHidden()
 

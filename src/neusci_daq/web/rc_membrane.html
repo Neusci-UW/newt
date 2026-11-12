@@ -7,6 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script>window.MathJax = { tex: { inlineMath: [['\\(', '\\)']] }, svg: { fontCache: 'global' } };</script>
+<!-- MathJax: a local copy next to this page if there is one (for offline use), otherwise the online copy -->
+<script async src="vendor/mathjax/tex-svg.js" onerror="var s=document.createElement('script');s.async=true;s.src='https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js';s.onerror=function(){document.documentElement.classList.add('no-mathjax')};document.head.appendChild(s);"></script>
 <style>
 /* Same look as membrane_potential.html: a circuit on top, the same thing done by ions below. */
 :root{
@@ -43,8 +46,9 @@ header p{margin:0;color:var(--muted);max-width:80ch}
 h2.part{font-size:20px;font-weight:600;margin:12px 0 0;text-wrap:balance}
 .top{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
 @media (max-width:1100px){.top{grid-template-columns:1fr}}
-.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
-@media (max-width:820px){.row2{grid-template-columns:1fr}}
+.cgrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start}
+@media (max-width:900px){.cgrid{grid-template-columns:1fr}}
+.ccol{display:flex;flex-direction:column;gap:12px;min-width:0}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
 .stage{display:flex;flex-direction:column;gap:12px}
 canvas{display:block;width:100%;height:auto;border-radius:6px}
@@ -60,6 +64,12 @@ canvas{display:block;width:100%;height:auto;border-radius:6px}
 .sect-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
 .caption{font-size:13px;color:var(--muted);margin:0;max-width:90ch}
 .panel{display:flex;flex-direction:column;gap:16px}
+.top.stacked{grid-template-columns:1fr}
+.panel.wide{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px 32px;align-items:start}
+.panel.wide fieldset{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px 28px;align-items:start}
+.sgroup{display:flex;flex-direction:column;gap:10px}.sgroup[hidden]{display:none}
+.panel.wide legend{grid-column:1/-1}
+@media (max-width:820px){.panel.wide{grid-template-columns:1fr}}
 .vbox{display:flex;flex-direction:column;gap:2px}
 .vnum{font-family:var(--font-mono);font-size:40px;font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums}
 .vrow{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -78,8 +88,22 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
 button{font:inherit;font-size:14px;cursor:pointer;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 12px}
 button:hover{border-color:var(--accent)}
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:500}
-button.gate{border-color:var(--na);font-weight:500}
-button.gate[aria-pressed="true"]{background:var(--na);color:var(--surface)}
+/* theory card, styled like the GHK derivation in membrane_potential.html */
+.theory h2{font-size:20px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+.theory h3{font-size:15px;font-weight:600;margin:18px 0 4px}
+.deriv{max-width:72ch}
+.deriv p{margin:6px 0}
+.deriv .eq{overflow-x:auto;margin:8px 0;padding:4px 0}
+.mj-fail{display:none}
+.no-mathjax .mj-fail{display:block;color:var(--pos)}
+/* on/off switch for the Na⁺ channels (or the current source): label, track, state in words */
+button.toggle{display:inline-flex;align-items:center;gap:10px;border:0;background:none;padding:4px 2px;font-weight:600}
+button.toggle .track{width:42px;height:24px;border-radius:12px;background:var(--muted);position:relative;transition:background .15s;flex:none}
+button.toggle .thumb{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--surface);transition:left .15s}
+button.toggle[aria-checked="true"] .track{background:var(--on,var(--na))}
+button.toggle[aria-checked="true"] .thumb{left:21px}
+button.toggle .tstate{font-family:var(--font-mono);font-size:13px;font-weight:400;color:var(--muted);min-width:52px;text-align:left}
+@media (prefers-reduced-motion:reduce){button.toggle .track,button.toggle .thumb{transition:none}}
 .chip{font-size:13px;padding:5px 10px;border-radius:999px}
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -102,29 +126,41 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
 
 <!-- =================== Part 1: the circuit =================== -->
 <h2 class="part">1 · The circuit</h2>
-<div class="top">
+<div class="top stacked">
   <section class="card stage">
     <div class="btns" role="group" aria-label="Circuit">
       <button class="chip" data-mode="inj" aria-pressed="false">Current injection</button>
       <button class="chip" data-mode="g" aria-pressed="true">Conductance change (Na⁺ channels)</button>
     </div>
-    <canvas id="circ" aria-label="Circuit diagram with moving charges"></canvas>
-    <div class="runbar">
-      <button id="cSwitch" class="gate" aria-pressed="false">Close switch</button>
-      <button id="cPulse">Pulse</button>
-      <button id="cReset">Reset</button>
-      <label for="cSpeed" class="runlab">Speed</label>
-      <input type="range" id="cSpeed" min="0" max="100" value="40">
-      <output id="cSpeedo" for="cSpeed"></output>
+    <div class="cgrid">
+      <div class="ccol">
+        <canvas id="circ" aria-label="Circuit diagram with moving charges"></canvas>
+        <div class="runbar">
+          <button id="cSwitch" class="toggle" role="switch" aria-checked="false" aria-labelledby="cSwitchLab"><span id="cSwitchLab">Na⁺ channels</span><span class="track"><span class="thumb"></span></span><span class="tstate" id="cSwitchState">closed</span></button>
+          <button id="cReset">Reset</button>
+          <label for="cSpeed" class="runlab">Speed</label>
+          <input type="range" id="cSpeed" min="0" max="100" value="40">
+          <output id="cSpeedo" for="cSpeed"></output>
+        </div>
+        <div class="legend">
+          <span><i class="dot pos"></i>positive charge (conventional current)</span>
+          <span id="cLegNa"><i class="dot na"></i>through the Na⁺ branch</span>
+          <span id="cLegK"><i class="dot k"></i>through the K⁺ branch</span>
+        </div>
+      </div>
+      <div class="ccol">
+        <p class="sect-title">Membrane potential</p>
+        <canvas id="cVchart" aria-label="Voltage over time"></canvas>
+        <div class="charthead"><p class="sect-title">Where the current goes</p>
+          <div class="btns"><button class="chip" data-cview="i" aria-pressed="true">Currents</button><button class="chip" data-cview="q" aria-pressed="false">Charge moved</button></div></div>
+        <canvas id="cIchart" aria-label="Branch currents over time"></canvas>
+      </div>
     </div>
-    <div class="legend">
-      <span><i class="dot pos"></i>positive charge (conventional current)</span>
-      <span id="cLegNa"><i class="dot na"></i>through the Na⁺ branch</span>
-      <span id="cLegK"><i class="dot k"></i>through the K⁺ branch</span>
-    </div>
+    <p class="caption"><b>Membrane potential:</b> shaded, switch closed. The voltage moves exponentially toward V<sub>∞</sub> with time constant τ. Closing the switch adds a conductance, so τ gets shorter.</p>
+    <p class="caption"><b>Where the current goes:</b> <span id="cIcap"></span></p>
     <p class="caption">Each dot carries the same charge as one + or − mark on the capacitor plates, so you can watch dots arriving at a plate turn into marks. The top wire is the inside of the cell, the bottom wire the outside (ground); current is counted positive when it flows from inside to outside, the usual sign for membrane currents.</p>
   </section>
-  <aside class="card panel">
+  <aside class="card panel wide">
     <div class="vbox">
       <span class="sect-title">Membrane potential</span>
       <span class="vnum" id="cV">—</span>
@@ -136,55 +172,89 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
     </div>
     <fieldset>
       <legend class="sect-title">Components</legend>
-      <div class="row"><label for="cC">C</label><input type="range" id="cC" min="0.2" max="3" step="0.1" value="1"><output id="cCo" for="cC"></output></div>
-      <div class="row" data-for="inj"><label for="cGL">g (1/R)</label><input type="range" id="cGL" min="0.1" max="3" step="0.05" value="0.5"><output id="cGLo" for="cGL"></output></div>
-      <div class="row" data-for="inj"><label for="cI">I injected</label><input type="range" id="cI" min="-60" max="60" step="1" value="20"><output id="cIo" for="cI"></output></div>
-      <div class="row" data-for="g"><label for="cGK"><i class="dot k"></i>g<sub>K</sub></label><input type="range" id="cGK" min="0.05" max="3" step="0.05" value="0.5"><output id="cGKo" for="cGK"></output></div>
-      <div class="row" data-for="g"><label for="cEK"><i class="dot k"></i>E<sub>K</sub></label><input type="range" id="cEK" min="-110" max="0" step="1" value="-86"><output id="cEKo" for="cEK"></output></div>
-      <div class="row" data-for="g"><label for="cGNa"><i class="dot na"></i>g<sub>Na</sub></label><input type="range" id="cGNa" min="0.05" max="5" step="0.05" value="0.7"><output id="cGNao" for="cGNa"></output>
-        <span class="hint">conductance when the switch is closed (Na⁺ channels open)</span></div>
-      <div class="row" data-for="g"><label for="cENa"><i class="dot na"></i>E<sub>Na</sub></label><input type="range" id="cENa" min="0" max="90" step="1" value="60"><output id="cENao" for="cENa"></output></div>
-      <div class="row"><label for="cDur">Pulse</label><input type="range" id="cDur" min="1" max="40" step="1" value="12"><output id="cDuro" for="cDur"></output></div>
+      <!-- groups in circuit order, left to right: Na⁺ branch, K⁺ branch (or source and resistor), capacitor -->
+      <div class="sgroup" data-for="g">
+        <div class="row"><label for="cGNa"><i class="dot na"></i>g<sub>Na</sub></label><input type="range" id="cGNa" min="0.05" max="5" step="0.05" value="0.7"><output id="cGNao" for="cGNa"></output>
+          <span class="hint">conductance when the switch is closed (Na⁺ channels open)</span></div>
+        <div class="row"><label for="cENa"><i class="dot na"></i>E<sub>Na</sub></label><input type="range" id="cENa" min="0" max="90" step="1" value="60"><output id="cENao" for="cENa"></output></div>
+      </div>
+      <div class="sgroup" data-for="g">
+        <div class="row"><label for="cGK"><i class="dot k"></i>g<sub>K</sub></label><input type="range" id="cGK" min="0.05" max="3" step="0.05" value="0.5"><output id="cGKo" for="cGK"></output></div>
+        <div class="row"><label for="cEK"><i class="dot k"></i>E<sub>K</sub></label><input type="range" id="cEK" min="-110" max="0" step="1" value="-86"><output id="cEKo" for="cEK"></output></div>
+      </div>
+      <div class="sgroup" data-for="inj">
+        <div class="row"><label for="cI">I injected</label><input type="range" id="cI" min="-60" max="60" step="1" value="20"><output id="cIo" for="cI"></output></div>
+        <div class="row"><label for="cGL">g (1/R)</label><input type="range" id="cGL" min="0.1" max="3" step="0.05" value="0.5"><output id="cGLo" for="cGL"></output></div>
+      </div>
+      <div class="sgroup">
+        <div class="row"><label for="cC">C</label><input type="range" id="cC" min="0.2" max="3" step="0.1" value="1"><output id="cCo" for="cC"></output></div>
+      </div>
     </fieldset>
   </aside>
 </div>
-<div class="row2">
-  <section class="card stage">
-    <p class="sect-title">Membrane potential</p>
-    <canvas id="cVchart" aria-label="Voltage over time"></canvas>
-    <p class="caption">Shaded: switch closed. The voltage moves exponentially toward V<sub>∞</sub> with time constant τ. Closing the switch adds a conductance, so τ gets shorter.</p>
-  </section>
-  <section class="card stage">
-    <div class="charthead"><p class="sect-title">Where the current goes</p>
-      <div class="btns"><button class="chip" data-cview="i" aria-pressed="true">Currents</button><button class="chip" data-cview="q" aria-pressed="false">Charge moved</button></div></div>
-    <canvas id="cIchart" aria-label="Branch currents over time"></canvas>
-    <p class="caption" id="cIcap"></p>
-  </section>
-</div>
+
+<!-- =================== Theory: current sets dV/dt =================== -->
+<section class="card theory" id="dvdt">
+  <div class="deriv">
+    <h2>Current sets how fast the voltage changes</h2>
+    <p class="caption mj-fail">The equation renderer (MathJax) could not load, so equations appear as TeX source. Without internet, add a local copy (see tools/fetch_mathjax.py in Newt).</p>
+    <p>The voltage across a capacitor is the charge on it divided by its capacitance. So the only way to change the voltage is to move charge onto or off the plates, and the current into the capacitor is how fast that charge moves:</p>
+    <div class="eq">\[ Q = C\,V \quad\Rightarrow\quad I_C = \frac{dQ}{dt} = C\,\frac{dV}{dt} \]</div>
+    <p>No charge builds up on the wires, so whatever the channels carry across must come off the capacitor (Kirchhoff's current law). The voltage changes at a rate set by the net channel current:</p>
+    <div class="eq">\[ I_C + I_\mathrm{Na} + I_\mathrm{K} = 0 \quad\Rightarrow\quad \frac{dV}{dt} = -\,\frac{I_\mathrm{Na} + I_\mathrm{K}}{C} \]</div>
+    <h3>A quick number</h3>
+    <p>With currents in µA/cm² and C in µF/cm², the rate comes out in mV/ms: 100 µA/cm² into 1 µF/cm² moves V at 100 mV/ms. At the default settings, opening the Na⁺ channels at rest gives \(I_\mathrm{Na} = 0.7 \times (-86 - 60) \approx -102\) µA/cm² while \(I_\mathrm{K} = 0\), so V starts climbing at about 100 mV/ms.</p>
+    <h3>Why it slows down</h3>
+    <p>Each channel current is \(g\,(V - E)\), so the currents shrink as V nears the voltage where they cancel, \(V_\infty\). The rate shrinks with them:</p>
+    <div class="eq">\[ \frac{dV}{dt} = -\,\frac{g_\mathrm{Na}(V - E_\mathrm{Na}) + g_\mathrm{K}(V - E_\mathrm{K})}{C} = \frac{V_\infty - V}{\tau}, \qquad \tau = \frac{C}{g_\mathrm{Na} + g_\mathrm{K}} \]</div>
+    <p>\(V_\infty\) is the voltage where the channel currents cancel, so nothing more charges the capacitor. Setting \(dV/dt = 0\):</p>
+    <div class="eq">\[ g_\mathrm{Na}(V_\infty - E_\mathrm{Na}) + g_\mathrm{K}(V_\infty - E_\mathrm{K}) = 0 \quad\Rightarrow\quad V_\infty = \frac{g_\mathrm{Na}E_\mathrm{Na} + g_\mathrm{K}E_\mathrm{K}}{g_\mathrm{Na} + g_\mathrm{K}} \]</div>
+    <p>The GHK equation answers the same question, where the currents add to zero, for real channels. Real channels, and the ones in the particle model, are not ohmic: their currents follow the GHK current equation, and the voltage at which those currents cancel is the GHK voltage. So for a membrane, \(V_\infty\) is the solution of the GHK equation:</p>
+    <div class="eq">\[ V_\infty = \frac{RT}{F}\,\ln\frac{P_\mathrm{K}[\mathrm{K}^+]_o + P_\mathrm{Na}[\mathrm{Na}^+]_o}{P_\mathrm{K}[\mathrm{K}^+]_i + P_\mathrm{Na}[\mathrm{Na}^+]_i} \]</div>
+    <p>The two formulas agree when each g is the channel's chord conductance at that voltage, \(g = I/(V - E)\) (see the Membrane potential page). The circuit uses fixed g instead, so its \(V_\infty\) is close to, but not exactly, the GHK value; in the particle model the voltage settles on the GHK line.</p>
+    <p>A rate proportional to the distance still to go gives an exponential approach:</p>
+    <div class="eq">\[ V(t) = V_\infty + \left(V_0 - V_\infty\right) e^{-t/\tau} \]</div>
+    <p>At the defaults \(\tau = 1/(0.7 + 0.5) \approx 0.83\) ms: V covers about 63% of the way in one τ and 95% in three.</p>
+    <h3>In the particle model</h3>
+    <p>The same rule is a count. Each net ion that crosses adds one charge to the membrane, which moves V by a fixed step: about 2 mV at the default Membrane C (the bilayer's capacitance in series with the charge layers in the solution). On the Ions moved chart, "on membrane" is that net count, and the voltage trace follows its shape.</p>
+  </div>
+</section>
 
 <!-- =================== Part 2: the ions =================== -->
 <h2 class="part">2 · The same thing, ion by ion</h2>
-<div class="top">
+<div class="top stacked">
   <section class="card stage">
-    <canvas id="sim" aria-label="Particle simulation of K⁺ and Na⁺ ions crossing a membrane"></canvas>
-    <div class="runbar">
-      <button id="gate" class="gate" aria-pressed="false">Open Na⁺ channels</button>
-      <button id="pPulse">Pulse</button>
-      <button id="play" class="primary">Pause</button>
-      <button id="reset">Reset ions</button>
-      <label for="speed" class="runlab">Speed</label>
-      <input type="range" id="speed" min="0" max="100" value="90">
-      <output id="speedo" for="speed"></output>
+    <div class="cgrid">
+      <div class="ccol">
+        <canvas id="sim" aria-label="Particle simulation of K⁺ and Na⁺ ions crossing a membrane"></canvas>
+        <div class="runbar">
+          <button id="gate" class="toggle" role="switch" aria-checked="false" aria-label="Na⁺ channels">Na⁺ channels<span class="track"><span class="thumb"></span></span><span class="tstate" id="gateState">closed</span></button>
+          <button id="play" class="primary">Pause</button>
+          <button id="reset">Reset ions</button>
+          <label for="speed" class="runlab">Speed</label>
+          <input type="range" id="speed" min="0" max="100" value="90">
+          <output id="speedo" for="speed"></output>
+        </div>
+        <div class="legend">
+          <span><i class="dot k"></i>K⁺</span>
+          <span><i class="dot na"></i>Na⁺</span>
+          <span><i class="dot a"></i>A⁻ anions (cannot cross)</span>
+          <span><i class="dot neg"></i><i class="dot pos" style="border-radius:2px"></i>charge density</span>
+        </div>
+      </div>
+      <div class="ccol">
+        <p class="sect-title">Membrane potential</p>
+        <canvas id="pVchart" aria-label="Voltage trace of the particle simulation"></canvas>
+        <div class="charthead"><p class="sect-title">Where the ions go</p>
+          <div class="btns"><button class="chip" data-pview="i" aria-pressed="true">Currents</button><button class="chip" data-pview="q" aria-pressed="false">Ions moved</button></div></div>
+        <canvas id="pIchart" aria-label="Ions crossing the membrane over time"></canvas>
+      </div>
     </div>
-    <div class="legend">
-      <span><i class="dot k"></i>K⁺</span>
-      <span><i class="dot na"></i>Na⁺</span>
-      <span><i class="dot a"></i>A⁻ anions (cannot cross)</span>
-      <span><i class="dot neg"></i><i class="dot pos" style="border-radius:2px"></i>charge density</span>
-    </div>
+    <p class="caption"><b>Membrane potential:</b> each point averages 100 steps. Shaded: Na⁺ channels open. Dashed lines are E<sub>K</sub> and E<sub>Na</sub>; dotted is the GHK prediction for the channels as they are now.</p>
+    <p class="caption"><b>Where the ions go:</b> <span id="pIcap"></span></p>
     <p class="caption" id="patchInfo"></p>
   </section>
-  <aside class="card panel">
+  <aside class="card panel wide">
     <div class="vbox">
       <span class="sect-title">Membrane potential</span>
       <span class="vnum" id="pV">—</span>
@@ -196,29 +266,22 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
     </div>
     <fieldset>
       <legend class="sect-title">Channels in the simulated patch</legend>
-      <div class="row"><label for="nK"><i class="dot k"></i>K⁺</label><input type="range" id="nK" min="0" max="24" step="1" value="9"><output id="nKo" for="nK"></output>
-        <span class="hint">leak channels, always open: the resistor g<sub>K</sub></span></div>
-      <div class="row"><label for="nNa"><i class="dot na"></i>Na⁺</label><input type="range" id="nNa" min="0" max="24" step="1" value="12"><output id="nNao" for="nNa"></output>
-        <span class="hint">gated channels: the switch and resistor g<sub>Na</sub></span></div>
-      <div class="row"><label for="pDur">Pulse</label><input type="range" id="pDur" min="1" max="40" step="1" value="15"><output id="pDuro" for="pDur"></output></div>
-      <div class="row"><label for="qmv">Membrane C</label><input type="range" id="qmv" min="4" max="30" step="1" value="11"><output id="qmvo" for="qmv"></output>
-        <span class="hint">more capacitance takes more ions to change the voltage, so it changes more slowly</span></div>
-      <label class="check" for="tint"><input type="checkbox" id="tint" checked>Show charge density map</label>
+      <!-- groups in circuit order: Na⁺ branch, K⁺ branch, capacitor -->
+      <div class="sgroup">
+        <div class="row"><label for="nNa"><i class="dot na"></i>Na⁺</label><input type="range" id="nNa" min="0" max="24" step="1" value="12"><output id="nNao" for="nNa"></output>
+          <span class="hint">gated channels: the switch and resistor g<sub>Na</sub></span></div>
+      </div>
+      <div class="sgroup">
+        <div class="row"><label for="nK"><i class="dot k"></i>K⁺</label><input type="range" id="nK" min="0" max="24" step="1" value="9"><output id="nKo" for="nK"></output>
+          <span class="hint">leak channels, always open: the resistor g<sub>K</sub></span></div>
+      </div>
+      <div class="sgroup">
+        <div class="row"><label for="qmv">Membrane C</label><input type="range" id="qmv" min="4" max="30" step="1" value="11"><output id="qmvo" for="qmv"></output>
+          <span class="hint">more capacitance takes more ions to change the voltage, so it changes more slowly</span></div>
+        <label class="check" for="tint"><input type="checkbox" id="tint" checked>Show charge density map</label>
+      </div>
     </fieldset>
   </aside>
-</div>
-<div class="row2">
-  <section class="card stage">
-    <p class="sect-title">Membrane potential</p>
-    <canvas id="pVchart" aria-label="Voltage trace of the particle simulation"></canvas>
-    <p class="caption">Each point averages 100 steps. Shaded: Na⁺ channels open. Dashed lines are E<sub>K</sub> and E<sub>Na</sub>; dotted is the GHK prediction for the channels as they are now.</p>
-  </section>
-  <section class="card stage">
-    <div class="charthead"><p class="sect-title">Where the ions go</p>
-      <div class="btns"><button class="chip" data-pview="q" aria-pressed="true">Ions moved</button><button class="chip" data-pview="i" aria-pressed="false">Currents</button></div></div>
-    <canvas id="pIchart" aria-label="Ions crossing the membrane over time"></canvas>
-    <p class="caption" id="pIcap"></p>
-  </section>
 </div>
 
 <section class="card">
@@ -244,7 +307,6 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
       <li>As the voltage rises, the K⁺ branch carries more and more current outward and the Na⁺ branch less inward, because both are now further from (or closer to) their batteries.</li>
       <li>Once the voltage stops changing, the capacitor current is zero. Current now goes all the way around: in through Na⁺, out through K⁺. The charge on the membrane is constant, yet ions keep crossing.</li>
       <li>Open the switch again and the capacitor discharges through the K⁺ branch alone, more slowly, because there is less conductance.</li>
-      <li>A Pulse shorter than a few time constants never reaches V<sub>∞</sub>: the membrane is a low-pass filter.</li>
     </ul>
   </div>
   <div>
@@ -288,8 +350,10 @@ function niceStep(span) { const p = Math.pow(10, Math.floor(Math.log10(span))), 
 // The y range grows to fit and shrinks slowly, so it doesn't jump around with every frame.
 const CHW = 640, CHH = 340;
 function drawChart(c, o) {
-  const L = 62, R = 96, T = 14, B = 30, pw = CHW - L - R, ph = CHH - T - B;
-  c.fillStyle = C.surface; c.fillRect(0, 0, CHW, CHH);
+  const W = o.w || CHW, H = o.h || CHH;   // logical size; defaults to CHW × CHH
+  const key = o.key || 11;                // font size of the series labels at the right
+  const L = 62, R = o.r || 96, T = 14, B = 30, pw = W - L - R, ph = H - T - B;   // o.r: room for the keys
+  c.fillStyle = C.surface; c.fillRect(0, 0, W, H);
   let lo = o.fixed ? o.fixed[0] : 0, hi = o.fixed ? o.fixed[1] : 0;
   if (!o.fixed) {
     for (const s of o.series) for (const v of s.ys) if (isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
@@ -323,7 +387,7 @@ function drawChart(c, o) {
     c.fillStyle = C.muted; c.fillText((Math.abs(v) < stp / 1e3 ? 0 : +v.toPrecision(4)) + '', L - 6, y);
   }
   c.save(); c.translate(14, T + ph / 2); c.rotate(-Math.PI / 2); c.textAlign = 'center'; c.fillText(o.ylabel, 0, 0); c.restore();
-  c.textAlign = 'left'; c.fillText(o.xlabel, L, CHH - 9);
+  c.textAlign = 'left'; c.fillText(o.xlabel, L, H - 9);
   // reference lines
   const labels = [];
   for (const r of o.refs || []) {
@@ -346,9 +410,9 @@ function drawChart(c, o) {
   }
   c.restore();
   labels.sort((a, b) => a.y - b.y);
-  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
-  c.font = '600 11px "IBM Plex Sans", sans-serif'; c.textAlign = 'left';
-  labels.forEach(l => { c.fillStyle = l.c; c.fillText(l.t, L + pw + 6, Math.max(T + 4, Math.min(CHH - 6, l.y))); });
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < key + 2) labels[i].y = labels[i - 1].y + key + 2;
+  c.font = `600 ${key}px "IBM Plex Sans", sans-serif`; c.textAlign = 'left';
+  labels.forEach(l => { c.fillStyle = l.c; c.fillText(l.t, L + pw + 6, Math.max(T + 4, Math.min(H - 6, l.y))); });
   c.strokeStyle = C.line; c.lineWidth = 1; c.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
   c.textBaseline = 'alphabetic';
 }
@@ -364,12 +428,14 @@ function chipGroup(attr, onPick) {
 // =====================================================================================
 (() => {
   const cv = $('circ'), CWd = 780, CHd = 470, c = setupCanvas(cv, CWd, CHd);
-  const vc = setupCanvas($('cVchart'), CHW, CHH), ic = setupCanvas($('cIchart'), CHW, CHH);
+  const CW = 480, CH = 300;              // charts sit beside the circuit, so draw them smaller to keep text legible
+  const I_RANGE = [-120, 120];           // fixed current axis (µA/cm²): fits the default Na⁺ step; larger g clips
+  const vc = setupCanvas($('cVchart'), CW, CH), ic = setupCanvas($('cIchart'), CW, CH);
   const TOP = 70, BOT = 410, MID = 240, XS = [140, 400, 640];
   const SP = 20, Q0 = 4;                // dot spacing (px); charge per dot and per plate mark (nC/cm²)
   const KPX = SP / Q0;                   // px a dot moves per nC/cm² of charge through its wire
-  let mode = 'g', sw = false, pulseEnd = -1, t = 0, V = -86, speed = 1;
-  const p = { C: 1, gL: 0.5, I: 20, gK: 0.5, EK: -86, gNa: 0.7, ENa: 60, dur: 12 };
+  let mode = 'g', sw = false, t = 0, V = -86, speed = 1;
+  const p = { C: 1, gL: 0.5, I: 20, gK: 0.5, EK: -86, gNa: 0.7, ENa: 60 };
   let cum = [0, 0, 0];                    // since the last switch: ion branch 1 in, branch 2 out, stored
   const hist = { t: [], V: [], i1: [], i2: [], iC: [], q1: [], q2: [], qC: [], on: [] };
   const WIN = 40, SAMPLE_MS = 0.04;      // chart window and sample interval (ms)
@@ -386,28 +452,30 @@ function chipGroup(attr, onPick) {
     return { G, Vinf: I / G, tau: p.C / G };
   }
   function restV() { return mode === 'inj' ? 0 : p.EK; }
+  function switchText() {
+    const g = mode === 'g';
+    $('cSwitchLab').textContent = g ? 'Na⁺ channels' : 'Current source';
+    $('cSwitchState').textContent = g ? (sw ? 'open' : 'closed') : (sw ? 'on' : 'off');
+    $('cSwitch').style.setProperty('--on', g ? 'var(--na)' : 'var(--ink)');
+  }
   function setSwitch(on) {
     if (on === sw) return;
     sw = on; cum = [0, 0, 0];
-    $('cSwitch').setAttribute('aria-pressed', String(sw));
-    $('cSwitch').textContent = sw ? 'Open switch' : 'Close switch';
+    $('cSwitch').setAttribute('aria-checked', String(sw));
+    switchText();
   }
-  // Exact exponential step toward V∞ (the circuit is linear), in small pieces so pulses end on time.
+  // Exact exponential step toward V∞ (the circuit is linear), in small pieces for the dots and charts.
   function advance(dt) {
     let left = dt;
     while (left > 1e-9) {
-      let h = Math.min(left, 0.01);
-      if (pulseEnd >= 0 && t + h >= pulseEnd) { h = Math.max(0, pulseEnd - t); }
+      const h = Math.min(left, 0.01);
       const { Vinf, tau } = steady();
       const v0 = V;
       V = Vinf + (V - Vinf) * Math.exp(-h / tau);
-      const vm = (v0 + V) / 2, I = currents(vm), iC = p.C * (V - v0) / (h || 1);
-      if (h > 0) {
-        cum[0] += -I[0] * h; cum[1] += I[1] * h; cum[2] += p.C * (V - v0);
-        moveDots(I, iC, h);
-      }
+      const vm = (v0 + V) / 2, I = currents(vm), iC = p.C * (V - v0) / h;
+      cum[0] += -I[0] * h; cum[1] += I[1] * h; cum[2] += p.C * (V - v0);
+      moveDots(I, iC, h);
       t += h; left -= h;
-      if (pulseEnd >= 0 && t >= pulseEnd - 1e-9) { pulseEnd = -1; setSwitch(false); }
       sampleAcc += h;
       if (sampleAcc >= SAMPLE_MS) { sampleAcc -= SAMPLE_MS; record(I, iC); }
     }
@@ -422,8 +490,11 @@ function chipGroup(attr, onPick) {
   // ---------- moving charges ----------
   // Each wire is a straight segment with its own offset; dots sit every SP px and move with the
   // segment's current (positive = from a to b). Rails carry the running sum of branch currents.
+  // Charge is summed over a frame and the dots moved once per frame; a step near SP would alias
+  // (dots seem to stand still or run backwards), so steps are capped at MAXSTEP, all wires scaled alike.
+  const MAXSTEP = 0.3 * SP;
   const segs = [];
-  function seg(ax, ay, bx, by, color, skip) { segs.push({ ax, ay, bx, by, L: Math.hypot(bx - ax, by - ay), o: Math.random() * SP, color, skip: skip || [], I: 0 }); return segs.length - 1; }
+  function seg(ax, ay, bx, by, color, skip) { segs.push({ ax, ay, bx, by, L: Math.hypot(bx - ax, by - ay), o: Math.random() * SP, color, skip: skip || [], I: 0, q: 0 }); return segs.length - 1; }
   let SB = [], ST = [], SBot = [];
   function buildSegs() {
     segs.length = 0;
@@ -431,7 +502,7 @@ function chipGroup(attr, onPick) {
     SB = [
       seg(XS[0], TOP, XS[0], BOT, isG ? 'na' : 'pos', isG ? [[MID - 112, MID - 72]] : [[MID - 26, MID + 26]]),
       seg(XS[1], TOP, XS[1], BOT, isG ? 'k' : 'pos'),
-      seg(XS[2], TOP, XS[2], BOT, 'pos', [[MID - 10, MID + 10]]),
+      seg(XS[2], TOP, XS[2], BOT, 'pos', [[MID - 8, MID + 8]]),
     ];
     ST = [seg(XS[0], TOP, XS[1], TOP, 'pos'), seg(XS[1], TOP, XS[2], TOP, 'pos')];
     SBot = [seg(XS[0], BOT, XS[1], BOT, 'pos'), seg(XS[1], BOT, XS[2], BOT, 'pos')];
@@ -441,7 +512,12 @@ function chipGroup(attr, onPick) {
     for (let k = 0; k < 3; k++) segs[SB[k]].I = b[k];
     segs[ST[0]].I = -b[0]; segs[ST[1]].I = -(b[0] + b[1]);
     segs[SBot[0]].I = b[0]; segs[SBot[1]].I = b[0] + b[1];
-    for (const s of segs) s.o = ((s.o + s.I * KPX * h) % SP + SP) % SP;
+    for (const s of segs) s.q += s.I * h;
+  }
+  function stepDots() {
+    const big = Math.max(...segs.map(s => Math.abs(s.q * KPX)));
+    const k = big > MAXSTEP ? MAXSTEP / big : 1;
+    for (const s of segs) { s.o = ((s.o + s.q * KPX * k) % SP + SP) % SP; s.q = 0; }
   }
 
   // ---------- drawing ----------
@@ -478,17 +554,17 @@ function chipGroup(attr, onPick) {
     c.beginPath(); c.moveTo(x - 6, yc + (up ? -6 : 6)); c.lineTo(x, yc + (up ? -13 : 13)); c.lineTo(x + 6, yc + (up ? -6 : 6)); c.stroke();
   }
   function capacitor(x, yc) {
-    blank(x, yc - 10, yc + 10);
-    c.strokeStyle = C.ink; c.lineWidth = 4;
-    wire(x - 70, yc - 8, x + 70, yc - 8); wire(x - 70, yc + 8, x + 70, yc + 8);
+    blank(x, yc - 8, yc + 8);
+    c.strokeStyle = C.ink; c.lineWidth = 3;
+    wire(x - 52, yc - 6, x + 52, yc - 6); wire(x - 52, yc + 6, x + 52, yc + 6);
     // charge on the plates: one mark per Q0
     const q = p.C * V, n = Math.min(84, Math.round(Math.abs(q) / Q0));
     const topCol = q >= 0 ? C.pos : C.neg, botCol = q >= 0 ? C.neg : C.pos;
     c.font = '700 12px "IBM Plex Mono", monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
     for (let k = 0; k < n; k++) {
-      const row = Math.floor(k / 14), col = k % 14, xx = x - 65 + col * 10;
-      c.fillStyle = topCol; c.fillText(q >= 0 ? '+' : '−', xx, yc - 18 - row * 11);
-      c.fillStyle = botCol; c.fillText(q >= 0 ? '−' : '+', xx, yc + 19 + row * 11);
+      const row = Math.floor(k / 10), col = k % 10, xx = x - 45 + col * 10;
+      c.fillStyle = topCol; c.fillText(q >= 0 ? '+' : '−', xx, yc - 16 - row * 11);
+      c.fillStyle = botCol; c.fillText(q >= 0 ? '−' : '+', xx, yc + 17 + row * 11);
     }
     c.textBaseline = 'alphabetic';
   }
@@ -543,7 +619,7 @@ function chipGroup(attr, onPick) {
       resistor(XS[1], MID, C.ink); label(`R = 1/g, g ${p.gL.toFixed(2)} mS/cm²`, XS[1] + 26, MID + 4, C.ink);
       arrowLabel(XS[0], I[0], 'I_src', C.ink); arrowLabel(XS[1], I[1], 'I_R', C.ink);
     }
-    capacitor(XS[2], MID); label(`C ${p.C.toFixed(1)} µF/cm²`, XS[2] - 76, MID - 30, C.ink, 'right');
+    capacitor(XS[2], MID); label(`C ${p.C.toFixed(1)} µF/cm²`, XS[2] - 58, MID - 30, C.ink, 'right');
     arrowLabel(XS[2], iC, 'I_C', C.pos);
     label('currents in µA/cm², + = outward', CWd - 12, CHd - 10, C.muted, 'right', '500 11.5px "IBM Plex Sans", sans-serif');
   }
@@ -552,13 +628,13 @@ function chipGroup(attr, onPick) {
     const refs = mode === 'g'
       ? [{ v: p.EK, color: C.k, label: 'E_K' }, { v: p.ENa, color: C.na, label: 'E_Na' }, { v: Vinf, color: C.accent, dash: [2, 3], width: 2, label: 'V∞' }]
       : [{ v: Vinf, color: C.accent, dash: [2, 3], width: 2, label: 'V∞' }];
-    drawChart(vc, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, state: vState, minSpan: 20,
+    drawChart(vc, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, w: CW, h: CH, key: 15, state: vState, minSpan: 20,
       series: [{ ys: hist.V, color: C.ink, width: 2.4 }], refs, ylabel: 'mV', xlabel: `last ${WIN} ms` });
     const n1 = mode === 'g' ? 'Na⁺' : 'source', n2 = mode === 'g' ? 'K⁺' : 'R', c1 = mode === 'g' ? C.na : C.muted, c2 = mode === 'g' ? C.k : C.ink;
-    if (cview === 'i') drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, state: iState, minSpan: 10,
+    if (cview === 'i') drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, w: CW, h: CH, key: 15, fixed: I_RANGE,
       series: [{ ys: hist.i1, color: c1, label: 'I ' + n1 }, { ys: hist.i2, color: c2, label: 'I ' + n2 }, { ys: hist.iC, color: C.pos, width: 2.6, label: 'I_C' }],
       ylabel: 'µA/cm², outward +', xlabel: `last ${WIN} ms` });
-    else drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, restart: true, state: iState, minSpan: 10,
+    else drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, restart: true, w: CW, h: CH, key: 15, state: iState, minSpan: 10,
       series: [{ ys: hist.q1, color: c1, label: n1 + ' in' }, { ys: hist.q2, color: c2, label: n2 + ' out' }, { ys: hist.qC, color: C.pos, width: 2.6, label: 'on C' }],
       ylabel: 'nC/cm² since the switch', xlabel: `last ${WIN} ms` });
   }
@@ -581,7 +657,7 @@ function chipGroup(attr, onPick) {
     document.querySelectorAll('[data-for]').forEach(r => r.hidden = r.dataset.for !== mode);
   }
   function reset() {
-    sw = true; setSwitch(false); pulseEnd = -1; V = restV(); t = 0; cum = [0, 0, 0]; sampleAcc = 0;
+    sw = true; setSwitch(false); V = restV(); t = 0; cum = [0, 0, 0]; sampleAcc = 0;
     for (const k in hist) hist[k].length = 0;
     vState.lo = iState.lo = null;
     buildSegs();
@@ -589,8 +665,7 @@ function chipGroup(attr, onPick) {
 
   chipGroup('mode', m => { mode = m; reset(); captions(); });
   chipGroup('cview', v => { cview = v; iState.lo = null; captions(); });
-  $('cSwitch').addEventListener('click', () => { pulseEnd = -1; setSwitch(!sw); });
-  $('cPulse').addEventListener('click', () => { setSwitch(true); pulseEnd = t + p.dur; });
+  $('cSwitch').addEventListener('click', () => setSwitch(!sw));
   $('cReset').addEventListener('click', reset);
   const speedFrom = v => Math.pow(10, -1 + v * 0.02);   // ms of model time per second: 0.1 to 10
   bindRange('cSpeed', v => { const s = speedFrom(v); return (s < 1 ? s.toFixed(2) : s.toFixed(1)) + ' ms/s'; }, v => speed = speedFrom(v));
@@ -601,13 +676,12 @@ function chipGroup(attr, onPick) {
   bindRange('cEK', v => fmtSigned(v, 0), v => p.EK = v);
   bindRange('cGNa', v => v.toFixed(2) + ' mS/cm²', v => p.gNa = v);
   bindRange('cENa', v => fmtSigned(v, 0), v => p.ENa = v);
-  bindRange('cDur', v => v + ' ms', v => p.dur = v);
 
   reset(); captions();
   let last = performance.now(), frame = 0;
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    advance(dt * speed);
+    advance(dt * speed); stepDots();
     draw(); drawCharts();
     if (frame++ % 6 === 0) readouts();
     requestAnimationFrame(loop);
@@ -625,8 +699,9 @@ function chipGroup(attr, onPick) {
 (() => {
   // ---------- geometry & constants ----------
   const W = 1200, MX = W / 2, MW = 8, PH = 18, SLOT = 36, H_REF = 100;
-  const NSLOT = 24, H = NSLOT * SLOT;         // simulated membrane length (periodic in y)
-  const VZ = 1.25, CW = 900, CH = 540;         // view: zoom, canvas size; shows the top of the patch
+  const NSLOT = 48, H = NSLOT * SLOT;         // simulated membrane length (periodic in y); room for 24 of each channel
+  const H0 = 24 * SLOT;                       // patch length the Membrane C slider is scaled to, so C stays per patch
+  const VZ = 1.25, CW = 900, CH = 860;         // view: zoom, canvas size; shows the top 688 px of the patch
   const VX0 = MX - CW / (2 * VZ);
   const XIN = MX - MW, XOUT = MX + MW;
   const KT = 25.7;                             // RT/F, mV
@@ -700,15 +775,20 @@ function chipGroup(attr, onPick) {
   const lambda = 40;
   let cTot = 1.9;
   const cross = [0, 0];                         // net outward crossings this sample window, K and Na
-  let cumNaIn = 0, cumKOut = 0, pulseEnd = -1;
+  let cumNaIn = 0, cumKOut = 0;
   const SAMPLE = 100, TRACE_LEN = 500;
   let sampleAcc = 0, vSum = 0, vAvg = 0, iSm = [0, 0, 0];
   const tr = { x: [], V: [], iK: [], iNa: [], iC: [], qNa: [], qK: [], qC: [], on: [] };
   const crossings = [];
 
   const hist = new Float32Array(W + 1), E = new Float32Array(W + 1), kap = new Float32Array(W + 1);
+  // Random kicks, as in membrane_potential.html: every entry is stored with its negative so the table's
+  // mean is exactly 0. A sampled table is off by about 0.004, a steady push on every ion that moved the
+  // voltage by tens of mV (even past E_Na) and in a different direction on every page load.
   const GN = 1 << 16, GTAB = new Float32Array(GN);
-  for (let i = 0; i < GN; i++) GTAB[i] = (Math.random() + Math.random() + Math.random() - 1.5) * 2;
+  { let ss = 0;
+    for (let i = 0; i < GN; i += 2) { const v = (Math.random() + Math.random() + Math.random() - 1.5) * 2; GTAB[i] = v; GTAB[i + 1] = -v; ss += 2 * v * v; }
+    const k = Math.sqrt(GN / ss); for (let i = 0; i < GN; i++) GTAB[i] *= k; }   // and exactly unit variance
   let rngState = (Math.random() * 0xffffffff) | 0 || 1;
 
   const perPx2 = c => c * density / MM_PER_RHO;
@@ -716,7 +796,7 @@ function chipGroup(attr, onPick) {
   const inCount = s => perPx2(conc(CIN, s)) * XIN * H;
   const bathCount = s => perPx2(conc(COUT, s)) * (W - XOUT) * H;
   function setKappa() {
-    const kMem = qmv / (KT * 2 * MW) * (H_REF / H);
+    const kMem = qmv / (KT * 2 * MW) * (H_REF / H0);
     const kWat = 1 / (lambda * lambda * cTot);
     for (let i = 0; i <= W; i++) kap[i] = (i >= XIN && i < XOUT) ? kMem : kWat;
   }
@@ -736,7 +816,7 @@ function chipGroup(attr, onPick) {
     // start near rest: move the charge a K⁺-only membrane holds at E_K from inside to outside. The
     // diffuse charge layers are a second capacitor in series with the bilayer (about 0.6 e/mV per
     // 1000 px of membrane, measured), so the charge is less than the bilayer's C × E_K.
-    const cMem = H / (H_REF * qmv), cLayers = 0.6 * H / 1000, cEff = 1 / (1 / cMem + 1 / cLayers);   // e per mV
+    const cMem = H0 / (H_REF * qmv), cLayers = 0.6 * H / 1000, cEff = 1 / (1 / cMem + 1 / cLayers);   // e per mV
     setMembraneCharge(Math.round(cEff * KT * Math.log(COUT[0] / CIN[0])));
     steps = 0; stepAcc = 0; sampleAcc = 0; vSum = 0; cross.fill(0); cumNaIn = cumKOut = 0; iSm = [0, 0, 0];
     for (const k in tr) tr[k].length = 0;
@@ -822,7 +902,6 @@ function chipGroup(attr, onPick) {
     if (steps % 25 === 0) clampBath();
     computeField();
     sampleAcc++; vSum += V;
-    if (pulseEnd >= 0 && steps >= pulseEnd) { pulseEnd = -1; setGate(false); }
     if (sampleAcc >= SAMPLE) sample();
   }
   function sample() {
@@ -864,7 +943,7 @@ function chipGroup(attr, onPick) {
     const o = poreSlots();
     naOpen = open; cumNaIn = cumKOut = 0;
     if (!open) ejectFromPores(o);
-    const b = $('gate'); b.setAttribute('aria-pressed', String(open)); b.textContent = open ? 'Close Na⁺ channels' : 'Open Na⁺ channels';
+    $('gate').setAttribute('aria-checked', String(open)); $('gateState').textContent = open ? 'open' : 'closed';
   }
 
   // ---------- readouts ----------
@@ -880,9 +959,11 @@ function chipGroup(attr, onPick) {
 
   // ---------- drawing ----------
   const cv = $('sim'), ctx = setupCanvas(cv, CW, CH);
-  const vc = setupCanvas($('pVchart'), CHW, CHH), ic = setupCanvas($('pIchart'), CHW, CHH);
+  const chartW = 480, chartH = 360;      // charts sit beside the simulation, as in part 1; taller to match its height
+  const I_RANGE = [-30, 30];             // fixed current axis (ions per 1000 steps): fits 24 of each channel
+  const vc = setupCanvas($('pVchart'), chartW, chartH), ic = setupCanvas($('pIchart'), chartW, chartH);
   const vState = {}, iState = {};
-  let pview = 'q', tint = [], lipid = '';
+  let pview = 'i', tint = [], lipid = '';
   colorHooks.push(() => { tint = [C.k, C.na].map(c => mixc(c, C.surface, 0.24)); lipid = mixc(C.mem, C.surface, 0.45); lutDark = null; });
   tint = [C.k, C.na].map(c => mixc(c, C.surface, 0.24)); lipid = mixc(C.mem, C.surface, 0.45);
 
@@ -1001,15 +1082,15 @@ function chipGroup(attr, onPick) {
   }
   function drawCharts() {
     const x1 = Math.max(TRACE_LEN * SAMPLE / 1000, steps / 1000), x0 = x1 - TRACE_LEN * SAMPLE / 1000;
-    drawChart(vc, { xs: tr.x, x0, x1, on: tr.on, fixed: [-110, 80],
+    drawChart(vc, { w: chartW, h: chartH, key: 15, xs: tr.x, x0, x1, on: tr.on, fixed: [-110, 80],
       series: [{ ys: tr.V, color: C.ink, width: 2.2 }],
       refs: [{ v: nernst(0), color: C.k, label: 'E_K' }, { v: nernst(1), color: C.na, label: 'E_Na' },
              { v: ghk(nCh[0], naOpen ? nCh[1] : 0), color: C.accent, dash: [2, 3], width: 2, label: 'GHK' }],
       ylabel: 'mV', xlabel: 'thousands of steps' });
-    if (pview === 'q') drawChart(ic, { xs: tr.x, x0, x1, on: tr.on, restart: true, state: iState, minSpan: 20,
+    if (pview === 'q') drawChart(ic, { w: chartW, h: chartH, key: 15, r: 128, xs: tr.x, x0, x1, on: tr.on, restart: true, state: iState, minSpan: 20,
       series: [{ ys: tr.qNa, color: C.na, label: 'Na⁺ in' }, { ys: tr.qK, color: C.k, label: 'K⁺ out' }, { ys: tr.qC, color: C.pos, width: 2.6, label: 'on membrane' }],
       ylabel: 'ions since the last change', xlabel: 'thousands of steps' });
-    else drawChart(ic, { xs: tr.x, x0, x1, on: tr.on, state: iState, minSpan: 4,
+    else drawChart(ic, { w: chartW, h: chartH, key: 15, xs: tr.x, x0, x1, on: tr.on, fixed: I_RANGE,
       series: [{ ys: tr.iNa, color: C.na, label: 'I_Na' }, { ys: tr.iK, color: C.k, label: 'I_K' }, { ys: tr.iC, color: C.pos, width: 2.6, label: 'I_C' }],
       ylabel: 'ions per 1000 steps, outward +', xlabel: 'thousands of steps' });
   }
@@ -1023,23 +1104,16 @@ function chipGroup(attr, onPick) {
   const speedFromSlider = v => Math.pow(10, -1.7 + v * 0.04);
   const fmtSpeed = s => s >= 1 ? Math.round(s) + ' steps/fr' : '1 step/' + Math.round(1 / s) + ' fr';
   bindRange('speed', v => fmtSpeed(speedFromSlider(v)), v => speed = speedFromSlider(v));
-  bindRange('nK', v => v + ' channels', v => { nCh[0] = v; fixTotal(1); });
-  bindRange('nNa', v => v + ' channels', v => { nCh[1] = v; fixTotal(0); });
-  function fixTotal(other) {
-    // at most one channel per slot: lower the other slider if needed
-    if (nCh[0] + nCh[1] > NSLOT) { nCh[other] = NSLOT - nCh[1 - other]; const id = other ? 'nNa' : 'nK'; $(id).value = nCh[other]; $(id + 'o').textContent = nCh[other] + ' channels'; }
-    if (N) relayout(); else buildChannels();
-  }
-  let pulseDur = 15000;
-  bindRange('pDur', v => (v * 1000).toLocaleString() + ' steps', v => pulseDur = v * 1000);
-  bindRange('qmv', v => (H / (H_REF * v)).toFixed(2) + ' e/mV', v => { qmv = v; setKappa(); computeField(); });
+  // 48 slots hold up to 24 of each, so the two sliders never limit each other
+  bindRange('nK', v => v + ' channels', v => { nCh[0] = v; N ? relayout() : buildChannels(); });
+  bindRange('nNa', v => v + ' channels', v => { nCh[1] = v; N ? relayout() : buildChannels(); });
+  bindRange('qmv', v => (H0 / (H_REF * v)).toFixed(2) + ' e/mV', v => { qmv = v; setKappa(); computeField(); });
   $('tint').addEventListener('change', e => tintOn = e.target.checked);
-  $('gate').addEventListener('click', () => { pulseEnd = -1; setGate(!naOpen); });
-  $('pPulse').addEventListener('click', () => { setGate(true); pulseEnd = steps + pulseDur; });
+  $('gate').addEventListener('click', () => setGate(!naOpen));
   const playBtn = $('play');
   const setRunning = r => { running = r; playBtn.textContent = r ? 'Pause' : 'Play'; };
   playBtn.addEventListener('click', () => setRunning(!running));
-  $('reset').addEventListener('click', () => { pulseEnd = -1; setGate(false); reset(); iState.lo = null; });
+  $('reset').addEventListener('click', () => { setGate(false); reset(); iState.lo = null; });
   chipGroup('pview', v => { pview = v; iState.lo = null; captions(); });
   colorHooks.push(() => { drawSim(); drawCharts(); });
 

@@ -22,6 +22,7 @@ import numpy as np
 
 from . import colors, config
 from .backends import Backend, Chunk
+from .units import whole
 
 try:
     import sounddevice as _sd
@@ -115,8 +116,8 @@ class AudioBackend(Backend):
             _sd.check_input_settings(device=dev["index"], channels=max(self._sel) + 1,
                                      samplerate=self.cfg.sample_rate, dtype="float32")
         except Exception:
-            raise RuntimeError(f"{dev['name']} can't record at {self.cfg.sample_rate:,.0f} Hz; try "
-                               f"{dev['rate']:,.0f} Hz (its usual rate), 44,100 or 48,000 Hz.") from None
+            raise RuntimeError(f"{dev['name']} can't record at {whole(self.cfg.sample_rate)}; try "
+                               f"{whole(dev['rate'])} (its usual rate), 44,100 Hz or 48 kHz.") from None
         self._blocks: queue.Queue = queue.Queue()
         self._stream = _sd.InputStream(device=dev["index"], channels=max(self._sel) + 1,
                                        samplerate=self.cfg.sample_rate, blocksize=self.cfg.chunk_size,

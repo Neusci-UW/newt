@@ -10,7 +10,7 @@ from .units import _PREFIX, _converter, _tidy_unit, parse_quantity, unit_factor
 
 
 # Prefixes a field may show, by base unit, smallest first. Others get µ, m and none.
-_SHOW_PREFIXES = {"Hz": ("", "k"), "A": ("n", "µ", "m", "")}
+_SHOW_PREFIXES = {"Hz": ("", "k"), "A": ("n", "µ", "m", ""), "Ω": ("", "k", "M"), "F": ("p", "n", "µ", "m", "")}
 
 
 class UnitSpinBox(QtWidgets.QDoubleSpinBox):
@@ -59,6 +59,14 @@ class UnitSpinBox(QtWidgets.QDoubleSpinBox):
         for u in options:
             if abs(v) >= self._convert(u) * (1 - 1e-9):
                 best = u
+        # Above the base unit (k, M), only a prefix that gives a whole number: 10000 Hz is
+        # "10 kHz" but 2500 Hz stays "2500 Hz" rather than "2.5 kHz".
+        base_f = self._convert(base) or 1.0
+        while self._convert(best) > base_f * (1 + 1e-9):
+            x = v / self._convert(best)
+            if abs(x - round(x)) < 1e-9 * max(1.0, abs(x)):
+                break
+            best = options[options.index(best) - 1]
         return best
 
     def textFromValue(self, v: float) -> str:

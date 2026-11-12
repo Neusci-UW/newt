@@ -36,6 +36,7 @@ from .stim import Stimulus
 from .repeatfinder import RepeatFinder
 from .spikefinder import SpikeFinder
 from .viewkit import scroll_column
+from .units import whole
 
 
 class AnalysisPage(QtWidgets.QWidget):
@@ -277,7 +278,7 @@ class AnalysisPage(QtWidgets.QWidget):
             src = self.main.review_dir.name if self.main.review_dir else "this session"
             lo, hi = f"{min(durs):.3g}", f"{max(durs):.3g}"
             self.source.setText(f"<b>{src}</b>: {n} trial(s), {lo if lo == hi else lo + '–' + hi} s each, "
-                                f"{good[0]['sample_rate']:,.0f} Hz")
+                                f"{whole(good[0]['sample_rate'])}")
         for w in (self.current, self.slider):
             w.blockSignals(True)
             w.setMaximum(max(1, n))

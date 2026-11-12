@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 # SI prefixes a typed unit may carry ("u" for people without a µ key).
-_PREFIX = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6, "m": 1e-3, "k": 1e3}
+_PREFIX = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 _QUANTITY = re.compile(r"^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*(\S*)\s*$", re.IGNORECASE)
 
 
@@ -77,3 +77,17 @@ def best_prefix(v: float, unit: str, prefixes=("µ", "m", "")) -> tuple[float, s
     fits = [p for p in prefixes if abs(in_base) >= factor[p] * (1 - 1e-9)]
     p = max(fits, key=factor.get) if fits else min(prefixes, key=factor.get)
     return in_base / factor[p], p + base
+
+
+def whole(v: float, unit: str = "Hz") -> str:
+    """v (in `unit`) as text, with the largest prefix that still gives a whole number:
+    10000 Hz -> "10 kHz", 25000 -> "25 kHz", 2000000 -> "2 MHz"; 44100 stays "44,100 Hz"
+    and 0.5 stays "0.5 Hz"."""
+    def is_whole(x):
+        return abs(x - round(x)) < 1e-9 * max(1.0, abs(x))
+    p, f = "", 1.0
+    for q, g in (("k", 1e3), ("M", 1e6)):
+        if abs(v) >= g and is_whole(v / g):
+            p, f = q, g
+    x = v / f
+    return f"{round(x):,} {p}{unit}" if is_whole(x) else f"{x:,g} {p}{unit}"

@@ -1,16 +1,18 @@
 """The Membrane potential tab: an interactive particle simulation of ions crossing a
 membrane, with the Nernst and GHK equations, a charge-density view and a GHK calculator.
-The RC circuit tab uses the same class to show web/rc_membrane.html: a membrane's
+The RC circuit tab uses the same class to show rc_membrane.html: a membrane's
 equivalent circuit charging, then the same thing with ions when Na⁺ channels open.
 
-The page itself is web/membrane_potential.html (plain HTML and JavaScript). It is shown
+The pages live in the Neusci-UW/lessons repo, a git submodule at lessons/ (clone Newt with
+--recurse-submodules, or run `git submodule update --init`). The page itself is
+lessons/membrane_potential.html (plain HTML and JavaScript). It is shown
 in a QWebEngineView, which needs the optional PyQt6-WebEngine package:
 
     pip install -e ".[web]"
 
 Without it the tab explains that and offers to open the page in the web browser instead.
-The equations use MathJax: web/vendor/mathjax/tex-svg.js if present (see
-tools/fetch_mathjax.py, for computers without internet), otherwise the online copy.
+The equations use MathJax: lessons/vendor/mathjax/tex-svg.js if present (see
+lessons/tools/fetch_mathjax.py, for computers without internet), otherwise the online copy.
 """
 from __future__ import annotations
 
@@ -21,9 +23,11 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
 
-PAGE = Path(__file__).with_name("web") / "membrane_potential.html"
+# The lesson pages: the Neusci-UW/lessons submodule
+LESSON_PAGES = Path(__file__).with_name("lessons")
+PAGE = LESSON_PAGES / "membrane_potential.html"
 # The RC circuit page: a capacitor charging, then the same thing done by ions
-RC_PAGE = Path(__file__).with_name("web") / "rc_membrane.html"
+RC_PAGE = LESSON_PAGES / "rc_membrane.html"
 
 # QtWebEngine has to be imported before the QApplication exists. gui.py imports this
 # module at the top, before run() makes the app, so importing it here is early enough.
@@ -38,8 +42,9 @@ except Exception:   # not installed, or imported after the QApplication (as in s
     QWebChannel = None
 
 # Lessons: questions placed on a simulation page and parts of it locked until they are
-# answered (web/lesson.js). Each lesson is a file here; the page's lesson editor saves into it.
-LESSONS = Path(__file__).with_name("lessons")
+# answered (lessons/lesson.js). Each lesson is a file in lessons/questions; the page's lesson
+# editor saves into it.
+LESSONS = LESSON_PAGES / "questions"
 _LESSON_NAME = re.compile(r"[a-z0-9_-]{1,64}")
 
 
@@ -106,7 +111,7 @@ class MembranePage(QtWidgets.QWidget):
         self.btn_refresh = QtWidgets.QPushButton("Refresh")
         self.btn_refresh.setToolTip("Reload the simulation from the start, with every setting back to its default")
         self.btn_refresh.clicked.connect(self.view.reload)
-        # Shown once the page turns out to have lessons (it loads web/lesson.js)
+        # Shown once the page turns out to have lessons (it loads lessons/lesson.js)
         self.btn_lesson = QtWidgets.QPushButton("Edit lesson")
         self.btn_lesson.setCheckable(True)
         self.btn_lesson.setToolTip("Write or change this page's lesson: right-click the page to insert a question "

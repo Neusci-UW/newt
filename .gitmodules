@@ -1,0 +1,3 @@
+[submodule "src/neusci_daq/lessons"]
+	path = src/neusci_daq/lessons
+	url = https://github.com/Neusci-UW/lessons.git

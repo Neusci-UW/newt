@@ -20,7 +20,7 @@ import time
 
 import numpy as np
 
-from . import colours, config
+from . import colors, config
 from .backends import Backend, Chunk
 
 try:
@@ -186,7 +186,7 @@ class Monitor:
         return self._stream is not None
 
     def feed(self, y: np.ndarray, fs: float) -> None:
-        """The newest samples of the channel listened to (any unit; centred and scaled)."""
+        """The newest samples of the channel listened to (any unit; centered and scaled)."""
         y = np.nan_to_num(np.asarray(y, float))
         if not len(y):
             return
@@ -252,7 +252,7 @@ def use_audio_channels(cfg) -> None:
     if not all(c.physical.startswith("in") for c in cfg.channels):
         cfg.spare_channels = []
         cfg.channels = [config.Channel(f"in{i + 1}", f"Audio {i + 1}") for i in range(n)]
-        colours.fill_colors(cfg.channels)
+        colors.fill_colors(cfg.channels)
     if cfg.sample_rate not in RATES:
         cfg.sample_rate = dev["rate"] if dev else 48000.0
     cfg.chunk_size = config.auto_chunk_size(cfg.sample_rate)

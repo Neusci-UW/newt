@@ -3,7 +3,7 @@
 Fusion is used everywhere so the app looks the same on Windows and macOS
 (the native Windows style draws gradient buttons and boxed drop-down arrows).
 The moon/sun button switches the whole app, plots included (see theme.py for
-the plot colours).
+the plot colors).
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 ICON_DIR = Path(__file__).with_name("icons")
 LIGHT, DARK = "light", "dark"
 
-# Colours for each mode. Start (blue) and Record (red) are the same in both.
+# Colors for each mode. Start (blue) and Record (red) are the same in both.
 TOKENS = {
     LIGHT: dict(
         ink="#1f2328", muted="#4a5058", subtle="#5c6370", ground="#f3f4f6", panel="#ffffff",

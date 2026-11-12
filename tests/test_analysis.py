@@ -4,7 +4,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pytest
 
 from neusci_daq import analysis as A, trialfile
-from neusci_daq import colours as cm, groupsfile, session, simulation as sim
+from neusci_daq import colors as cm, groupsfile, session, simulation as sim
 from neusci_daq.channels import ColorButton
 from neusci_daq.gui import REVIEW
 from neusci_daq.canvas import KINDS
@@ -628,7 +628,7 @@ def test_mean_spread():
     assert np.allclose(mean, [3, 4, 5]) and list(n) == [3, 3, 1]
     assert sd[0] == pytest.approx(2.0) and sem[0] == pytest.approx(2 / np.sqrt(3))
     assert np.isnan(sd[2]) and np.isnan(sem[2])                     # one trial: no spread
-    centres, rates = A.triggered_rates({0: np.array([0.105, 0.11, 0.62])}, {0: np.array([0.1, 0.6])}, 10, 30, 10)
+    centeres, rates = A.triggered_rates({0: np.array([0.105, 0.11, 0.62])}, {0: np.array([0.1, 0.6])}, 10, 30, 10)
     assert rates.shape == (2, 4) and list(rates[:, 1]) == [100.0, 0.0]   # 5 ms after: 1 spike in 10 ms
 
 
@@ -954,21 +954,76 @@ def _spike_sorting(app, win):
     return ap, ap.raw
 
 
-def test_the_trials_browser_picks_the_trials(app, win):
+def test_ticks_choose_the_trials_and_highlighting_just_looks(app, win):
     ap, raw = _spike_sorting(app, win)
     assert ap.blocks_panel.isVisible() and ap.blocks_panel.title.text().startswith("<b>Trials</b>")
-    tree = ap.blocks_panel.tree
-    for item in ap.blocks_panel.items():                             # as a drag across two blocks would
+    panel, tree = ap.blocks_panel, ap.blocks_panel.tree
+    every = len(raw.chosen_or_none())
+    assert not panel.btn_tick_hl.isEnabled() and not panel.btn_only_hl.isEnabled()
+    for item in panel.items():                                       # as a drag across two blocks would
         data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         item.setSelected(data[0] == "block" and data[1] in (0, 2))
     pump(app, 0.3)
+    assert ap.picked == [] and len(raw.chosen_or_none()) == every    # highlighting alone analyzes nothing new
+    assert ap.index() in (0, 2) and panel.btn_only_hl.isEnabled()    # but shows the trial you're on
+    panel.btn_only_hl.click()
+    pump(app, 0.3)
     assert ap.picked == [0, 2] and raw.chosen_or_none() == [0, 2]
     assert tree.selectedItems()
-    ap.source_changed()                                              # a refill keeps the selection
-    assert ap.blocks_panel.selected_blocks() == [0, 2]
-    ap.blocks_panel.btn_all.click()
+    ap.source_changed()                                              # a refill keeps the highlight
+    assert panel.selected_blocks() == [0, 2]
+    panel.btn_select.click()                                         # Select all: every trial again
     pump(app, 0.05)
-    assert ap.picked == [] and not tree.selectedItems() and len(raw.chosen_or_none()) == len(ap.blocks)
+    assert ap.picked == [] and len(raw.chosen_or_none()) == every
+
+
+def test_tick_highlighted_adds_to_the_ticked_trials(app, win):
+    ap, raw = _spike_sorting(app, win)
+    ap.select_blocks([0])
+    assert raw.chosen_or_none() == [0]
+    ap.tick_highlighted([2], [], False)
+    assert raw.chosen_or_none() == [0, 2]                           # added, nothing unticked
+
+
+def test_spikes_are_found_by_themselves_on_the_ticked_trials(app, win):
+    ap, raw = _spike_sorting(app, win)
+    raw.clear()
+    raw._paused = False
+    ap.select_blocks([0])
+    pump(app, 0.6)                                                   # no Find pressed
+    assert raw.events is not None and set(raw.events.block.tolist()) <= {0}
+    found = dict(raw._memo)
+    ap.tick_highlighted([1], [], False)
+    pump(app, 0.6)
+    assert raw.events is not None and set(raw.events.block.tolist()) <= {0, 1}
+    assert all(k in raw._memo for k in found)                        # trial 0 wasn't searched again
+    raw.clear()
+    ap.tick_highlighted([2], [], False)
+    pump(app, 0.6)
+    assert raw.events is None                                        # Clear stops it until Find again
+
+
+def test_spikes_are_found_when_a_session_opens(app, win):
+    ap, raw = _spike_sorting(app, win)
+    raw.clear()
+    raw._paused = False                                              # as when NEWT starts
+    raw._done = set()
+    ap.refresh()                                                     # the trials read, as on opening
+    pump(app, 0.6)
+    assert raw.events is not None                                    # nothing ticked or pressed
+
+
+def test_units_keep_their_numbers_when_more_trials_are_sorted():
+    rng = np.random.default_rng(1)
+    big, small = np.sin(np.linspace(0, 3, 20)) * 5, np.sin(np.linspace(0, 3, 20))
+    def events(order):
+        waves = np.vstack([w + rng.normal(0, 0.05, (10, 20)) for w in order])
+        unit = np.repeat(np.arange(len(order)), 10)
+        return A.Events(np.zeros(len(unit), int), np.zeros(len(unit)), unit, np.zeros(len(unit)), waves,
+                        np.arange(20), 1.0, 1.0, [])
+    before, after = events([big, small]), events([small, big])     # sorted again, numbered the other way
+    assert list(np.unique(A.match_units(before, after)[after.unit == 0])) == [1]
+    assert list(np.unique(A.match_units(before, after)[after.unit == 1])) == [0]
 
 
 def test_the_raster_has_a_row_for_each_chosen_block(app, win):
@@ -1052,7 +1107,7 @@ def test_a_page_shows_its_average_and_blocks_their_trials(app, win):
     assert C(raw, "Trials").trial_items[0].opts["pen"].color().alpha() == 255 > alpha   # one on its own is solid
 
 
-def test_page_colours_are_editable_and_saved_with_the_session(app, win):
+def test_page_colors_are_editable_and_saved_with_the_session(app, win):
     ap, raw = _spike_sorting(app, win)
     name = ap.shown[0][0]
     ap.set_page_color(name, "#123456")
@@ -1063,7 +1118,7 @@ def test_page_colours_are_editable_and_saved_with_the_session(app, win):
     assert ap.group_color(0) != "#123456"
 
 
-def test_colour_maps_run_across_pages_and_trials(app, win):
+def test_color_maps_run_across_pages_and_trials(app, win):
     ap, raw = _spike_sorting(app, win)
     ap.page_map.setCurrentText("Viridis")
     assert ap.group_color(0) == cm.sample("Viridis", 0).name()
@@ -1083,7 +1138,7 @@ def test_the_stimulus_chart_shows_every_chosen_block(app, win):
     assert sum(s.getOriginalDataset()[1].shape[0] for s in C(raw, "Stimulus").stim_items) == 2
 
 
-def test_the_stimulus_is_the_colour_of_its_response(app, win):
+def test_the_stimulus_is_the_color_of_its_response(app, win):
     ap, raw = _spike_sorting(app, win)
     name = ap.shown[0][0]
     ap.select_pages([name])
@@ -1229,7 +1284,7 @@ def test_any_chart_can_be_open_twice_with_its_own_settings(app, win):
     second.point_size.setValue(7)
     assert first.point_size.value() == 4
     assert first.raster_dots.opts["size"] == 4 and second.raster_dots.opts["size"] == 7
-    second.units_box.setCurrentIndex(1)                              # its own units
+    second.units_own.setChecked(True)                                # its own units
     second.show_unit(0, False)
     assert len(second.raster_dots.data) == (ev.unit == 1).sum() and len(first.raster_dots.data) == len(ev.t)
     raw.show_units({0})                                              # the others follow the ticks; it doesn't
@@ -1294,6 +1349,41 @@ def test_charts_move_snap_and_resize_on_the_board(app, win):
     assert (f.place.width(), f.place.height()) == (B.MIN_W, B.MIN_H)
     space.zoom_about(0.5)                                            # smaller on screen, same place on the board
     assert abs(f.width() - B.MIN_W * 0.5) <= 1 and f.place.width() == B.MIN_W
+
+
+def test_a_chart_moves_when_dragged_by_its_name(app, win):
+    from pyqtgraph.Qt import QtTest
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    f = C(raw, "Raster").dock
+    f.bar.show()                                                       # the mouse is on the chart
+    pump(app, 0.1)
+    before = QtCore.QPointF(f.place.topLeft())
+    at = QtCore.QPoint(f.bar.name.x() + 10, f.bar.height() // 2)          # on the name, as most clicks are
+    under = f.bar.childAt(at) or f.bar
+    assert under is not f.bar.name                                     # the name lets the click through to the bar
+    left = QtCore.Qt.MouseButton.LeftButton
+    QtTest.QTest.mousePress(under, left, QtCore.Qt.KeyboardModifier.NoModifier, under.mapFrom(f.bar, at))
+    to = at + QtCore.QPoint(80, 60)
+    QtWidgets.QApplication.sendEvent(under, QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseMove, QtCore.QPointF(under.mapFrom(f.bar, to)), QtCore.QPointF(f.bar.mapToGlobal(to)),
+        QtCore.Qt.MouseButton.NoButton, left, QtCore.Qt.KeyboardModifier.NoModifier))
+    QtTest.QTest.mouseRelease(under, left, QtCore.Qt.KeyboardModifier.NoModifier, under.mapFrom(f.bar, to))
+    assert f.place.topLeft() != before
+
+
+def test_the_left_panel_takes_only_the_room_it_shows(app, win):
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    for key in ("spikes", "trials", "groups", "channels"):
+        ap.open_panel(key)
+        pump(app, 0.05)
+        shown = ap.panels[key]
+        assert ap.panel() == key
+        assert ap.drawer.width() <= shown.width() + 2                  # no blank strip over the board
+        assert ap.canvas.geometry().left() <= ap.drawer.geometry().right() + 2
+    ap.open_panel("")
+    assert ap.panel() == "" and not ap.drawer.isVisible()
 
 
 def test_picking_several_charts_changes_them_together(app, win):
@@ -1407,6 +1497,128 @@ def test_clicking_a_chart_shows_its_settings(app, win):
     assert ap.side.isVisible() and "Rate" in ap.side.heading.text()  # beside the board, not in a window
 
 
+def test_a_quick_click_inside_a_chart_picks_it(app, win):
+    ap, raw = _spike_sorting(app, win)
+    canvas = ap.canvas
+    first, chart = C(raw, "Raster"), C(raw, "Rate")
+    canvas.select(first)
+    at = QtCore.QPointF(20, 20)
+    view = chart.plot.viewport()
+    QtWidgets.QApplication.sendEvent(view, QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonPress, at, view.mapToGlobal(at), QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier))
+    assert canvas.picked() == [chart]                                # no holding, no focus needed
+    QtWidgets.QApplication.sendEvent(first.plot.viewport(), QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonPress, at, view.mapToGlobal(at), QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.ShiftModifier))
+    assert set(canvas.picked()) == {first, chart}                    # shift adds
+
+
+def test_title_bars_show_only_while_the_mouse_is_on_the_chart(app, win):
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    f = C(raw, "Rate").dock
+    pump(app, 0.05)
+    assert not f.bar.isVisible()
+    QtWidgets.QApplication.sendEvent(f, QtGui.QEnterEvent(QtCore.QPointF(5, 5), QtCore.QPointF(5, 5),
+                                                          QtCore.QPointF(f.mapToGlobal(QtCore.QPoint(5, 5)))))
+    assert f.bar.isVisible() and f.bar.y() <= 1                      # over the chart's top: nothing moves
+    QtWidgets.QApplication.sendEvent(f, QtCore.QEvent(QtCore.QEvent.Type.Leave))
+    assert not f.bar.isVisible()
+
+
+def test_the_board_stays_put_when_a_panel_folds(app, win):
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    f = C(raw, "Rate").dock
+    ap.open_panel("trials")
+    pump(app, 0.1)
+    before = f.mapTo(win, QtCore.QPoint(0, 0))
+    ap.open_panel("")
+    pump(app, 0.1)
+    assert abs(f.mapTo(win, QtCore.QPoint(0, 0)).x() - before.x()) <= 1
+    ap.open_panel("spikes")
+    pump(app, 0.1)
+    assert abs(f.mapTo(win, QtCore.QPoint(0, 0)).x() - before.x()) <= 1
+
+
+def test_the_grid_can_be_hidden_and_is_remembered(app, win):
+    ap, raw = _spike_sorting(app, win)
+    space = ap.canvas.space
+    ap.canvas.floating.btn_grid.setChecked(False)
+    assert not space.grid and space.state()["grid"] is False
+    space.restore({**space.state(), "grid": True})
+    assert space.grid
+
+
+def test_an_area_of_the_board_exports_as_a_figure(app, win, tmp_path):
+    from neusci_daq import figure
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    f = C(raw, "Rate").dock
+    pump(app, 0.1)
+    area = f.place.adjusted(-10, -10, 10, 10)
+    for fmt in ("pdf", "svg", "png", "tiff"):
+        path = figure.save(ap.canvas.space, area, fmt, tmp_path / f"fig.{fmt}", dpi=150)
+        assert path.exists() and path.stat().st_size > 1000
+    img = QtGui.QImage(str(tmp_path / "fig.png"))
+    assert img.width() == round(area.width() * 150 / 72)              # the board's size, at 150 dpi
+    assert "<svg" in (tmp_path / "fig.svg").read_text()[:400]
+    copied = figure.save(ap.canvas.space, area, "copy", dpi=72)
+    assert not QtWidgets.QApplication.clipboard().image().isNull() and copied.width() == round(area.width())
+
+
+def test_the_export_tool_drags_a_box_over_the_charts(app, win, monkeypatch):
+    from neusci_daq import board as B
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    f = C(raw, "Rate").dock
+    pump(app, 0.1)
+    got = []
+    space = ap.canvas.space
+    monkeypatch.setattr(ap.canvas, "export", got.append)
+    space.export_requested.disconnect()
+    space.export_requested.connect(ap.canvas.export)
+    ap.canvas.set_tool(B.EXPORT)
+    r = f.geometry()
+    ov = space.overlay
+    ov.mousePressEvent(_mouse(QtCore.QPointF(r.center())))           # starting on a chart
+    ov.mouseMoveEvent(_mouse(QtCore.QPointF(r.center() + QtCore.QPoint(60, 40))))
+    ov.mouseReleaseEvent(_mouse(QtCore.QPointF(r.center() + QtCore.QPoint(60, 40))))
+    assert len(got) == 1 and got[0].width() > 0
+    ov.mousePressEvent(_mouse(QtCore.QPointF(5, 5)))
+    ov.mouseReleaseEvent(_mouse(QtCore.QPointF(5, 5)))               # a click: the same box again
+    assert len(got) == 2 and got[1] == got[0]
+    ap.canvas.set_tool(B.SELECT)
+
+
+def test_a_charts_look_line_thickness_grid_and_axis_ranges(app, win):
+    ap, raw = _spike_sorting(app, win)
+    win.show()
+    chart = C(raw, "Rate")
+    ap.canvas.select(chart)
+    pump(app, 0.1)
+    look = ap.side.look
+    assert look.isVisible()
+    pi = chart.plot.getPlotItem()
+    widths = [i.opts["pen"].widthF() for i in pi.listDataItems() if i.opts.get("pen") is not None]
+    look.thick.setValue(2.0)
+    after = [i.opts["pen"].widthF() for i in pi.listDataItems() if i.opts.get("pen") is not None]
+    assert after == [2 * (w or 1.0) for w in widths]
+    look.grid.setChecked(False)
+    assert not pi.ctrl.xGridCheck.isChecked()
+    box, auto = look.edges[("y", 1)]
+    box.setValue(123.0)
+    assert not auto.isChecked() and chart.look["y"][1] == 123.0
+    assert pi.vb.viewRange()[1][1] == pytest.approx(123.0)
+    chart.redraw()
+    assert pi.vb.viewRange()[1][1] == pytest.approx(123.0)           # stays when drawn again
+    state = chart.state()
+    assert state["look"]["thick"] == 2.0 and state["look"]["grid"] is False
+    auto.setChecked(True)
+    assert chart.look["y"] == [None, None]
+
+
 def test_the_left_strip_folds_out_one_panel_at_a_time(app, win):
     ap, raw = _spike_sorting(app, win)
     assert ap.panel() == "trials" and ap.blocks_panel.tree.isVisible() and not raw.isVisible()
@@ -1420,7 +1632,7 @@ def test_the_left_strip_folds_out_one_panel_at_a_time(app, win):
     pump(app, 0.05)
     assert ap.panel() == "" and not ap.stim_channel.isVisible()
     ap.open_panel("groups")
-    assert ap.spread_box.isVisibleTo(ap) and ap.group_colours.isVisibleTo(ap)
+    assert ap.spread_box.isVisibleTo(ap) and ap.group_colors.isVisibleTo(ap)
 
 
 def _mouse(at: QtCore.QPointF):
@@ -1725,7 +1937,7 @@ def test_find_rescales_y_and_settings_search_again(app, win):
     assert raw.events is not None
 
 
-def test_a_unit_colour_reaches_every_graph(app, win):
+def test_a_unit_color_reaches_every_graph(app, win):
     ap, raw = _spike_sorting(app, win)
     ev = raw.find()
     ev.unit = np.arange(len(ev.t)) % 2
@@ -1743,7 +1955,7 @@ def test_a_unit_colour_reaches_every_graph(app, win):
     assert C(raw, "Trials").marks.data["brush"][first].color() == want
 
 
-def test_groups_and_trials_can_be_hidden_and_colour_maps_skip_them(app, win):
+def test_groups_and_trials_can_be_hidden_and_color_maps_skip_them(app, win):
     two_stimulus_session(app, win)
     win.show()
     win.tabs.pick(0, "analysis")

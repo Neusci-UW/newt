@@ -2,15 +2,15 @@
 from pyqtgraph.Qt import QtCore, QtGui
 
 from neusci_daq import config, theme, trialfile
-from neusci_daq import colours
-from neusci_daq.colours import PALETTE
+from neusci_daq import colors
+from neusci_daq.colors import PALETTE
 
 from test_channels import app, make_cfg, pump, win  # noqa: F401  (fixtures)
 from test_colors import pen_hex, record_block
 
 
 def contrast(a: str, b: str) -> float:
-    la, lb = colours._luminance(QtGui.QColor(a)), colours._luminance(QtGui.QColor(b))
+    la, lb = colors._luminance(QtGui.QColor(a)), colors._luminance(QtGui.QColor(b))
     hi, lo = max(la, lb), min(la, lb)
     return (hi + 0.05) / (lo + 0.05)
 
@@ -38,24 +38,24 @@ def test_choice_is_remembered(win, tmp_path, app):
     w2.close()
 
 
-def test_every_palette_colour_is_visible_on_both_backgrounds():
+def test_every_palette_color_is_visible_on_both_backgrounds():
     for c in PALETTE:
-        assert contrast(colours.display_color(c, theme.LIGHT), "#ffffff") >= 3, c
-        assert contrast(colours.display_color(c, theme.DARK), "#000000") >= 3, c
-    assert contrast(colours.display_color("#000000", theme.DARK), "#000000") >= 3
+        assert contrast(colors.display_color(c, theme.LIGHT), "#ffffff") >= 3, c
+        assert contrast(colors.display_color(c, theme.DARK), "#000000") >= 3, c
+    assert contrast(colors.display_color("#000000", theme.DARK), "#000000") >= 3
 
 
-def test_dark_colours_are_left_alone_on_black():
-    assert colours.display_color("#e69f00", theme.DARK) == "#e69f00"
+def test_dark_colors_are_left_alone_on_black():
+    assert colors.display_color("#e69f00", theme.DARK) == "#e69f00"
 
 
-def test_light_mode_changes_drawing_not_the_saved_colour(app, win):
+def test_light_mode_changes_drawing_not_the_saved_color(app, win):
     win.set_channel_color(1, "#ffffff")
     record_block(app, win)
     win.btn_run.setChecked(False)
     win.set_plot_theme(theme.LIGHT)
     assert pen_hex(win.curves[1]) != "#ffffff"                     # drawn darker
-    assert win.rows[1].ch.color == "#ffffff"                       # saved colour unchanged
+    assert win.rows[1].ch.color == "#ffffff"                       # saved color unchanged
     assert session_colors(win.blocks[-1])[1] == "#ffffff"
 
 
@@ -90,7 +90,7 @@ def test_review_and_new_plots_use_the_current_theme(app, win):
     assert all(bg(win, i) == "#ffffff" for i in range(len(win.plot_widgets)))
 
 
-def test_icons_are_one_colour(app):
+def test_icons_are_one_color(app):
     for mode in (theme.DARK, theme.LIGHT):
         img = theme.toggle_icon(mode, "#000000").pixmap(20, 20).toImage()
         seen = {img.pixelColor(x, y).name() for x in range(20) for y in range(20)

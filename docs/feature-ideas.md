@@ -81,9 +81,9 @@ The top picks for a teaching lab, roughly in order:
 ### Acquisition
 
 - **Triggered recording with pre-trigger time**: record only around a threshold crossing or TTL, keeping some time before it. (LabChart, Spike2, Open Ephys)
-- **Keyboard event markers**: number keys drop typed or coloured markers, such as "drug on" and "drug off", which then appear in analysis. (Spike2 keyboard markers, LabChart comments)
+- **Keyboard event markers**: number keys drop typed or colored markers, such as "drug on" and "drug off", which then appear in analysis. (Spike2 keyboard markers, LabChart comments)
 - **Impedance check** of electrodes before recording, only if the hardware supports it. (Intan RHX)
-- **Synchronized video**, for behaviour alongside the recording. (LabChart Video Capture, Open Ephys)
+- **Synchronized video**, for behavior alongside the recording. (LabChart Video Capture, Open Ephys)
 - **Closed-loop stimulation**: stimulate when a spike or threshold crossing is detected. (Open Ephys, Spike2 sequencer)
 - **Live spike detection display**: the newest spikes overlaid in a small scope beside the chart. (Intan RHX Spike Scope, Open Ephys Spike Viewer)
 - **Saved experiment settings ("settings files")**: one file per lab exercise that sets channels, ranges, filters, stimulator and calculations together. (LabChart settings files, Clampex protocols)
@@ -105,7 +105,6 @@ The top picks for a teaching lab, roughly in order:
 - **NWB export** (Neurodata Without Borders), the standard format for sharing neurophysiology. (Open Ephys, SpikeInterface)
 - **ABF and WCP import**, to open Axon and WinWCP files for comparison. (Clampfit, WinWCP)
 - **A notebook export**: a Jupyter notebook that reloads the session and repeats the DataPad measurements, so students can take the analysis further in Python.
-- **Figure export**: a plot saved as SVG or PDF at publication size, with scale bars instead of axes. (Clampfit, AxoGraph)
 
 ### Simulation and teaching
 
@@ -114,11 +113,8 @@ The top picks for a teaching lab, roughly in order:
 - **Cable and propagation**: a compound action potential along a simulated nerve, with conduction velocity measured between two electrodes. It matches the earthworm and frog nerve labs. (NEURON)
 - **Synaptic plasticity** (paired-pulse facilitation, depression, LTP) in the network. (Brian2, NEST)
 - **Guided lab exercises**: a side panel with steps, questions and "check your measurement". (LabChart Lab Tutor / Guided Experiments)
-- **Noise sources in the simulator**: 60 Hz hum, electrode drift and movement artifacts, so students can practise filtering. Some of this already exists.
+- **Noise sources in the simulator**: 60 Hz hum, electrode drift and movement artifacts, so students can practice filtering. Some of this already exists.
 
 ## To recode later
 
-- **The whiteboard stays put when a left panel folds in or out.** Opening or closing Trials, Groups, Channels or Spikes changes the board's width, and at the moment what you were looking at slides sideways by the panel's width. Instead, keep the same spot of the board under the same place on screen, so the chart you were working on doesn't move. A chart near the left edge may end up under the opened panel; that's fine.
-- **Black in the channel color choices on Acquisition**, beside White. Like White, it only shows on a plot of the other shade, so it uses the rule that already adjusts a trace's color to stay visible (black on a black plot is drawn light). New channels shouldn't be given it automatically: add it to the end of the choices, after the palette that new channels take their colors from.
-- **Rename the "Groups" colour map setting to "Default Colormap"**, in Analysis > Groups (the drop-down that colours the groups, above "Trials"). The left strip's Groups button keeps its name.
-- **American English everywhere.** The Groups colour map setting becomes "Default Colormap". All of Argus's on-screen text, tooltips, messages and the README switch to American spelling: color, colormap, gray, center, practice (verb), analyze, and so on. The names in the code and in saved files (e.g. `colours.py`) can follow, as long as files saved before still open.
+- **NEWT's name when alt-tabbing (Cmd-Tab), whatever way it's started.** It shows "python3.12" because macOS names the app after the Python program running it. NEWT.app already fixes this, but starting with `neusci-daq` in a terminal doesn't. At start-up on a Mac, set the app's name to NEWT (the bundle name macOS reads, through PyObjC if it's installed), so the app switcher and the Dock say NEWT with its icon. Check Windows' Alt-Tab and taskbar say NEWT too.

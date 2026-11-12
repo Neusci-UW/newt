@@ -28,7 +28,7 @@ calculations build on each other: Ch2 band-pass, then rate("Ch2 band-pass", 0.1)
 The recorded data is never changed: calculations are worked out for display and
 analysis. Two ways, giving the same result apart from timing:
 - offline, on a whole recorded block: filters run forwards and backwards (zero
-  phase, no delay) and smooth/rms/envelope are centred;
+  phase, no delay) and smooth/rms/envelope are centered;
 - streaming, live, a chunk at a time: filters run forwards only (a short delay, as
   any live filter has) and moving windows trail; each keeps its state between chunks.
 The formula is parsed into a small tree (no eval): only numbers, channel names, the
@@ -98,12 +98,12 @@ def _filter_offline(sos: np.ndarray, x: np.ndarray, settle: int = 0) -> np.ndarr
         return signal.sosfilt(sos, x)
 
 
-def _moving_mean(x: np.ndarray, n: int, centred: bool, tail: np.ndarray | None = None):
-    """Mean of each n samples: centred (offline), or the n ending at each sample, using
+def _moving_mean(x: np.ndarray, n: int, centered: bool, tail: np.ndarray | None = None):
+    """Mean of each n samples: centered (offline), or the n ending at each sample, using
     `tail` (the previous chunk's last n-1 samples) to carry on from a previous chunk."""
     if n <= 1:
         return x.copy(), np.empty(0)
-    if centred:
+    if centered:
         k = np.ones(n) / n
         pad = np.pad(x, (n // 2, n - 1 - n // 2), mode="edge")
         return np.convolve(pad, k, mode="valid"), None

@@ -3,7 +3,7 @@ the channels respond, on a whiteboard of charts that you put there (see canvas.p
 
 Left of the board, a strip folds out what every chart shares (sidepanels.py): Trials, which
 picks the trials to analyze, with a check box to leave any out of everything; Groups,
-which groups every chart shows and their colours (and Spread, the SD or SEM shaded round
+which groups every chart shows and their colors (and Spread, the SD or SEM shaded round
 averages); Channels (the stimulus and analyzed channels, gains and the stimulus fit); and
 Spikes (threshold or bimodal, sorted into units, see analysis.py, run again whenever its
 settings change until you Clear, with the units found, whose ticks decide what the charts
@@ -24,14 +24,14 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
 from . import analysisfile
-from . import colours
+from . import colors
 from . import dsp
 from . import groupsfile
 from . import style
 from .trialsbrowser import TrialsBrowser
 from .canvas import ChartCanvas
 from .measurecharts import MeasureTool
-from .sidepanels import GroupColours, Rail, SettingsPanel, drawer
+from .sidepanels import GroupColors, Rail, SettingsPanel, drawer
 from .stim import Stimulus
 from .repeatfinder import RepeatFinder
 from .spikefinder import SpikeFinder
@@ -78,7 +78,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel = TrialsBrowser(for_analysis=True)
         self.blocks_panel.selection.connect(self._blocks_picked)
         self.blocks_panel.activated.connect(self._block_clicked)
-        self.blocks_panel.btn_all.clicked.connect(lambda: self.select_blocks([]))
+        self.blocks_panel.tick_highlighted.connect(self.tick_highlighted)
         self.blocks_panel.btn_select.clicked.connect(self.show_all)
         self.blocks_panel.btn_deselect.clicked.connect(self.hide_all)
         self.blocks_panel.hide_changed.connect(self.set_hidden)
@@ -89,11 +89,10 @@ class AnalysisPage(QtWidgets.QWidget):
             lambda i, page: self.main.move_block(i, page) if page else self.main._new_page_dialog(i))
         self.blocks_panel.reset_requested.connect(self.main._reset_pages_dialog)
         self.picked: list[int] = []               # the blocks selected; none means all of them
-        self.picked_pages: list[str] = []         # the pages selected: their averages are shown
+        self.picked_pages: list[str] = []         # the pages ticked whole: their averages are shown
+        self._highlighted: tuple[list[int], list[str]] = ([], [])   # in the Trials list: just where you're looking
         self.shown: list[tuple[str, list[int]]] = []   # the pages of the Blocks panel
-        self._looks = groupsfile.load(None)            # the colours saved with the session
-        self._pick_timer = QtCore.QTimer(self, singleShot=True, interval=150)   # dragging picks many at once
-        self._pick_timer.timeout.connect(self.groups_changed)
+        self._looks = groupsfile.load(None)            # the colors saved with the session
         self.stim_channel = self.blocks_panel.stim_ch
         self.stim_channel.setToolTip("The channel that recorded the stimulus, if one did; you can set it any "
                                      "time after recording. Its pulses give exact stimulus times, and trials "
@@ -108,14 +107,14 @@ class AnalysisPage(QtWidgets.QWidget):
                                    "across the trials (trials or stimuli) it's made of")
         self.spread_box.currentIndexChanged.connect(lambda *_: self.spread_changed())
         self.page_map = QtWidgets.QComboBox()
-        self.page_map.addItems(colours.PAGE_STYLES)
-        self.page_map.setToolTip("Colours every group at once. Palette: a different colour each; a colour map: "
-                                 "from the first group to the last. A colour you give a group (right-click it) "
+        self.page_map.addItems(colors.PAGE_STYLES)
+        self.page_map.setToolTip("Colors every group at once. Palette: a different color each; a color map: "
+                                 "from the first group to the last. A color you give a group (right-click it) "
                                  "stays. Saved with the session")
         self.trial_map = QtWidgets.QComboBox()
-        self.trial_map.addItems(colours.TRIAL_STYLES)
-        self.trial_map.setToolTip("How a group's trials are drawn. Solid: all in the group's colour; Opacity: "
-                                  "faint to solid, first to last; a colour map: across its colours, first to "
+        self.trial_map.addItems(colors.TRIAL_STYLES)
+        self.trial_map.setToolTip("How a group's trials are drawn. Solid: all in the group's color; Opacity: "
+                                  "faint to solid, first to last; a color map: across its colors, first to "
                                   "last. Saved with the session")
         self.page_map.currentTextChanged.connect(lambda v: self._set_look("page_map", v))
         self.trial_map.currentTextChanged.connect(lambda v: self._set_look("trial_map", v))
@@ -151,8 +150,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.measure = MeasureTool(self)
         self.canvas = ChartCanvas(self)
         self.btn_save = QtWidgets.QPushButton("Save")
-        self.btn_save.setToolTip("Save everything in one .argus file: the recordings, the spikes found and units, "
-                                 "the measure windows, and how Argus looks now, so it all comes back when it's opened")
+        self.btn_save.setToolTip("Save everything in one .newt file: the recordings, the spikes found and units, "
+                                 "the measure windows, and how NEWT looks now, so it all comes back when it's opened")
         self.btn_save.clicked.connect(self.main.save)
         self.canvas.toolbar.layout().insertWidget(0, self.btn_save)
         top.addWidget(self.canvas.toolbar)
@@ -168,15 +167,18 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.color_requested.connect(self.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.set_page_color(name, None))
         # left: the strip and the panel it folds out; right: the picked chart's settings
-        self.group_colours = GroupColours(self)
-        self.blocks_panel.group_extras.layout().insertWidget(0, self.group_colours)
+        self.group_colors = GroupColors(self)
+        self.blocks_panel.group_extras.layout().insertWidget(0, self.group_colors)
         self.blocks_panel.btn_groups.clicked.connect(lambda: self.open_panel("groups"))
         self.rail = Rail()
-        self.drawer = QtWidgets.QStackedWidget()
+        self.drawer = QtWidgets.QWidget()            # one panel shows at a time; the hidden ones take no room
+        drawer_row = QtWidgets.QHBoxLayout(self.drawer)
+        drawer_row.setContentsMargins(0, 0, 0, 0)
         self.panels = {"trials": self.blocks_panel, "groups": drawer(self.blocks_panel.group_extras),
                        "channels": drawer(self.blocks_panel.extras), "spikes": drawer(self.raw)}
         for w in self.panels.values():
-            self.drawer.addWidget(w)
+            drawer_row.addWidget(w)
+            w.hide()
         self.rail.picked.connect(self.open_panel)
         self.side = SettingsPanel(self)
         self.side_scroll = scroll_column(self.side)
@@ -236,15 +238,15 @@ class AnalysisPage(QtWidgets.QWidget):
         key = key if key in self.panels else ""
         self.rail.set_open(key)
         self.drawer.setVisible(bool(key))
-        if key:
-            self.drawer.setCurrentWidget(self.panels[key])
+        for k, w in self.panels.items():
+            w.setVisible(k == key)
         self.main.settings.setValue("analysis/panel", key)
 
     def panel(self) -> str:
         """The left panel folded out, or ""."""
         if not self.drawer.isVisibleTo(self):
             return ""
-        return next(k for k, w in self.panels.items() if w is self.drawer.currentWidget())
+        return next(k for k, w in self.panels.items() if w.isVisibleTo(self.drawer))
 
     def _read(self, path: Path) -> dict:
         return self.main.store.read(path)            # shared with review and the Blocks panel
@@ -298,6 +300,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self._show_gain()
         self.repeats.stimulus_channel_changed()
         self._load_analysis()
+        self.raw.trials_changed()                     # find the spikes in trials not searched yet
 
     # -- saving ---------------------------------------------------------------------------------
     def _stems(self) -> list[str]:
@@ -342,7 +345,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self._saved = self._digest()
 
     def app_state(self) -> dict:
-        """What Analysis shows, for an .argus file."""
+        """What Analysis shows, for a .newt file."""
         stems = self._stems()
         return {"stim_channel": self.stim_channel.currentData() or "", "current": self.index(),
                 "picked": [stems[i] for i in self.picked if i < len(stems)], "picked_pages": list(self.picked_pages),
@@ -354,11 +357,7 @@ class AnalysisPage(QtWidgets.QWidget):
         if i >= 0 and i != self.stim_channel.currentIndex():
             self.stim_channel.setCurrentIndex(i)
         self.canvas.restore_app_state(s["canvas"])
-        where = {stem: i for i, stem in enumerate(self._stems())}
-        if s["picked_pages"]:
-            self.select_pages(s["picked_pages"])
-        else:
-            self.select_blocks([where[x] for x in s["picked"] if x in where])
+        self.groups_changed()                     # the ticks were saved beside the trials
         self.current.setValue(s["current"] + 1)
         self._analysis_from = None                # picking the blocks cleared the spikes: as saved again
         self._load_analysis()
@@ -582,22 +581,23 @@ class AnalysisPage(QtWidgets.QWidget):
         self.groups = shown if auto or changed else []
         self.shown = shown
         self._show_looks(d)
+        self.picked, self.picked_pages = self._ticked()
         labels = {i: (stem, f"{b['duration_s']:.1f} s" if b is not None else "?", *self._stimuli_note(b))
                   for i, (stem, b) in enumerate(zip(stems, self.blocks))}
         self.blocks_panel.populate(None, shown, [self.group_color(g) for g in range(max(1, len(shown)))], labels,
                                    lambda i: groupsfile.auto_page(auto, i, d), bool(changed), False,
                                    self._looks["hidden_groups"], self.hidden_blocks())
         self.blocks_panel.sort_box.setCurrentIndex(max(0, self.blocks_panel.sort_box.findData(self._looks["sort"])))
-        self.blocks_panel.select(self.picked, self.picked_pages)
+        self.blocks_panel.select(*self._highlighted)
         n = len([g for g in self.groups if g[0] != "No stimulus found"])
         self.group_note.setText(
             "No stimulus channel or notes: pick the channel that recorded the stimulus" if not how else
             f"{n} different stimul{'us' if n == 1 else 'i'}" + (" (from the notes)" if how == "notes" else "")
-            + ": select a group to see just its trials" if n else
+            + ": tick a group to see just its trials" if n else
             f"No stimulus pulses found on {how}: is it the right channel?" if how != "notes" else
             "No stimuli in the notes")
         if hasattr(self, "side"):                 # the group lists beside the board
-            self.group_colours.fill()
+            self.group_colors.fill()
             self.side.groups.show_for(self.canvas.picked())
 
 
@@ -677,7 +677,7 @@ class AnalysisPage(QtWidgets.QWidget):
         return self.main.review_dir if self.main.mode == "review" else self.main.session_dir
 
     def _show_looks(self, d: dict) -> None:
-        """Use the colours saved with this session, if it has any yet."""
+        """Use the colors saved with this session, if it has any yet."""
         if self._folder() is not None:
             self._looks = d
         for box, key in ((self.page_map, "page_map"), (self.trial_map, "trial_map"), (self.fit_box, "stim_fit")):
@@ -702,7 +702,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self._save_looks()
 
     def set_page_color(self, name: str, color: str | None) -> None:
-        """Give a page its own colour; None goes back to the default."""
+        """Give a page its own color; None goes back to the default."""
         colors = {k: v for k, v in self._looks["colors"].items() if k != name}
         if color:
             colors[name] = color
@@ -711,24 +711,24 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def pick_color(self, name: str) -> None:
         g = next((k for k, (n, _) in enumerate(self.shown) if n == name), 0)
-        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.group_color(g)), self, f"Colour of {name}")
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.group_color(g)), self, f"Color of {name}")
         if c.isValid():
             self.set_page_color(name, c.name())
 
     def group_color(self, g: int, names: list[str] | None = None, looks: dict | None = None) -> str:
-        """Page g's colour (of `names`; default the pages here): the one you gave it, else from
-        the colour map, else from a palette in a different order from the unit colours, so
+        """Page g's color (of `names`; default the pages here): the one you gave it, else from
+        the color map, else from a palette in a different order from the unit colors, so
         they don't look alike."""
         names = [n for n, _ in self.shown] if names is None else names
         looks = self._looks if looks is None else looks
         given = looks["colors"].get(names[g]) if g < len(names) else None
         if given:
             return given
-        if looks["page_map"] in colours.MAPS:           # across the pages left showing
+        if looks["page_map"] in colors.MAPS:           # across the pages left showing
             left = [n for n in names if n not in looks["hidden_groups"]]
             place = left.index(names[g]) if g < len(names) and names[g] in left else g
-            return colours.sample(looks["page_map"], place / max(1, len(left) - 1)).name()
-        return colours.group_color(g)
+            return colors.sample(looks["page_map"], place / max(1, len(left) - 1)).name()
+        return colors.group_color(g)
 
     def plan(self, chosen: list[int], picked: list[int] | None = None, pages_picked: list[str] | None = None
              ) -> tuple[list[tuple[int, str, list[int]]], list[int]]:
@@ -758,46 +758,69 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def trial_colors(self, blocks: list[int]) -> dict[int, QtGui.QColor]:
         """How each of these trials is drawn: in order within its page, by the Trials setting."""
-        style_ = self._looks["trial_map"] or colours.SOLID
+        style_ = self._looks["trial_map"] or colors.SOLID
         out: dict[int, QtGui.QColor] = {}
         for g, (_, members) in enumerate(self.shown):
             rows = [i for i in blocks if i in members]
-            out.update(zip(rows, colours.spread(style_, self.group_color(g), len(rows))))
+            out.update(zip(rows, colors.spread(style_, self.group_color(g), len(rows))))
         rest = [i for i in blocks if i not in out]
-        out.update(zip(rest, colours.spread(style_, self.group_color(0), len(rest))))
+        out.update(zip(rest, colors.spread(style_, self.group_color(0), len(rest))))
         return out
 
     def group_of(self, i: int) -> int | None:
         return next((g for g, (_, blocks) in enumerate(self.groups) if i in blocks), None)
 
     def group_blocks(self) -> list[int] | None:
-        """The blocks selected in the Blocks panel, or None for all blocks."""
+        """The blocks ticked in the Trials list, or None for all of them."""
         return self.picked or None
 
+    def _ticked(self) -> tuple[list[int], list[str]]:
+        """(the trials ticked, the groups ticked whole), or ([], []) when everything is: a group
+        ticked whole shows its average, a trial ticked on its own its trace."""
+        hidden = self.hidden_blocks()
+        every = sorted(i for _, blocks in self.shown for i in blocks)
+        picked = [i for i in every if i not in hidden]
+        if picked == every:
+            return [], []
+        return picked, [n for n, blocks in self.shown if blocks and not set(blocks) & hidden]
+
     def _blocks_picked(self, picked: list[int]) -> None:
-        names = self.blocks_panel.selected_pages()
-        if picked != self.picked or names != self.picked_pages:
-            self.picked, self.picked_pages = picked, names
-            self._pick_timer.start()
+        """Highlighting in the Trials list: just the trial you're looking at (ticks choose what's
+        analyzed)."""
+        self._highlighted = (picked, self.blocks_panel.selected_pages())
+        if picked and self.index() not in picked:
+            self.current.setValue(picked[0] + 1)
+
+    def tick_highlighted(self, blocks: list[int], pages: list[str], only: bool) -> None:
+        """Tick the highlighted trials and groups; with `only`, untick everything else."""
+        looks = dict(self._looks)
+        stems = {self._paths[i].stem for i in blocks if i < len(self._paths)}
+        whole = set(pages)
+        if only:
+            looks["hidden_groups"] = [n for n, _ in self.shown if n not in whole]
+            looks["hidden_trials"] = []
+            looks["shown_trials"] = sorted(stems)
+        else:
+            looks["hidden_groups"] = [n for n in looks["hidden_groups"] if n not in whole]
+            looks["hidden_trials"] = [s for s in looks["hidden_trials"] if s not in stems]
+            looks["shown_trials"] = sorted(set(looks["shown_trials"]) | stems)
+        self._looks = looks
+        self._save_looks()
 
     def _block_clicked(self, data) -> None:
         if isinstance(data, tuple) and data[0] == "block":
             self.current.setValue(int(data[1]) + 1)
 
     def select_blocks(self, blocks: list[int]) -> None:
-        """Analyze just these blocks (none: all of them)."""
-        self._pick_timer.stop()
-        self.picked, self.picked_pages = sorted(blocks), []
-        self.blocks_panel.select(self.picked)
-        self.groups_changed()
+        """Analyze just these blocks, ticking only them (none: tick all of them)."""
+        if blocks:
+            self.tick_highlighted(sorted(blocks), [], True)
+        else:
+            self.show_all()
 
     def select_pages(self, names: list[str]) -> None:
-        """Show these pages' averages."""
-        self._pick_timer.stop()
-        self.picked_pages = list(names)
-        self.picked = sorted(i for name, blocks in self.shown if name in names for i in blocks)
-        self.blocks_panel.select(self.picked, self.picked_pages)
-        self.groups_changed()
+        """Show these pages' averages, ticking only them."""
+        self.tick_highlighted([], list(names), True)
 
     def onsets(self, i: int) -> np.ndarray | None:
         """When each stimulus started in block i (s): the first pulse of each train on the
@@ -827,6 +850,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.canvas.refresh()
 
     def groups_changed(self) -> None:
+        self.picked, self.picked_pages = self._ticked()
         if self.picked and self.index() not in self.picked:
             self.current.setValue(self.picked[0] + 1)     # the highlighted block is one of them
         self.raw.settings_changed()

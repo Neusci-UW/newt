@@ -12,7 +12,7 @@ from .chartbase import Chart, dot_size
 from .plotzoom import OverlayCurve, TraceCurve, plot_widget
 from .unitbox import UnitSpinBox
 from .viewkit import label_axis
-from . import colours
+from . import colors
 
 MAX_WAVES = 150                    # per unit in the waveform plot
 MAX_MARKED = 2000                  # spikes drawn over the blocks when a unit is highlighted
@@ -37,7 +37,7 @@ def draw_band(p: pg.PlotItem, x: np.ndarray, mean: np.ndarray, spread: np.ndarra
 
 
 class SpikeChart(Chart):
-    group = "Spikes"
+    counts_spikes = True
     help = "spike_sorting"
 
     def __init__(self, page, cid: str = "", title: str = ""):
@@ -66,14 +66,14 @@ class SpikeChart(Chart):
 
 class StimulusChart(SpikeChart):
     kind = "Stimulus"
-    tip = "The stimulus of every chosen trial"
+    tip = "What was the stimulus in each trial?"
     link = "time"
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid)
         sp = self.plot.getPlotItem()
         sp.setLabel("bottom", "time in trial", units="s")
-        self.stim_items: list[OverlayCurve] = []  # in the colours of the responses
+        self.stim_items: list[OverlayCurve] = []  # in the colors of the responses
         self.stim_onsets = pg.ScatterPlotItem(size=10, symbol="t1", pen=None, brush=pg.mkBrush("#E69F00"))
         sp.addItem(self.stim_onsets)
 
@@ -131,7 +131,7 @@ class StimulusChart(SpikeChart):
 
 class BlocksChart(SpikeChart):
     kind = "Trials"
-    tip = "The chosen trials' traces or averages, with the spikes found and the threshold"
+    tip = "Where are the spikes in each trial, and where's the threshold?"
     link = "time"
 
     def __init__(self, page, cid: str = ""):
@@ -150,11 +150,11 @@ class BlocksChart(SpikeChart):
         self.field("threshold", "", self.show_thr, self.threshold_changed)
         p = self.plot.getPlotItem()
         p.setLabel("bottom", "time in trial", units="s")
-        self.trial_items: list[OverlayCurve] = []    # the trials shown, one item per colour
+        self.trial_items: list[OverlayCurve] = []    # the trials shown, one item per color
         self.marks = pg.ScatterPlotItem(size=self.mark_size.value(), pen=None)
         self.marks.setZValue(20)
         p.addItem(self.marks)
-        # the picked units' spikes, drawn over the trace in their colour
+        # the picked units' spikes, drawn over the trace in their color
         self.event_hl = pg.PlotCurveItem(connect="finite")
         self.event_hl.setZValue(15)
         p.addItem(self.event_hl)
@@ -188,7 +188,7 @@ class BlocksChart(SpikeChart):
         return [(self.plot, self.page.unit_of(self.channel_name()), "s")]
 
     def _draw_trials(self, Y: np.ndarray, chosen: list[int], trials: list[int], fs: float) -> None:
-        """The trials, one item for each colour, so hundreds of them stay quick."""
+        """The trials, one item for each color, so hundreds of them stay quick."""
         rows = {i: r for r, i in enumerate(chosen)}
         by_color: dict[str, tuple[QtGui.QColor, list[int]]] = {}
         for i, c in self.page.trial_colors(trials).items():
@@ -259,7 +259,7 @@ class BlocksChart(SpikeChart):
 
     def units_changed(self) -> None:
         """Mark the spikes on the blocks: the units shown, and if those are only some of them,
-        their spikes are drawn over the blocks in their colour."""
+        their spikes are drawn over the blocks in their color."""
         ev = self.events()
         on = self.units()
         hl = on if ev is not None and len(on) < self.page.events.n_units else set()
@@ -322,7 +322,7 @@ class BlocksChart(SpikeChart):
 
 class RasterChart(SpikeChart):
     kind = "Raster"
-    tip = "Each spike in each chosen trial"
+    tip = "When did each spike happen, trial by trial?"
     link = "time"
 
     def __init__(self, page, cid: str = ""):
@@ -337,7 +337,7 @@ class RasterChart(SpikeChart):
         self.raster_dots = pg.ScatterPlotItem(size=2, pen=None)
         p.addItem(self.raster_dots)
         self._rows: dict[int, int] = {}                  # block -> its row
-        # each block's stimulus group, as a coloured mark at the start of its row
+        # each block's stimulus group, as a colored mark at the start of its row
         self.group_marks = pg.ScatterPlotItem(size=8, symbol="s", pen=None)
         self.group_marks.setZValue(5)
         p.addItem(self.group_marks)
@@ -386,7 +386,7 @@ class RasterChart(SpikeChart):
 
     def apply_theme(self, mode: str) -> None:
         super().apply_theme(mode)
-        band = QtGui.QColor(colours.PALETTE[1])
+        band = QtGui.QColor(colors.PALETTE[1])
         band.setAlpha(45)
         self.cur_band.setBrush(pg.mkBrush(band))
         for line in self.cur_band.lines:
@@ -395,7 +395,7 @@ class RasterChart(SpikeChart):
 
 class RateChart(SpikeChart):
     kind = "Rate"
-    tip = "Spikes per second during a trial"
+    tip = "How fast does it fire through the trial?"
     link = "time"
 
     def __init__(self, page, cid: str = ""):
@@ -448,7 +448,7 @@ class RateChart(SpikeChart):
 
 class PcaChart(SpikeChart):
     kind = "PCA map"
-    tip = "Each spike as a point, coloured by its unit"
+    tip = "Do the spikes fall into separate units?"
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid, "PCA map of the units")
@@ -475,7 +475,7 @@ class PcaChart(SpikeChart):
 
 class WaveformsChart(SpikeChart):
     kind = "Waveforms"
-    tip = "The spikes of each unit"
+    tip = "What does each unit's spike look like?"
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid, "Waveforms by unit")
@@ -536,7 +536,7 @@ class _HistChart(SpikeChart):
 
 class SizesChart(_HistChart):
     kind = "AP sizes"
-    tip = "A histogram of each unit's spike sizes"
+    tip = "How big are each unit's spikes?"
     norm_tip = "Each unit's histogram as a fraction of its own events, so units with different counts compare by shape"
 
     def __init__(self, page, cid: str = ""):
@@ -558,7 +558,7 @@ class SizesChart(_HistChart):
 
 class IntervalsChart(_HistChart):
     kind = "Intervals"
-    tip = "A histogram of the time between each unit's spikes"
+    tip = "How long between one spike and the next?"
     norm_tip = "Each unit's intervals as a fraction of its own intervals"
 
     def __init__(self, page, cid: str = ""):

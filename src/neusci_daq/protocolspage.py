@@ -3,7 +3,7 @@ settings, and see the responses lined up, overlaid, averaged and measured.
 
 Left: the protocol (what to vary, repeats, order, timing, window).
 Middle: Plan (the order of trials and the stimulus at each value), Responses
-(one panel per value of b, coloured by a) and Curve (the measurement against a).
+(one panel per value of b, colored by a) and Curve (the measurement against a).
 Right: the measurement and a table of every trial; untick a trial to leave it out.
 
 The protocol logic lives in protocols.py; this file is the window and the runner.

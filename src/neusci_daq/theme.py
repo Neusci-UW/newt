@@ -1,7 +1,7 @@
 """Dark or light plot backgrounds, and the moon/sun toggle icon.
 
 Only the plots change; the rest of the window follows the operating system.
-How a trace's colour is kept visible on either is in colours.py.
+How a trace's color is kept visible on either is in colors.py.
 """
 from __future__ import annotations
 
@@ -77,6 +77,6 @@ class _SymbolEngine(QtGui.QIconEngine):
 
 
 def toggle_icon(mode: str, color: QtGui.QColor | str = "#000000") -> QtGui.QIcon:
-    """A moon in dark mode, a sun in light mode, in one plain colour (black on a light
+    """A moon in dark mode, a sun in light mode, in one plain color (black on a light
     window, white on a dark one). Drawn at the needed resolution, so never blurry."""
     return QtGui.QIcon(_SymbolEngine(mode, QtGui.QColor(color)))

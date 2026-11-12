@@ -1,10 +1,11 @@
 """The panels beside the Analysis whiteboard.
 
 Left, a strip of buttons that fold panels out: Trials (the Trials browser), Groups (which
-groups every chart shows and how they're coloured), Channels (the stimulus and analyzed
+groups every chart shows and how they're colored), Channels (the stimulus and analyzed
 channels, gains, the stimulus fit) and Spikes (finding action potentials, and the units with
-their colours). Right, the settings of the chart you picked: its Groups (the page's, or its
-own), then its own settings. Pick several and the panel changes them together.
+their colors). Right, the settings of the chart you picked: its Groups (the page's, or its
+own), its Look (line thickness, grid lines and the axis ranges), then its own settings.
+Pick several and the panel changes them together.
 """
 from __future__ import annotations
 
@@ -12,12 +13,13 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import style
 from .channels import ColorButton
-from .viewkit import scroll_column
+from .unitbox import UnitSpinBox
+from .viewkit import scroll_column, with_slider
 
 PANELS = (("trials", "Trials", "Every trial, in its group: pick the ones the charts show"),
-          ("groups", "Groups", "Which groups every chart shows, and their colours"),
+          ("groups", "Groups", "Which groups every chart shows, and their colors"),
           ("channels", "Channels", "The stimulus and analyzed channels, amplifier gains and the stimulus fit"),
-          ("spikes", "Spikes", "Find action potentials, and tick and colour the units"))
+          ("spikes", "Spikes", "Find action potentials, and tick and color the units"))
 
 
 class Rail(QtWidgets.QWidget):
@@ -59,8 +61,8 @@ class Rail(QtWidgets.QWidget):
                            f"border-radius: 6px; }}")
 
 
-class GroupColours(QtWidgets.QWidget):
-    """Each group: ticked to show it everywhere, and its colour (click to change)."""
+class GroupColors(QtWidgets.QWidget):
+    """Each group: ticked to show it everywhere, and its color (click to change)."""
 
     def __init__(self, page):
         super().__init__()
@@ -90,7 +92,7 @@ class GroupColours(QtWidgets.QWidget):
             box.setChecked(name not in hidden)
             box.toggled.connect(lambda on, n=name: page.set_hidden(("page", n), not on))
             pick = ColorButton(page.group_color(g), lambda c, n=name: page.set_page_color(n, c),
-                               f"Pick {name}'s colour, used in every chart")
+                               f"Pick {name}'s color, used in every chart")
             pick.setFixedWidth(34)
             h.addWidget(box, 1)
             h.addWidget(pick)
@@ -174,6 +176,119 @@ class ChartGroups(QtWidgets.QGroupBox):
             c.set_own_groups(names)
 
 
+class ChartLook(QtWidgets.QGroupBox):
+    """The picked charts' line thickness, grid lines and axis ranges. An edge on Auto follows
+    the data; typing a value fixes it. Zooming or panning a chart fills the boxes in."""
+
+    def __init__(self):
+        super().__init__("Look")
+        self.charts: list = []
+        self._vb = None
+        form = QtWidgets.QFormLayout(self)
+        self.thick = QtWidgets.QDoubleSpinBox(minimum=0.25, maximum=6.0, singleStep=0.25, decimals=2, suffix=" ×")
+        self.thick.setToolTip("How thick the lines are: × 1 as drawn, × 2 twice as thick")
+        self.thick.setKeyboardTracking(False)
+        form.addRow("Line thickness", with_slider(self.thick))
+        self.grid = QtWidgets.QCheckBox("Grid lines")
+        self.grid.setToolTip("Show the chart's grid lines. Off for a cleaner figure")
+        form.addRow(self.grid)
+        self.edges: dict[tuple[str, int], tuple[UnitSpinBox, QtWidgets.QCheckBox]] = {}
+        self.axis_rows: list[QtWidgets.QWidget] = []
+        for axis in ("x", "y"):
+            for end, word in ((0, "min"), (1, "max")):
+                box = UnitSpinBox(-1e9, 1e9, "", decimals=6)
+                box.setToolTip(f"Where the {axis.upper()} axis {'starts' if end == 0 else 'ends'}. Typing a value "
+                               f"turns Auto off")
+                auto = QtWidgets.QCheckBox("Auto")
+                auto.setToolTip("Follow the data (and zooming with the mouse)")
+                row = QtWidgets.QWidget()
+                h = QtWidgets.QHBoxLayout(row)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.addWidget(box, 1)
+                h.addWidget(auto)
+                form.addRow(f"{axis.upper()} {word}", row)
+                self.axis_rows.append(row)
+                self.edges[(axis, end)] = (box, auto)
+                box.valueChanged.connect(lambda v, a=axis, e=end: self._typed(a, e, v))
+                auto.toggled.connect(lambda on, a=axis, e=end: self._auto(a, e, on))
+        self.thick.valueChanged.connect(lambda v: self._set("thick", v))
+        self.grid.toggled.connect(lambda on: self._set("grid", on))
+
+    def show_for(self, charts: list) -> None:
+        self.charts = list(charts)
+        self.setVisible(bool(self.charts))
+        if self._vb is not None:
+            try:
+                self._vb.sigRangeChanged.disconnect(self._zoomed)
+            except (TypeError, RuntimeError):
+                pass
+            self._vb = None
+        if not self.charts:
+            return
+        first = self.charts[0]
+        plots = first.plots()
+        for w in self.axis_rows:
+            w.setVisible(bool(plots))
+        for w in (self.thick, self.grid, *[b for pair in self.edges.values() for b in pair]):
+            w.blockSignals(True)
+        self.thick.setValue(first.look["thick"])
+        self.grid.setChecked(first.look["grid"])
+        if plots:
+            pi = plots[0].getPlotItem()
+            for axis, side in (("x", "bottom"), ("y", "left")):
+                unit = pi.getAxis(side).labelUnits or ""
+                for end in (0, 1):
+                    box, auto = self.edges[(axis, end)]
+                    box.set_unit(unit)
+                    auto.setChecked(first.look[axis][end] is None)
+            self._vb = pi.vb
+            self._vb.sigRangeChanged.connect(self._zoomed)
+            self._zoomed()
+        for w in (self.thick, self.grid, *[b for pair in self.edges.values() for b in pair]):
+            w.blockSignals(False)
+
+    def _zoomed(self, *_) -> None:
+        """The boxes show where the first picked chart's axes are now."""
+        if self._vb is None:
+            return
+        try:
+            ranges = self._vb.viewRange()
+        except RuntimeError:                  # the chart was closed
+            self._vb = None
+            return
+        for k, axis in enumerate(("x", "y")):
+            for end in (0, 1):
+                box = self.edges[(axis, end)][0]
+                box.blockSignals(True)
+                box.setValue(ranges[k][end])
+                box.blockSignals(False)
+
+    def _set(self, key: str, value) -> None:
+        for c in self.charts:
+            c.set_look(key, value)
+
+    def _typed(self, axis: str, end: int, v: float) -> None:
+        auto = self.edges[(axis, end)][1]
+        auto.blockSignals(True)
+        auto.setChecked(False)
+        auto.blockSignals(False)
+        self._edge(axis, end, v)
+
+    def _auto(self, axis: str, end: int, on: bool) -> None:
+        self._edge(axis, end, None if on else self.edges[(axis, end)][0].value())
+
+    def _edge(self, axis: str, end: int, v) -> None:
+        for c in self.charts:
+            lohi = list(c.look[axis])
+            lohi[end] = v
+            if lohi[0] is None and lohi[1] is None:
+                c.set_look(axis, lohi)
+                for pw in c.plots()[:1]:
+                    pw.getPlotItem().enableAutoRange(axis=axis)
+            else:
+                c.set_look(axis, lohi)
+
+
 class SettingsPanel(QtWidgets.QWidget):
     """Beside the board, on the right: the picked chart's settings, or several charts'."""
 
@@ -189,6 +304,8 @@ class SettingsPanel(QtWidgets.QWidget):
         lay.addWidget(self.heading)
         self.groups = ChartGroups(page)
         lay.addWidget(self.groups)
+        self.look = ChartLook()
+        lay.addWidget(self.look)
         self.multi = QtWidgets.QWidget()
         m = QtWidgets.QVBoxLayout(self.multi)
         m.setContentsMargins(0, 0, 0, 0)
@@ -222,6 +339,7 @@ class SettingsPanel(QtWidgets.QWidget):
                              f"<b>{n} charts picked</b><br>{', '.join(c.name for c in charts)}" if n else "")
         self.heading.setVisible(bool(n))
         self.groups.show_for(charts)
+        self.look.show_for(charts)
         self.multi.setVisible(n > 1)
         self.btn_remove.setText(f"Remove {n} charts")
         self.page.canvas.options.setVisible(n == 1)

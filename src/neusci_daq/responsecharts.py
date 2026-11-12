@@ -8,7 +8,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
-from . import colours
+from . import colors
 from . import style, theme
 from .chartbase import Chart, dot_size
 from .plotzoom import AxisGroup, MultiAxis, OverlayCurve, TraceCurve, plot_widget
@@ -29,8 +29,7 @@ def _times_by_block(ev: A.Events | None, units: set[int]) -> dict[int, np.ndarra
 
 class TracesChart(Chart):
     kind = "Traces"
-    group = "Response"
-    tip = "The chosen trials' channels, and how fast they change"
+    tip = "What did each channel record through the trial?"
     link = "time"
     help = "comparison"
 
@@ -51,7 +50,7 @@ class TracesChart(Chart):
         self.d_smooth.setToolTip("Differentiating amplifies noise: average over this long first (0 = none)")
         self.field("smooth", "Smooth for d/dt", self.d_smooth)
         self.layout_mode = QtWidgets.QComboBox()
-        self.layout_mode.setToolTip("Show the channels on separate axes, in group and trial colours, or the "
+        self.layout_mode.setToolTip("Show the channels on separate axes, in group and trial colors, or the "
                                     "average of each on one plot, scaled to fit")
         self.layout_mode.addItem("Stacked, each on its own axis", "stacked")
         self.layout_mode.addItem("Overlaid, each scaled to fit", "overlaid")
@@ -113,7 +112,7 @@ class TracesChart(Chart):
 
     def _draw_series(self, p: pg.PlotItem, ys: dict[int, np.ndarray], fs: float) -> None:
         """One channel of the chosen blocks: a picked page's average (with its Spread), a
-        picked block's trial, in their colours."""
+        picked block's trial, in their colors."""
         page = self.page
         averaged, trials = self.plan(list(ys))
         Y = np.full((len(ys), max(len(y) for y in ys.values())), np.nan)
@@ -167,14 +166,14 @@ class TracesChart(Chart):
             return
         n = max(len(y) for s in series for y in s[2].values())
         th = theme.THEMES[theme.DARK if self._mode == style.DARK else theme.LIGHT]
-        colors = [colours.PALETTE[(k + 1) % len(colours.PALETTE)] for k in range(len(series))]
+        series_colors = [colors.PALETTE[(k + 1) % len(colors.PALETTE)] for k in range(len(series))]
         overlaid = self.layout_mode.currentData() == "overlaid"
         if overlaid:
             pw = plot_widget()
             p = pw.getPlotItem()
             legend = p.addLegend(offset=(10, 10))
             multi = MultiAxis(p)                          # each on its own axis, fitted to the height
-            for (label, unit, ys), color in zip(series, colors):
+            for (label, unit, ys), color in zip(series, series_colors):
                 Y = np.full((len(ys), n), np.nan)
                 for r, y in enumerate(ys.values()):
                     Y[r, :len(y)] = y
@@ -208,7 +207,7 @@ class TracesChart(Chart):
         for pw in plots:                                  # plain seconds on every row, so they read the same
             pw.getPlotItem().getAxis("bottom").enableAutoSIPrefix(False)
         if overlaid:
-            self._multi.recolor()                         # the theme reset the left axis's colour
+            self._multi.recolor()                         # the theme reset the left axis's color
         plots[-1].getPlotItem().setLabel("bottom", "time in trial (s)")
         plots[0].getPlotItem().setXRange(0, n / fs, padding=0)
         self._plots = plots
@@ -233,7 +232,6 @@ class TracesChart(Chart):
 
 
 class _AverageChart(Chart):
-    group = "Response"
     help = "comparison"
 
     def __init__(self, page, cid: str, title: str, bottom: str):
@@ -264,7 +262,7 @@ class _AverageChart(Chart):
 
 class PsthChart(_AverageChart):
     kind = "Stimulus-triggered rate"
-    tip = "How spiking changes after a stimulus"
+    tip = "How does firing change after each stimulus?"
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid, "Stimulus-triggered spike rate", "ms from the stimulus")
@@ -338,11 +336,11 @@ class PsthChart(_AverageChart):
 
         def psth(trig: dict, color: str, name: str | None, filled: bool) -> int:
             """One stimulus-triggered rate: the mean over stimuli, with its spread."""
-            centres, rates = A.triggered_rates(times, trig, self.before.value(), self.after.value(), width)
+            centeres, rates = A.triggered_rates(times, trig, self.before.value(), self.after.value(), width)
             if not len(rates):
                 return 0
             mean, sd, sem, _ = A.mean_spread(rates)
-            edges = np.append(centres - width / 2, centres[-1] + width / 2)
+            edges = np.append(centeres - width / 2, centeres[-1] + width / 2)
             c = QtGui.QColor(color)
             if spread:
                 s_ = np.nan_to_num(sd if spread == "sd" else sem)
@@ -378,7 +376,7 @@ class PsthChart(_AverageChart):
 
 class StaChart(_AverageChart):
     kind = "Spike-triggered average"
-    tip = "What a channel does around each spike"
+    tip = "What does a channel do just before and after a spike?"
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid, "Spike-triggered average", "ms from the spike")
@@ -439,8 +437,7 @@ class StaChart(_AverageChart):
 
 class FitChart(Chart):
     kind = "Stimulus fit"
-    group = "Response"
-    tip = "With a Stim fit picked: the fit over the recording, and what it left out"
+    tip = "How well does the Stim fit match the recording, and what's left over?"
     link = "time"
     uses_units = False
 
@@ -503,7 +500,6 @@ class FitChart(Chart):
 
 class CycleChart(Chart):
     """A chart on the phase of the repeats found on the stimulus."""
-    group = "Response"
     link = "phase"
     help = "cycles"
     title = ""
@@ -540,11 +536,11 @@ class CycleChart(Chart):
         self.cycle_each.setToolTip("Draw every cycle behind the average")
         self.field("each", "", self.cycle_each)
         self.cycle_map = QtWidgets.QComboBox()
-        self.cycle_map.addItems(colours.TRIAL_STYLES)
+        self.cycle_map.addItems(colors.TRIAL_STYLES)
         self.cycle_map.setCurrentText("Viridis")
-        self.cycle_map.setToolTip("How to colour the cycles, from the first of a trial to the last: a colour "
+        self.cycle_map.setToolTip("How to color the cycles, from the first of a trial to the last: a color "
                                   "map shows how the response changes through the stimulus")
-        self.field("colours", "Cycle colours", self.cycle_map)
+        self.field("colours", "Cycle colors", self.cycle_map)    # the key layouts were saved with
 
     def _fill_response(self) -> None:
         names = self.page.names()
@@ -555,7 +551,7 @@ class CycleChart(Chart):
         self.fill(self.cycle_resp, names, default=default)
 
     def cycle_sets(self) -> tuple[dict[int, np.ndarray], list[tuple[str, QtGui.QColor, list[int]]]]:
-        """Each block's cycles, and what to draw of them: (block -> cycles, [(name, colour, its
+        """Each block's cycles, and what to draw of them: (block -> cycles, [(name, color, its
         blocks)]), the same pages and trials as the other charts."""
         page = self.page
         skip = page.repeats.cycle_skip.value()
@@ -570,7 +566,7 @@ class CycleChart(Chart):
         return cycles, sets + [(f"Trial {k + 1}", QtGui.QColor(colors[k].rgb()), [k]) for k in trials]
 
     def _shades(self, color: QtGui.QColor, number: np.ndarray) -> list:
-        shades = colours.spread(self.cycle_map.currentText(), color, int(number.max()) + 1)
+        shades = colors.spread(self.cycle_map.currentText(), color, int(number.max()) + 1)
         for c in shades:
             c.setAlpha(min(c.alpha(), 150))
         return shades
@@ -627,7 +623,7 @@ class CycleChart(Chart):
 
 class StimulusCycleChart(CycleChart):
     kind = "Stimulus cycle"
-    tip = "One cycle of the stimulus, by phase"
+    tip = "What does one cycle of the stimulus look like?"
     title = "Stimulus"
 
     def __init__(self, page, cid: str = ""):
@@ -658,7 +654,7 @@ class StimulusCycleChart(CycleChart):
 
 class ResponseCycleChart(CycleChart):
     kind = "Response by cycle"
-    tip = "Every cycle of the response overlaid by phase"
+    tip = "Is the response the same in every cycle?"
     title = "Response, each cycle"
 
     def __init__(self, page, cid: str = ""):
@@ -697,7 +693,7 @@ class ResponseCycleChart(CycleChart):
 
 class LoopChart(CycleChart):
     kind = "Response against stimulus"
-    tip = "The response plotted against the stimulus: a loop"
+    tip = "Does the response follow the stimulus, or lag it (a loop)?"
     title = "Response against stimulus"
     link = ""
     phased = False
@@ -733,7 +729,7 @@ class LoopChart(CycleChart):
 
 class SpikeCycleChart(CycleChart):
     kind = "Spikes by cycle"
-    tip = "A raster of each cycle's spikes, by phase"
+    tip = "When in each cycle did the spikes happen?"
     title = "Spikes by cycle"
 
     def __init__(self, page, cid: str = ""):
@@ -754,7 +750,7 @@ class SpikeCycleChart(CycleChart):
         size = self.point_size.value()
         for _, _, blocks in sets:
             for b in blocks:
-                for u in sorted(self.units()):           # in the units' colours
+                for u in sorted(self.units()):           # in the units' colors
                     k, deg = A.spike_phases(ev.t[(ev.block == b) & (ev.unit == u)], cycles[b],
                                             self.data[b]["sample_rate"])
                     p.addItem(pg.ScatterPlotItem(deg, row + k + 1, size=size, pen=None,
@@ -767,7 +763,7 @@ class SpikeCycleChart(CycleChart):
 
 class PhaseChart(CycleChart):
     kind = "Spikes per phase"
-    tip = "When in the cycle spikes happen"
+    tip = "Which part of the cycle does it fire in most?"
     title = "Spikes per phase"
 
     def __init__(self, page, cid: str = ""):

@@ -27,7 +27,7 @@ def fake_sdk(tmp_path, monkeypatch):
     lib = tmp_path / ("libamcam.dylib" if sys.platform == "darwin" else "libamcam.so")
     subprocess.run([cc, "-shared", "-fPIC", "-O2", "-o", str(lib), os.path.join(HERE, "fakeamcam.c"),
                     "-lpthread"], check=True)
-    monkeypatch.setenv("ARGUS_CAMERA_SDK", str(lib))
+    monkeypatch.setenv("NEWT_CAMERA_SDK", str(lib))
     amscope.reset()
     yield lib
     amscope.reset()
@@ -62,7 +62,7 @@ def test_lists_opens_and_pulls_frames(fake_sdk):
 def test_a_wrong_id_or_no_library_says_why(fake_sdk, monkeypatch):
     with pytest.raises(OSError, match="didn't open"):
         amscope.Camera("not-a-camera")
-    monkeypatch.setenv("ARGUS_CAMERA_SDK", str(fake_sdk.parent / "missing.dll"))
+    monkeypatch.setenv("NEWT_CAMERA_SDK", str(fake_sdk.parent / "missing.dll"))
     monkeypatch.setattr(amscope, "_candidates", lambda: [(fake_sdk.parent / "missing.dll", "Amcam_")])
     amscope.reset()
     assert amscope.cameras() == [] and "wasn't found" in amscope.why_not()

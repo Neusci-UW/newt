@@ -85,7 +85,7 @@ class Recorder:
                 self._file = None
 
     def set_colors(self, colors: list[str]) -> None:
-        """Update the colours of the block being recorded (display metadata only)."""
+        """Update the colors of the block being recorded (display metadata only)."""
         with self._lock:
             if self._file is not None:
                 self._file.attrs["colors"] = list(colors)

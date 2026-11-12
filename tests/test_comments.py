@@ -193,11 +193,11 @@ def test_double_click_opens_the_popup(app, win, tmp_path):
     win.show()
     pump(app, 0.1)
     vb = win.plots[0].vb
-    centre = vb.sceneBoundingRect().center()
+    centere = vb.sceneBoundingRect().center()
 
     class Ev:
         def double(self): return True
-        def scenePos(self): return centre
+        def scenePos(self): return centere
 
     win._plot_clicked(win.plot_widgets[0], Ev())
     assert win._popup is not None and win._popup.isVisible()

@@ -1,4 +1,4 @@
-"""Small pieces the parts of Analysis share: colours, plot styling, axis labels with
+"""Small pieces the parts of Analysis share: colors, plot styling, axis labels with
 units, and a base class with the page, the theme and a message line."""
 from __future__ import annotations
 
@@ -104,14 +104,14 @@ class ScaleBar(pg.GraphicsObject):
         f.setPixelSize(11)
         f.setBold(True)
         p.setFont(f)
-        centre = QtCore.Qt.AlignmentFlag.AlignCenter
+        centere = QtCore.Qt.AlignmentFlag.AlignCenter
         if self.px:
-            p.drawText(QtCore.QRectF(self.px / 2 - 40, 3, 80, 16), centre, self.x_text)
+            p.drawText(QtCore.QRectF(self.px / 2 - 40, 3, 80, 16), centere, self.x_text)
         if self.py:
             p.save()
             p.translate(-14, -self.py / 2)
             p.rotate(-90)
-            p.drawText(QtCore.QRectF(-40, -8, 80, 16), centre, self.y_text)
+            p.drawText(QtCore.QRectF(-40, -8, 80, 16), centere, self.y_text)
             p.restore()
 
     def mouseDragEvent(self, ev) -> None:

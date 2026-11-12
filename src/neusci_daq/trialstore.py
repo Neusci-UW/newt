@@ -2,7 +2,7 @@
 the Analysis tab, so a block is read from disk once rather than by each of them.
 
 Everything kept for a trial is tied to its file's modification time and size. Comments and
-colours you change are kept beside the files (trialfile.py) and put over them on every read,
+colors you change are kept beside the files (trialfile.py) and put over them on every read,
 so a change shows at once without reading the trial again.
 Block data is kept up to a memory budget, least recently used first out; the small
 facts about a trial (trialfile.block_info) and values worked out from it (memo, e.g.
@@ -34,7 +34,7 @@ class TrialStore:
 
     def read(self, path: str | Path) -> dict:
         """trialfile.read_block(path): the file from memory when it hasn't changed, with the
-        edits kept beside it (comments, colours) put over it each time."""
+        edits kept beside it (comments, colors) put over it each time."""
         path = Path(path)
         return trialfile.with_edits(path, self._read(path))
 

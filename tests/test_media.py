@@ -140,7 +140,7 @@ def test_monitor_plays_the_channel_scaled_to_be_heard(sd):
     t = np.arange(2000) / fs
     m.feed(0.001 * np.sin(2 * np.pi * 500 * t) + 5.0, fs)            # tiny, on an offset
     out = sd.outputs[-1].pull(6000)                                   # all of it (0.1 s at 44.1 kHz)
-    assert 0.3 < np.abs(out).max() <= 0.5 + 1e-6 and abs(np.mean(out)) < 0.05   # centred and audible
+    assert 0.3 < np.abs(out).max() <= 0.5 + 1e-6 and abs(np.mean(out)) < 0.05   # centered and audible
     assert np.all(sd.outputs[-1].pull(100) == 0)                      # nothing queued: silence
     m.stop()
 
@@ -267,5 +267,5 @@ def test_the_list_keeps_the_camera_picked_and_notices_it_unplugged(app, win, mon
     assert panel.camera_box.currentData() == "" and "unplugged" in panel.message.text()
 
 
-def test_window_title_says_argus(win):
-    assert "Argus" in win.windowTitle() and "neusci-daq-visualizer" not in win.windowTitle()
+def test_window_title_says_newt(win):
+    assert "NEWT" in win.windowTitle() and "neusci-daq-visualizer" not in win.windowTitle()

@@ -40,3 +40,18 @@ def test_follows_the_app_theme(win):
     assert win.membrane_page._mode == style.DARK
     win.membrane_page.apply_theme(style.LIGHT)
     assert win.membrane_page._mode == style.LIGHT
+
+
+def test_rc_page_ships_and_is_under_simulation(app, win):
+    html = membranepage.RC_PAGE.read_text(encoding="utf-8")
+    assert "<title>RC Circuit and Membrane</title>" in html
+    assert win.tabs.pages["rc"] is win.rc_page
+    assert win.tabs.group_of["rc"] == "sim"
+    win.show()
+    win.tabs.pick(0, "rc")
+    pump(app, 0.3)
+    if membranepage.available():
+        assert win.rc_page.view.url().toLocalFile().endswith("rc_membrane.html")
+    else:
+        texts = " ".join(lbl.text() for lbl in win.rc_page.findChildren(QtWidgets.QLabel))
+        assert "RC circuit" in texts

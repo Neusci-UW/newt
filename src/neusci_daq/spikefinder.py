@@ -1,5 +1,5 @@
 """Finding the action potentials every Analysis chart shares: the search's settings, the
-units found with their ticks, colours and opacity, and the exports (see analysis.py)."""
+units found with their ticks, colors and opacity, and the exports (see analysis.py)."""
 from __future__ import annotations
 
 import csv
@@ -10,7 +10,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
-from . import colours
+from . import colors
 from . import style
 from .channels import ColorButton
 from .helpview import add_help
@@ -21,12 +21,12 @@ from .viewkit import View
 
 class SpikeFinder(View):
     """Finding the action potentials every chart shares: its settings, the units found and
-    their ticks and colours, and the exports."""
+    their ticks and colors, and the exports."""
 
     def __init__(self, page: "AnalysisPage"):
         super().__init__(page)
         self.events: A.Events | None = None
-        self.unit_colors: dict[int, str] = {}     # 0-based unit -> the colour picked for it
+        self.unit_colors: dict[int, str] = {}     # 0-based unit -> the color picked for it
         self.unit_opacity: dict[int, float] = {}  # 0-based unit -> how solid it's drawn, if not fully
         self._unticked: set[int] = set()          # units left out of the charts
         left = QtWidgets.QVBoxLayout(self)
@@ -37,17 +37,18 @@ class SpikeFinder(View):
 
         box = QtWidgets.QGroupBox("Find action potentials")
         v = QtWidgets.QVBoxLayout(box)
-        self.btn_find = QtWidgets.QPushButton("Find action potentials")
+        self.btn_find = QtWidgets.QPushButton("Find again")
         self.btn_find.setObjectName("start")
+        self.btn_find.setToolTip("Action potentials are found by themselves in every ticked trial, as you tick "
+                                 "them or change a setting. This searches them all over again")
         self.btn_clear = QtWidgets.QPushButton("Clear")
-        self.btn_clear.setToolTip("Clear the action potentials found. Changing a setting won't search again "
-                                  "until you press Find action potentials")
+        self.btn_clear.setToolTip("Clear the action potentials found, and stop searching until you press Find again")
         buttons = QtWidgets.QHBoxLayout()
         buttons.addWidget(self.btn_find, 1)
         buttons.addWidget(self.btn_clear)
         v.addLayout(buttons)
         self.table = QtWidgets.QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["Unit", "Count", "Rate", "Amplitude", "Width", "Colour"])
+        self.table.setHorizontalHeaderLabels(["Unit", "Count", "Rate", "Amplitude", "Width", "Color"])
         self.table.horizontalHeaderItem(4).setToolTip("Mean waveform: trough to peak")
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -152,6 +153,10 @@ class SpikeFinder(View):
             w.valueChanged.connect(lambda *_: self._detection_changed())
         self.biphasic.toggled.connect(lambda *_: self._detection_changed())
         self._paused = False                      # Clear stops searching again until the next Find
+        self._memo: dict = {}                     # each trial's noise and events, kept between searches
+        self._last: A.Events | None = None        # the last spikes found, to keep their units' numbers
+        self._done: set[int] = set()              # the trials the spikes found are from
+        self._busy = False
 
     def state(self) -> dict:
         """What's set here, to save with the session."""
@@ -185,9 +190,16 @@ class SpikeFinder(View):
         self.unit_colors = {int(u): c for u, c in state["colors"].items()}
         self.unit_opacity = {int(u): o for u, o in state["opacity"].items()}
         self.events = events
+        self._done = set(self._searched()) if events is not None else set()   # what was saved covers them
         self._show_results()
         self.page.canvas.refresh()
         self.page.events_changed()
+
+    def trials_changed(self) -> None:
+        """The trials were read again (a session opened, a trial recorded): search those not
+        searched yet, unless Clear stopped it."""
+        if not self._paused and set(self._searched()) != self._done:
+            self._find_timer.start()
 
     def _show_search(self, on: bool) -> None:
         self.main.settings.setValue("analysis/search_settings", on)
@@ -222,12 +234,8 @@ class SpikeFinder(View):
         return [i for i in idx if i not in hidden and self.page.has(i, name) and self.blocks[i]["sample_rate"] == fs]
 
     def _chosen(self) -> list[int]:
-        """Indices of the chosen blocks that have this channel at the first block's rate."""
-        idx = list(range(len(self.blocks)))
-        group = self.page.group_blocks()
-        if group is not None:
-            idx = sorted(set(idx) & set(group))
-        return self.usable(idx)
+        """The ticked trials that have this channel at the first trial's rate."""
+        return self.usable(list(range(len(self.blocks))))
 
     def chosen_or_none(self) -> list[int]:
         return self._chosen() if self.blocks else []
@@ -240,7 +248,7 @@ class SpikeFinder(View):
         return self.page.trace(i, self.channel.currentText())
 
     def settings_changed(self) -> None:
-        if self.events is not None:              # the same search, on what's now chosen
+        if not self._paused:                     # the same search, on what's ticked now
             self._find_timer.start()
         self.events = None
         self._show_message("")
@@ -278,14 +286,14 @@ class SpikeFinder(View):
             self.page.canvas.units_changed()
 
     def color_of(self, u: int) -> str:
-        """Unit u's colour (0-based): the one picked for it, else its place in the palette."""
-        return self.unit_colors.get(int(u), colours.unit_color(u))
+        """Unit u's color (0-based): the one picked for it, else its place in the palette."""
+        return self.unit_colors.get(int(u), colors.unit_color(u))
 
     def opacity_of(self, u: int) -> float:
         return self.unit_opacity.get(int(u), 1.0)
 
     def qcolor(self, u: int) -> QtGui.QColor:
-        """Unit u's colour with its opacity, to draw with."""
+        """Unit u's color with its opacity, to draw with."""
         c = QtGui.QColor(self.color_of(u))
         c.setAlphaF(self.opacity_of(u))
         return c
@@ -384,27 +392,45 @@ class SpikeFinder(View):
 
     # -- finding -----------------------------------------------------------------------------
     def clear(self) -> None:
-        """Forget the action potentials, and don't search again until Find is pressed."""
+        """Forget the action potentials, and don't search again until Find again is pressed."""
         self._find_timer.stop()
         self._paused = True
-        self.events = None
+        self.events = self._last = None
         self._unticked = set()
         self._show_results()
         self.page.events_changed()
-        self._show_message("Cleared. Press Find action potentials to search again.")
+        self._show_message("Cleared. Press Find again to search again.")
 
     def _find_pressed(self) -> None:
         self._find_timer.stop()
+        self._memo.clear()                        # everything over again
         if self.find() is not None:
             self.page.canvas.rescale()
 
+    def _key(self, i: int) -> tuple:
+        """What trial i's trace on the search channel is: its file and how it's read."""
+        name = self.channel.currentText()
+        return (str(self.page._paths[i]), name, self.page.gain_of(name), self.page._looks["stim_fit"])
+
+    def _progress(self, done: int, total: int) -> None:
+        if total > 4:
+            self.main.statusBar().showMessage(f"Finding action potentials: {done} of {total} trials…")
+            # keep the window drawing, but take no clicks or typing until it's done
+            QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
     def find(self) -> A.Events | None:
+        if self._busy:                            # asked again while searching: once this one's done
+            self._find_timer.start()
+            return None
+        self._busy = True
+        before = self.events if self.events is not None else self._last
+        if len(self._memo) > 20000:               # many thresholds tried: start afresh
+            self._memo.clear()
         try:
             chosen = self._searched()
             if not chosen:
-                raise ValueError("No trials to search: record or open some, and check Trials and Channel.")
+                raise ValueError("No trials to search: tick some in Trials, and check the Channel.")
             self.main.statusBar().showMessage(f"Searching {len(chosen)} trial(s)…")
-            QtWidgets.QApplication.processEvents()
             kind, v = self._threshold()
             if self.method.currentData() and kind == "level":
                 kind, v = "sd", 5.0                      # bimodal's fallback is in SDs
@@ -414,13 +440,18 @@ class SpikeFinder(View):
                                biphasic_ms=self.bip_ms.value(),
                                polarity=self.polarity.currentData(), dead_ms=self.dead.value(),
                                pre_ms=self.pre.value(), post_ms=self.post.value(),
-                               n_units=self.units.currentData())
+                               n_units=self.units.currentData(), memo=self._memo,
+                               keys=[self._key(i) for i in chosen], progress=self._progress)
         except ValueError as e:
             self._show_message(str(e), error=True)
             return None
         finally:
+            self._busy = False
             self.main.statusBar().clearMessage()
-        self.events = ev
+        if before is not None:
+            ev.unit = A.match_units(before, ev)   # the same unit keeps its number, so its color
+        self.events = self._last = ev
+        self._done = set(chosen)
         self._paused = False
         self._show_results()
         self.page.events_changed()
@@ -446,7 +477,7 @@ class SpikeFinder(View):
                                     else QtCore.Qt.CheckState.Checked)
             self.table.setItem(r, 0, unit_item)
             pick = ColorButton(self.color_of(u), lambda c, u=u: self.set_unit_color(u, c),
-                               f"Pick Unit {s['unit']}'s colour and opacity, used on every graph",
+                               f"Pick Unit {s['unit']}'s color and opacity, used on every graph",
                                opacity=self.opacity_of(u), on_opacity=lambda v, u=u: self.set_unit_opacity(u, v))
             pick.setFixedWidth(26)
             pick.setText("▾")

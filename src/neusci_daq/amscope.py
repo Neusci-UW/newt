@@ -7,11 +7,11 @@ amcam.dll, which AmScope's software installs, or toupcam.dll from ToupTek's Toup
 Both have the same functions, named Amcam_… or Toupcam_….
 
 Where the library is looked for, in order:
-  the ARGUS_CAMERA_SDK environment variable (the full path of amcam.dll or toupcam.dll)
+  the NEWT_CAMERA_SDK environment variable (the full path of amcam.dll or toupcam.dll)
   C:\\Program Files\\AmScope\\AmScope\\x64\\amcam.dll (or x86, for 32-bit Python)
   C:\\Program Files\\ToupTek\\ToupView\\x64\\toupcam.dll
   amcam / toupcam on the library path (libamcam.so, libtoupcam.dylib, …)
-The library isn't part of Argus; it comes with the camera's software.
+The library isn't part of NEWT; it comes with the camera's software.
 
 Frames arrive on the library's own thread. The callback only notes that one is ready;
 Camera.latest() pulls it on the GUI thread, so Qt is never touched from that thread.
@@ -39,7 +39,7 @@ NAME_LEN = 64
 def _candidates() -> list[tuple[Path | str, str]]:
     """[(library, function prefix)] to try, most specific first."""
     out: list[tuple[Path | str, str]] = []
-    env = os.environ.get("ARGUS_CAMERA_SDK", "")
+    env = os.environ.get("NEWT_CAMERA_SDK") or os.environ.get("ARGUS_CAMERA_SDK", "")
     if env:
         out.append((Path(env), "Toupcam_" if "toupcam" in Path(env).name.lower() else "Amcam_"))
     if WINDOWS:
@@ -123,7 +123,7 @@ def sdk() -> Sdk | None:
         except (OSError, AttributeError) as e:
             reasons.append(f"{path}: {e}")
     _why = ("AmScope's camera library (amcam.dll) wasn't found: install AmScope's software, or set "
-            "ARGUS_CAMERA_SDK to the file's full path." if not reasons else
+            "NEWT_CAMERA_SDK to the file's full path." if not reasons else
             "AmScope's camera library didn't load: " + "; ".join(reasons))
     return None
 

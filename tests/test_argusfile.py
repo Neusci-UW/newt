@@ -1,4 +1,4 @@
-"""The .argus file: a whole session in one file, saved and opened again."""
+"""The .newt file: a whole session in one file, saved and opened again."""
 import json
 import os
 import zipfile
@@ -24,7 +24,7 @@ def _folder(tmp_path, n=2):
 
 def test_a_folder_packs_and_unpacks_the_same(tmp_path):
     f = _folder(tmp_path)
-    path = tmp_path / "lab.argus"
+    path = tmp_path / "lab.newt"
     files = argusfile.save(path, f, {"hello": 1})
     assert set(files) == {"block_001.h5", "block_002.h5", "pages.json"}
     folder, state, back = argusfile.open_file(path, tmp_path / "data")
@@ -38,7 +38,7 @@ def test_a_folder_packs_and_unpacks_the_same(tmp_path):
 
 def test_saving_again_adds_only_what_changed(tmp_path):
     f = _folder(tmp_path, 3)
-    path = tmp_path / "lab.argus"
+    path = tmp_path / "lab.newt"
     argusfile.save(path, f, {})
     (f / "pages.json").write_text('{"renamed": {"a": "b"}}')
     (f / "block_003.h5").unlink()
@@ -56,7 +56,7 @@ def test_saving_again_adds_only_what_changed(tmp_path):
 
 def test_a_file_mostly_old_copies_is_written_again(tmp_path):
     f = _folder(tmp_path, 1)
-    path = tmp_path / "lab.argus"
+    path = tmp_path / "lab.newt"
     for k in range(4):
         (f / "block_001.h5").write_bytes(os.urandom(5000))
         argusfile.save(path, f, {"k": k})
@@ -66,10 +66,10 @@ def test_a_file_mostly_old_copies_is_written_again(tmp_path):
 
 def test_bad_files_say_so(tmp_path):
     with pytest.raises(ArgusError):
-        argusfile.save(tmp_path / "x.argus", tmp_path, {})        # nothing recorded
-    (tmp_path / "bad.argus").write_text("not a zip")
+        argusfile.save(tmp_path / "x.newt", tmp_path, {})        # nothing recorded
+    (tmp_path / "bad.newt").write_text("not a zip")
     with pytest.raises(ArgusError):
-        argusfile.open_file(tmp_path / "bad.argus", tmp_path)
+        argusfile.open_file(tmp_path / "bad.newt", tmp_path)
 
 
 def test_save_reopens_argus_as_it_was(app, win, tmp_path):
@@ -90,10 +90,10 @@ def test_save_reopens_argus_as_it_was(app, win, tmp_path):
     win.set_stimulus(Stimulus(shape="sine", amplitude_v=0.5, freq_hz=7, duration_ms=300))
     from neusci_daq.tabs import SIDE
     win.tabs.set_layout(SIDE)
-    path = tmp_path / "lab.argus"
+    path = tmp_path / "lab.newt"
     win.save_argus(path)
     assert path.exists() and not win._has_unsaved() and win._argus() == path.resolve()
-    assert "lab.argus" in win.windowTitle()
+    assert "lab.newt" in win.windowTitle()
     ap.set_page_color(ap.shown[0][0], "#123456")                    # a change since: unsaved
     assert win._has_unsaved()
     asked = []

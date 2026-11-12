@@ -10,7 +10,7 @@ from .channels import ChannelRow, ChannelStrip
 from .config import Channel, valid_inputs
 from .stim import Stimulus
 from .stimwindow import StimPage
-from . import colours
+from . import colors
 from .mainparts import LIVE
 
 
@@ -169,7 +169,7 @@ class StimulatorMixin:
             if any(r.ch.name == "Stim" for r in rows):
                 self._channel_message("Another channel is already named Stim; rename it first.")
                 return False
-            color = colours.next_color(r.ch.color for r in rows)
+            color = colors.next_color(r.ch.color for r in rows)
             rows.append(ChannelRow(Channel(phys, "Stim", units="V", color=color)))
         # an existing channel just becomes the stimulus channel: no restart unless one goes away
         same = [(r.ch.physical, r.ch.name) for r in rows] == [(r.ch.physical, r.ch.name) for r in self.rows]

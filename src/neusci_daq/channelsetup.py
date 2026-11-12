@@ -1,4 +1,4 @@
-"""The main window's channels: adding, editing and removing them, their colours (and the
+"""The main window's channels: adding, editing and removing them, their colors (and the
 recorded trials'), applying a setup, the sampling rate and the input wiring."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from . import session
 from . import trialfile
 from .channels import ChannelRow, ChannelStrip
 from .config import Channel, Config, valid_inputs
-from . import colours
+from . import colors
 from .mainparts import LIVE, REVIEW
 
 
@@ -58,21 +58,21 @@ class ChannelSetupMixin:
         n = len(self.rows) + 1
         while f"Ch{n}" in names:
             n += 1
-        color = colours.next_color(r.ch.color for r in self.rows)
+        color = colors.next_color(r.ch.color for r in self.rows)
         return self.apply_channels(self._copy_rows() + [ChannelRow(Channel(free[0], f"Ch{n}", color=color))])
 
-    # -- colours (display only: allowed while recording, never restarts) ----
+    # -- colors (display only: allowed while recording, never restarts) ----
     def _channel_recolored(self, strip: ChannelStrip, color: str):
         self.set_channel_color(self.rows.index(strip.row), color)
 
     def set_channel_color(self, index: int, color: str, recolor_recorded: bool | None = None) -> None:
-        """Change a live channel's trace colour.
+        """Change a live channel's trace color.
 
-        If the session already has recorded blocks with a different colour for
-        this channel, asks whether to recolour them too (or uses
+        If the session already has recorded blocks with a different color for
+        this channel, asks whether to recolor them too (or uses
         `recolor_recorded` if given). The block being recorded always follows.
         """
-        color = colours.normalize_color(color)
+        color = colors.normalize_color(color)
         ch = self.rows[index].ch
         ch.color = color
         strip = self.strips[index] if index < len(self.strips) else None
@@ -96,10 +96,10 @@ class ChannelSetupMixin:
             if recolor_recorded:
                 self._recolor(older, {ch.name: color})
                 return
-        self.statusBar().showMessage(f"{ch.name}: colour {colours.color_label(color)}", 6000)
+        self.statusBar().showMessage(f"{ch.name}: color {colors.color_label(color)}", 6000)
 
     def _block_color(self, block: Path, name: str) -> str | None:
-        """Colour of channel `name` in a recorded block, or None if it isn't there."""
+        """Color of channel `name` in a recorded block, or None if it isn't there."""
         try:
             info = self.store.info(block)
         except Exception:
@@ -108,15 +108,15 @@ class ChannelSetupMixin:
         return info["colors"][names.index(name)] if name in names else None
 
     def _ask_recolor(self, name: str, n: int) -> tuple[bool, bool]:
-        """Ask whether to recolour recorded blocks. Returns (recolour, remember for this session)."""
+        """Ask whether to recolor recorded blocks. Returns (recolor, remember for this session)."""
         B = QtWidgets.QMessageBox.StandardButton
         box = QtWidgets.QMessageBox(
-            QtWidgets.QMessageBox.Icon.Question, "Recolour recorded trials?",
-            f"{n} trial(s) already recorded in this session show {name} in another colour.\n\n"
-            "Use the new colour for them too? (Only the display colour changes, not the data.)",
+            QtWidgets.QMessageBox.Icon.Question, "Recolor recorded trials?",
+            f"{n} trial(s) already recorded in this session show {name} in another color.\n\n"
+            "Use the new color for them too? (Only the display color changes, not the data.)",
             B.Yes | B.No, self)
         box.setDefaultButton(B.Yes)
-        remember = QtWidgets.QCheckBox("Do this for every colour change in this session")
+        remember = QtWidgets.QCheckBox("Do this for every color change in this session")
         box.setCheckBox(remember)
         return box.exec() == B.Yes, remember.isChecked()
 
@@ -124,16 +124,16 @@ class ChannelSetupMixin:
         failed = trialfile.recolor_blocks(blocks, colors)
         names = ", ".join(colors)
         if failed:
-            self._channel_message(f"Couldn't update the colour in {len(failed)} trial(s) "
+            self._channel_message(f"Couldn't update the color in {len(failed)} trial(s) "
                                   f"(read-only or in use?): {', '.join(f.name for f in failed)}")
         else:
-            self.statusBar().showMessage(f"{names}: colour updated in {len(blocks)} recorded trial(s)", 8000)
+            self.statusBar().showMessage(f"{names}: color updated in {len(blocks)} recorded trial(s)", 8000)
 
     def set_review_color(self, index: int, color: str) -> None:
-        """Recolour one channel in every block of the session being reviewed."""
+        """Recolor one channel in every block of the session being reviewed."""
         if self.mode != REVIEW or self.review_block is None:
             return
-        color = colours.normalize_color(color)
+        color = colors.normalize_color(color)
         name = self.review_block["channel_names"][index]
         self.review_block["colors"][index] = color
         self._set_curve_color(index, color)

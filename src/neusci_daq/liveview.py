@@ -19,7 +19,7 @@ from .config import Channel, valid_inputs
 from .plotzoom import MultiAxis, TraceCurve, light_grid
 from .stim import Stimulus
 from .ringbuffer import RingBuffer
-from . import colours
+from . import colors
 from .mainparts import LIVE, REVIEW, WINDOW_MAX, _SI_BASE, _TraceViewBox
 
 
@@ -130,7 +130,7 @@ class LiveMixin:
 
     def _apply_channel_overlay(self) -> None:
         """With Overlay channels on, put a copy of each other channel's curve in the first
-        plot (in its colour) and hide the other plots: live, their rows shrink to just the
+        plot (in its color) and hide the other plots: live, their rows shrink to just the
         channel's controls; in review, their rows go."""
         self._mirrors = []
         self._multi = None
@@ -191,7 +191,7 @@ class LiveMixin:
         self._calcs = [(c, f, f"Can't calculate: {why}" if why else "")
                        for c, f, why in zip(self._chain.calcs, self._chain.formulas, self._chain.problems)]
         for k, (c, f, problem) in enumerate(self._calcs):
-            color = colours.PALETTE[(len(names) + k) % len(colours.PALETTE)]
+            color = colors.PALETTE[(len(names) + k) % len(colors.PALETTE)]
             pw = self._new_plot(c.name, c.unit, color, 1.0)
             if live:
                 row = ChannelRowWidget(CalcStrip(c.name, c.formula, problem,
@@ -347,7 +347,7 @@ class LiveMixin:
 
     def _build_review_plots(self, names: list[str], units: list[str], colors: list[str]):
         self._review_names = list(names)
-        """Plots for a saved session: one per recorded channel, with only a colour bar."""
+        """Plots for a saved session: one per recorded channel, with only a color bar."""
         self._clear_plot_area()
         self.review_color_btns = []
         for i, (name, unit, color) in enumerate(zip(names, units, colors)):
@@ -355,7 +355,7 @@ class LiveMixin:
             h = QtWidgets.QHBoxLayout(row_w)
             h.setContentsMargins(0, 0, 0, 0)
             btn = ColorButton(color, lambda c, i=i: self.set_review_color(i, c),
-                              tooltip="Change this channel's colour in every trial of this session")
+                              tooltip="Change this channel's color in every trial of this session")
             self.review_color_btns.append(btn)
             h.addWidget(btn, 0)
             widths = {r.ch.name: r.ch.width for r in self.rows}
@@ -604,7 +604,7 @@ class LiveMixin:
             self.btn_rec.setToolTip("")
             self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
             self._set_comment_box(False)
-            self.analysis_page.source_changed()          # a new block to analyse
+            self.analysis_page.source_changed()          # a new block to analyze
         self._fill_recorded()
         # Starting a block keeps the previous block's comment lines: its data is
         # still on screen (now at negative times), and they scroll off with it.

@@ -13,7 +13,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import config as cfgmod
 from .config import Channel
-from . import colours
+from . import colors
 from .mainparts import REVIEW
 
 
@@ -236,7 +236,7 @@ class MediaMixin:
             cfg.channels = chans or [Channel("ai0", "Ch1"), Channel("ai1", "Ch2")]
             cfg.sample_rate = float(saved.get("sample_rate", 20000))
             cfg.chunk_size = cfgmod.auto_chunk_size(cfg.sample_rate)
-            colours.fill_colors(cfg.channels)
+            colors.fill_colors(cfg.channels)
         try:
             cfgmod.validate(cfg)
         except ValueError as e:

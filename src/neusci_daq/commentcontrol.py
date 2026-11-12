@@ -120,7 +120,7 @@ class CommentsMixin:
             {"t": float(t), "sample_index": int(round(t * fs)), "text": text.strip()}])
 
     def jump_to(self, t: float) -> None:
-        """Centre the review plots on a comment."""
+        """Centere the review plots on a comment."""
         if self.mode != REVIEW or not self.plots:
             return
         win = self.window_box.value()

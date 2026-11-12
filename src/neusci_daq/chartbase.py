@@ -1,7 +1,7 @@
 """A chart on the Analysis canvas. Any chart can be open more than once. What every copy
 shares is on the page (the recordings, gain, stimulus fit, the spikes found, the repeats);
-what's set per copy is on the chart: its name, units, pinned blocks, zoom link and the
-settings it adds with field().
+what's set per copy is on the chart: its name, spike units, pinned blocks, zoom link, its
+look (line thickness, grid lines, axis ranges) and the settings it adds with field().
 
 A chart only draws while it can be seen: refresh() marks it stale, and it catches up when
 it's shown.
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtWidgets
 
 from . import analysis as A
@@ -20,10 +21,13 @@ from .plotzoom import add_buttons
 from .viewkit import View, show_scale_bar, shrink_combos, style_plot, with_slider
 
 
+LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None]}   # None: that edge is auto
+
+
 class Chart(View):
-    kind = ""                      # its name in Add chart
-    group = ""                     # the heading it's under there
-    tip = ""                       # what it shows
+    kind = ""                      # its name in Add chart (its heading there is in canvas.GROUPS)
+    tip = ""                       # the question it answers
+    counts_spikes = False          # a Measure window dragged across it counts spikes
     link = ""                      # the charts it zooms with: "time", "phase", or none
     help = ""                      # its help topic
     uses_units = True              # can show its own units
@@ -38,6 +42,7 @@ class Chart(View):
         self.pin: dict | None = None          # {"stems": blocks, "picked": those of them, "pages": names}
         self.own_units: set[int] | None = None
         self.linked = True
+        self.look = {k: list(v) if isinstance(v, list) else v for k, v in LOOK.items()}
         self.stale = True
         self.auto_hide = False                # from a built-in layout: gives up its room when empty
         self.collapsed = False                # nothing to show: its dock gives up its room
@@ -47,6 +52,7 @@ class Chart(View):
         self.body.setContentsMargins(0, 0, 0, 0)
         self.body.setSpacing(2)
         self.options = self._make_options()
+        self._fill_units()
 
     # -- its settings ---------------------------------------------------------------------
     def _make_options(self) -> QtWidgets.QWidget:
@@ -62,16 +68,23 @@ class Chart(View):
         self.name_box.setToolTip("What this chart is called in its title bar")
         self.name_box.editingFinished.connect(self._renamed)
         f.addRow("Name", self.name_box)
-        self.units_box = QtWidgets.QComboBox()
-        self.units_box.addItem("The units ticked", False)
-        self.units_box.addItem("Its own", True)
-        self.units_box.setToolTip("Which units this chart shows: the ones ticked in the Units table, or its own")
-        self.units_box.currentIndexChanged.connect(lambda *_: self._units_mode_changed())
+        # the spike units it shows: the Spikes panel's, or chosen here (laid out like its Groups)
+        self.units_group = QtWidgets.QGroupBox("Spike units")
+        ul = QtWidgets.QVBoxLayout(self.units_group)
+        self.units_same = QtWidgets.QRadioButton("Same as the Spikes panel")
+        self.units_same.setToolTip("Show the units ticked in the Units table of Spikes")
+        self.units_own = QtWidgets.QRadioButton("Choose")
+        self.units_own.setToolTip("Show just the units ticked here, whatever Spikes shows: say Unit 1 here and "
+                                  "Unit 2 on another chart")
+        self.units_same.setChecked(True)
+        ul.addWidget(self.units_same)
+        ul.addWidget(self.units_own)
         self.unit_ticks = QtWidgets.QWidget()
         self._ticks = QtWidgets.QVBoxLayout(self.unit_ticks)
-        self._ticks.setContentsMargins(0, 0, 0, 0)
+        self._ticks.setContentsMargins(12, 0, 0, 0)
         self._ticks.setSpacing(2)
-        self.unit_ticks.hide()
+        ul.addWidget(self.unit_ticks)
+        self.units_own.toggled.connect(lambda *_: self._units_mode_changed())
         self.pin_box = QtWidgets.QCheckBox("Pin to these trials")
         self.pin_box.setToolTip("Keep this chart on the trials selected now, while the others follow the selection")
         self.pin_box.toggled.connect(self.set_pinned)
@@ -81,15 +94,16 @@ class Chart(View):
         self.link_box.setChecked(True)
         self.link_box.setToolTip("Zoom and pan with the other charts against time, or against phase. Off: on its own")
         self.link_box.toggled.connect(self._link_toggled)
-        if self.uses_units:
-            f.addRow("Units", self.units_box)
-            f.addRow(self.unit_ticks)
         # a chart's own trials are its own Groups, set with the Groups of the settings panel
         self.pin_box.hide()
         self.pin_note.hide()
         if self.link:
             f.addRow(self.link_box)
         self._side.addWidget(box)
+        if self.uses_units:
+            self._side.addWidget(self.units_group)
+        else:
+            self.units_group.hide()
         self.settings_box = QtWidgets.QGroupBox("Settings")
         self.form = QtWidgets.QFormLayout(self.settings_box)
         self.settings_box.hide()
@@ -135,7 +149,7 @@ class Chart(View):
             else:
                 fields[key] = w.value()
         return {"name": self.name, "pin": self.pin, "linked": self.linked, "auto_hide": self.auto_hide,
-                "fields": {**self._wanted, **fields},
+                "fields": {**self._wanted, **fields}, "look": self.look,
                 "units": None if self.own_units is None else sorted(self.own_units)}
 
     def restore(self, state: dict) -> None:
@@ -144,12 +158,16 @@ class Chart(View):
         self.pin = state.get("pin")
         self.linked = state.get("linked", True)
         self.auto_hide = state.get("auto_hide", False)
+        look = state.get("look", {})
+        self.look = {k: list(look.get(k, v)) if isinstance(v, list) else look.get(k, v) for k, v in LOOK.items()}
         units = state.get("units")
         self.own_units = None if units is None else set(units)
-        self.units_box.blockSignals(True)
-        self.units_box.setCurrentIndex(0 if self.own_units is None else 1)
-        self.units_box.blockSignals(False)
-        self.unit_ticks.setVisible(self.own_units is not None)
+        for b in (self.units_same, self.units_own):
+            b.blockSignals(True)
+        (self.units_same if self.own_units is None else self.units_own).setChecked(True)
+        for b in (self.units_same, self.units_own):
+            b.blockSignals(False)
+        self._fill_units()
         for w, on in ((self.pin_box, self.pin is not None), (self.link_box, self.linked)):
             w.blockSignals(True)
             w.setChecked(on)
@@ -308,26 +326,33 @@ class Chart(View):
         return replace_events(ev, np.isin(ev.block, self.blocks()))
 
     def _units_mode_changed(self) -> None:
-        on = bool(self.units_box.currentData())
+        on = self.units_own.isChecked()
+        if on == (self.own_units is not None):
+            return
         self.own_units = (set(self.finder.shown_units()) if on else None)
-        self.unit_ticks.setVisible(on)
         self._fill_units()
         self.show_title()
         self.saved()
         self.units_changed()
 
     def _fill_units(self) -> None:
-        """A tick for each unit, while it has its own."""
+        """A tick for each unit: grayed out, showing the Spikes panel's, unless it chooses its own."""
         while self._ticks.count():
             self._ticks.takeAt(0).widget().deleteLater()
         ev = self.page.events
-        if self.own_units is None or ev is None:
+        if ev is None:
+            note = QtWidgets.QLabel("No spikes found yet")
+            note.setEnabled(False)
+            self._ticks.addWidget(note)
             return
+        own = self.own_units is not None
+        shown = self.own_units if own else self.finder.shown_units()
         for u in range(ev.n_units):
             box = QtWidgets.QCheckBox(f"Unit {u + 1}")
             box.setToolTip("Show this unit on this chart")
             box.setIcon(style.dot_icon(self.finder.color_of(u)))
-            box.setChecked(u in self.own_units)
+            box.setChecked(u in shown)
+            box.setEnabled(own)
             box.toggled.connect(lambda on, u=u: self.show_unit(u, on))
             self._ticks.addWidget(box)
 
@@ -365,6 +390,53 @@ class Chart(View):
         measure = getattr(self.page, "measure", None)
         if measure is not None:
             measure.decorate(self)
+        self.apply_look()
+
+    # -- its look --------------------------------------------------------------------------------
+    def set_look(self, key: str, value) -> None:
+        """Change line thickness ("thick"), grid lines ("grid") or an axis range ("x" or "y":
+        [min, max], None for auto)."""
+        self.look[key] = list(value) if isinstance(value, (list, tuple)) else value
+        if key == "grid" and value:
+            self.refresh()                    # the chart's own grid lines, drawn again
+        self.apply_look()
+        self.saved()
+
+    def apply_look(self) -> None:
+        """Its line thickness, grid lines and axis ranges, on what's drawn now."""
+        plots = self.plots()
+        k = float(self.look["thick"])
+        for pw in plots:
+            pi = pw.getPlotItem()
+            if not self.look["grid"]:
+                pi.showGrid(x=False, y=False)
+            for item in pi.listDataItems():
+                pen = item.opts.get("pen") if isinstance(item, pg.PlotDataItem) else None
+                if pen is None:
+                    continue
+                pen = pg.mkPen(pen)
+                if pen.style() == pg.QtCore.Qt.PenStyle.NoPen:
+                    continue
+                base = getattr(item, "_base_width", None)
+                if base is None or getattr(item, "_set_width", None) != pen.widthF():   # drawn again since
+                    base = item._base_width = pen.widthF() or 1.0
+                pen.setWidthF(base * k)
+                item._set_width = pen.widthF()
+                item.setPen(pen)
+        if plots:
+            self._apply_ranges(plots[0].getPlotItem().vb)
+
+    def _apply_ranges(self, vb) -> None:
+        for k, axis in enumerate(("x", "y")):
+            lo, hi = self.look[axis]
+            if lo is None and hi is None:
+                continue
+            data = vb.childrenBounds()[k]
+            now = vb.viewRange()[k]
+            a = lo if lo is not None else (data[0] if data is not None else now[0])
+            b = hi if hi is not None else (data[1] if data is not None else now[1])
+            if b > a:
+                (vb.setXRange if axis == "x" else vb.setYRange)(a, b, padding=0)
 
     def measure_channel(self, k: int) -> str:
         """The channel a window dragged across plot k measures: the one the spikes are found on."""
@@ -389,7 +461,9 @@ class Chart(View):
         self.refresh()
 
     def units_changed(self) -> None:
-        """Other units are ticked, or their colours changed."""
+        """Other units are ticked, or their colors changed."""
+        if self.own_units is None:
+            self._fill_units()
         self.refresh()
 
     def current_changed(self) -> None:
@@ -403,7 +477,7 @@ class Chart(View):
         for pw in self.plots():
             pw.getPlotItem().enableAutoRange(axis="y")
             pw.getPlotItem().vb.updateAutoRange()     # now: a chart off screen on the board isn't painted
-
+        self.apply_look()                             # an axis range you set stays
     def listen_for_mark(self, on_drag) -> None:
         """Dragging across this chart marks one repeat, if it's a trace of the stimulus."""
 

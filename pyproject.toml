@@ -22,4 +22,4 @@ neusci-daq = "neusci_daq.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-neusci_daq = ["icons/*.png", "icons/*.ico", "icons/*.svg", "web/*.html", "web/*.js", "web/vendor/mathjax/*.js"]
+neusci_daq = ["icons/*.png", "icons/*.ico", "icons/*.svg", "web/*.html", "web/*.js", "lessons/*.js", "web/vendor/mathjax/*.js"]

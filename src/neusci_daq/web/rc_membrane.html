@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RC Circuit and Membrane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Same look as membrane_potential.html: a circuit on top, the same thing done by ions below. */
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --ink:#1c2220; --muted:#5b6662; --line:#d6dcd8; --accent:#0d6b7c;
+  --k:#6b3fb8; --na:#d07a1f; --a:#9aa29e;
+  --pos:#d1373f; --neg:#2861c8;
+  --cyto:#edf0f6; --bath:#e8f2ef; --mem:#cdbd92; --memdark:#a8946a;
+  --font-body:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+    --k:#a88cf2; --na:#f0a350; --a:#69726e;
+    --pos:#f0646b; --neg:#6b9cf2;
+    --cyto:#161d27; --bath:#13211d; --mem:#6c6046; --memdark:#8d7d58;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+  --k:#a88cf2; --na:#f0a350; --a:#69726e;
+  --pos:#f0646b; --neg:#6b9cf2;
+  --cyto:#161d27; --bath:#13211d; --mem:#6c6046; --memdark:#8d7d58;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.5;padding:24px 20px 48px}
+.wrap{max-width:1640px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header h1{font-weight:600;font-size:26px;letter-spacing:-0.01em;margin:0 0 6px;text-wrap:balance}
+header p{margin:0;color:var(--muted);max-width:80ch}
+h2.part{font-size:20px;font-weight:600;margin:12px 0 0;text-wrap:balance}
+.top{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:1100px){.top{grid-template-columns:1fr}}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:820px){.row2{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.stage{display:flex;flex-direction:column;gap:12px}
+canvas{display:block;width:100%;height:auto;border-radius:6px}
+.runbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.runbar input[type=range]{flex:1 1 200px;min-width:140px;max-width:380px}
+.runbar output{font-family:var(--font-mono);font-size:13px;min-width:96px;font-variant-numeric:tabular-nums}
+.runlab{font-size:14px;font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.dot.k{background:var(--k)}.dot.na{background:var(--na)}.dot.a{background:var(--a);width:12px;height:12px}
+.dot.pos{background:var(--pos)}.dot.neg{background:var(--neg);border-radius:2px}
+.sect-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.caption{font-size:13px;color:var(--muted);margin:0;max-width:90ch}
+.panel{display:flex;flex-direction:column;gap:16px}
+.vbox{display:flex;flex-direction:column;gap:2px}
+.vnum{font-family:var(--font-mono);font-size:40px;font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums}
+.vrow{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.vrow b{color:var(--ink);font-family:var(--font-mono);font-weight:500;white-space:nowrap}
+fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+legend{padding:0;margin-bottom:8px}
+.row{display:grid;grid-template-columns:92px minmax(0,1fr) 104px;align-items:center;gap:10px;font-size:14px}
+.row label{display:inline-flex;align-items:center;gap:7px}
+.row output{font-family:var(--font-mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.row .hint{grid-column:2 / 4;font-size:12px;color:var(--muted);margin-top:-6px}
+.row[hidden]{display:none}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.check{display:flex;align-items:center;gap:8px;font-size:14px}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+button{font:inherit;font-size:14px;cursor:pointer;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:500}
+button.gate{border-color:var(--na);font-weight:500}
+button.gate[aria-pressed="true"]{background:var(--na);color:var(--surface)}
+.chip{font-size:13px;padding:5px 10px;border-radius:999px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.charthead{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:space-between}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.notes h2{font-size:16px;font-weight:600;margin:0 0 8px}
+.notes ul{margin:0;padding-left:18px}
+.notes li{margin-bottom:6px;max-width:68ch}
+table.map{width:100%;border-collapse:collapse;font-size:14px}
+table.map th,table.map td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Charging a membrane: the RC circuit and the ions</h1>
+  <p>A membrane is a capacitor (the thin lipid bilayer) in parallel with resistors (the ion channels), each in series with a battery (that ion's Nernst potential). When something changes, current first goes into charging the capacitor; only once the voltage has moved to its new value does all of the current flow around through the resistors. The top half shows this with a circuit; the bottom half does the same thing with ions, using the particle model from the Membrane potential page.</p>
+</header>
+
+<!-- =================== Part 1: the circuit =================== -->
+<h2 class="part">1 · The circuit</h2>
+<div class="top">
+  <section class="card stage">
+    <div class="btns" role="group" aria-label="Circuit">
+      <button class="chip" data-mode="inj" aria-pressed="false">Current injection</button>
+      <button class="chip" data-mode="g" aria-pressed="true">Conductance change (Na⁺ channels)</button>
+    </div>
+    <canvas id="circ" aria-label="Circuit diagram with moving charges"></canvas>
+    <div class="runbar">
+      <button id="cSwitch" class="gate" aria-pressed="false">Close switch</button>
+      <button id="cPulse">Pulse</button>
+      <button id="cReset">Reset</button>
+      <label for="cSpeed" class="runlab">Speed</label>
+      <input type="range" id="cSpeed" min="0" max="100" value="40">
+      <output id="cSpeedo" for="cSpeed"></output>
+    </div>
+    <div class="legend">
+      <span><i class="dot pos"></i>positive charge (conventional current)</span>
+      <span id="cLegNa"><i class="dot na"></i>through the Na⁺ branch</span>
+      <span id="cLegK"><i class="dot k"></i>through the K⁺ branch</span>
+    </div>
+    <p class="caption">Each dot carries the same charge as one + or − mark on the capacitor plates, so you can watch dots arriving at a plate turn into marks. The top wire is the inside of the cell, the bottom wire the outside (ground); current is counted positive when it flows from inside to outside, the usual sign for membrane currents.</p>
+  </section>
+  <aside class="card panel">
+    <div class="vbox">
+      <span class="sect-title">Membrane potential</span>
+      <span class="vnum" id="cV">—</span>
+      <div class="vrow"><span>steady-state value V<sub>∞</sub></span><b id="cVinf">—</b></div>
+      <div class="vrow"><span>time constant τ = C / Σg</span><b id="cTau">—</b></div>
+      <div class="vrow"><span>capacitor current I<sub>C</sub></span><b id="cIC">—</b></div>
+      <div class="vrow"><span id="cIRlab">resistor current I<sub>R</sub></span><b id="cIR">—</b></div>
+      <div class="vrow"><span>charge on the capacitor</span><b id="cQ">—</b></div>
+    </div>
+    <fieldset>
+      <legend class="sect-title">Components</legend>
+      <div class="row"><label for="cC">C</label><input type="range" id="cC" min="0.2" max="3" step="0.1" value="1"><output id="cCo" for="cC"></output></div>
+      <div class="row" data-for="inj"><label for="cGL">g (1/R)</label><input type="range" id="cGL" min="0.1" max="3" step="0.05" value="0.5"><output id="cGLo" for="cGL"></output></div>
+      <div class="row" data-for="inj"><label for="cI">I injected</label><input type="range" id="cI" min="-60" max="60" step="1" value="20"><output id="cIo" for="cI"></output></div>
+      <div class="row" data-for="g"><label for="cGK"><i class="dot k"></i>g<sub>K</sub></label><input type="range" id="cGK" min="0.05" max="3" step="0.05" value="0.5"><output id="cGKo" for="cGK"></output></div>
+      <div class="row" data-for="g"><label for="cEK"><i class="dot k"></i>E<sub>K</sub></label><input type="range" id="cEK" min="-110" max="0" step="1" value="-86"><output id="cEKo" for="cEK"></output></div>
+      <div class="row" data-for="g"><label for="cGNa"><i class="dot na"></i>g<sub>Na</sub></label><input type="range" id="cGNa" min="0.05" max="5" step="0.05" value="0.7"><output id="cGNao" for="cGNa"></output>
+        <span class="hint">conductance when the switch is closed (Na⁺ channels open)</span></div>
+      <div class="row" data-for="g"><label for="cENa"><i class="dot na"></i>E<sub>Na</sub></label><input type="range" id="cENa" min="0" max="90" step="1" value="60"><output id="cENao" for="cENa"></output></div>
+      <div class="row"><label for="cDur">Pulse</label><input type="range" id="cDur" min="1" max="40" step="1" value="12"><output id="cDuro" for="cDur"></output></div>
+    </fieldset>
+  </aside>
+</div>
+<div class="row2">
+  <section class="card stage">
+    <p class="sect-title">Membrane potential</p>
+    <canvas id="cVchart" aria-label="Voltage over time"></canvas>
+    <p class="caption">Shaded: switch closed. The voltage moves exponentially toward V<sub>∞</sub> with time constant τ. Closing the switch adds a conductance, so τ gets shorter.</p>
+  </section>
+  <section class="card stage">
+    <div class="charthead"><p class="sect-title">Where the current goes</p>
+      <div class="btns"><button class="chip" data-cview="i" aria-pressed="true">Currents</button><button class="chip" data-cview="q" aria-pressed="false">Charge moved</button></div></div>
+    <canvas id="cIchart" aria-label="Branch currents over time"></canvas>
+    <p class="caption" id="cIcap"></p>
+  </section>
+</div>
+
+<!-- =================== Part 2: the ions =================== -->
+<h2 class="part">2 · The same thing, ion by ion</h2>
+<div class="top">
+  <section class="card stage">
+    <canvas id="sim" aria-label="Particle simulation of K⁺ and Na⁺ ions crossing a membrane"></canvas>
+    <div class="runbar">
+      <button id="gate" class="gate" aria-pressed="false">Open Na⁺ channels</button>
+      <button id="pPulse">Pulse</button>
+      <button id="play" class="primary">Pause</button>
+      <button id="reset">Reset ions</button>
+      <label for="speed" class="runlab">Speed</label>
+      <input type="range" id="speed" min="0" max="100" value="90">
+      <output id="speedo" for="speed"></output>
+    </div>
+    <div class="legend">
+      <span><i class="dot k"></i>K⁺</span>
+      <span><i class="dot na"></i>Na⁺</span>
+      <span><i class="dot a"></i>A⁻ anions (cannot cross)</span>
+      <span><i class="dot neg"></i><i class="dot pos" style="border-radius:2px"></i>charge density</span>
+    </div>
+    <p class="caption" id="patchInfo"></p>
+  </section>
+  <aside class="card panel">
+    <div class="vbox">
+      <span class="sect-title">Membrane potential</span>
+      <span class="vnum" id="pV">—</span>
+      <span class="caption">averaged over the last 2,000 steps</span>
+      <div class="vrow"><span>E<sub>K</sub> / E<sub>Na</sub></span><b id="pE">—</b></div>
+      <div class="vrow"><span>GHK, Na⁺ closed / open</span><b id="pGHK">—</b></div>
+      <div class="vrow"><span>charge on the membrane (inside)</span><b id="pQ">—</b></div>
+      <div class="vrow"><span>since the last change: Na⁺ in / K⁺ out</span><b id="pCum">—</b></div>
+    </div>
+    <fieldset>
+      <legend class="sect-title">Channels in the simulated patch</legend>
+      <div class="row"><label for="nK"><i class="dot k"></i>K⁺</label><input type="range" id="nK" min="0" max="24" step="1" value="9"><output id="nKo" for="nK"></output>
+        <span class="hint">leak channels, always open: the resistor g<sub>K</sub></span></div>
+      <div class="row"><label for="nNa"><i class="dot na"></i>Na⁺</label><input type="range" id="nNa" min="0" max="24" step="1" value="12"><output id="nNao" for="nNa"></output>
+        <span class="hint">gated channels: the switch and resistor g<sub>Na</sub></span></div>
+      <div class="row"><label for="pDur">Pulse</label><input type="range" id="pDur" min="1" max="40" step="1" value="15"><output id="pDuro" for="pDur"></output></div>
+      <div class="row"><label for="qmv">Membrane C</label><input type="range" id="qmv" min="4" max="30" step="1" value="11"><output id="qmvo" for="qmv"></output>
+        <span class="hint">more capacitance takes more ions to change the voltage, so it changes more slowly</span></div>
+      <label class="check" for="tint"><input type="checkbox" id="tint" checked>Show charge density map</label>
+    </fieldset>
+  </aside>
+</div>
+<div class="row2">
+  <section class="card stage">
+    <p class="sect-title">Membrane potential</p>
+    <canvas id="pVchart" aria-label="Voltage trace of the particle simulation"></canvas>
+    <p class="caption">Each point averages 100 steps. Shaded: Na⁺ channels open. Dashed lines are E<sub>K</sub> and E<sub>Na</sub>; dotted is the GHK prediction for the channels as they are now.</p>
+  </section>
+  <section class="card stage">
+    <div class="charthead"><p class="sect-title">Where the ions go</p>
+      <div class="btns"><button class="chip" data-pview="q" aria-pressed="true">Ions moved</button><button class="chip" data-pview="i" aria-pressed="false">Currents</button></div></div>
+    <canvas id="pIchart" aria-label="Ions crossing the membrane over time"></canvas>
+    <p class="caption" id="pIcap"></p>
+  </section>
+</div>
+
+<section class="card">
+  <p class="sect-title" style="margin-bottom:8px">How the circuit maps onto the membrane</p>
+  <table class="map">
+    <thead><tr><th>Circuit</th><th>Membrane</th><th>In the particle model</th></tr></thead>
+    <tbody>
+      <tr><td>Capacitor C</td><td>Lipid bilayer, an insulator a few nm thick between two salt solutions</td><td>The thin layers of excess charge on the two faces of the membrane (red and blue in the density map)</td></tr>
+      <tr><td>Charge on the plates</td><td>A tiny excess of cations on one face, anions on the other</td><td>"Charge on the membrane": net charge of all the ions on the inside</td></tr>
+      <tr><td>Resistor g<sub>K</sub> with battery E<sub>K</sub></td><td>K⁺ leak channels; the K⁺ concentration gradient drives K⁺ out</td><td>Purple channels; purple ions crossing outward</td></tr>
+      <tr><td>Switch, resistor g<sub>Na</sub>, battery E<sub>Na</sub></td><td>Gated Na⁺ channels opening; the Na⁺ gradient drives Na⁺ in</td><td>Orange channels with a gate on the inner mouth</td></tr>
+      <tr><td>Capacitor current I<sub>C</sub> = C dV/dt</td><td>Ions that crossed but have not been matched by an opposite flow</td><td>Na⁺ in minus K⁺ out: the charge that piles up at the membrane</td></tr>
+      <tr><td>Steady state: I<sub>Na</sub> + I<sub>K</sub> = 0</td><td>Na⁺ leaking in exactly as fast as K⁺ leaks out</td><td>The "Na⁺ in" and "K⁺ out" lines rising in parallel</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="notes card">
+  <div>
+    <h2>What to look for</h2>
+    <ul>
+      <li>Close the switch (or open the Na⁺ channels). At first almost all the Na⁺ current goes into the capacitor: the plates fill, and in the particle model Na⁺ ions pile up as positive charge just inside the membrane.</li>
+      <li>As the voltage rises, the K⁺ branch carries more and more current outward and the Na⁺ branch less inward, because both are now further from (or closer to) their batteries.</li>
+      <li>Once the voltage stops changing, the capacitor current is zero. Current now goes all the way around: in through Na⁺, out through K⁺. The charge on the membrane is constant, yet ions keep crossing.</li>
+      <li>Open the switch again and the capacitor discharges through the K⁺ branch alone, more slowly, because there is less conductance.</li>
+      <li>A Pulse shorter than a few time constants never reaches V<sub>∞</sub>: the membrane is a low-pass filter.</li>
+    </ul>
+  </div>
+  <div>
+    <h2>What it simplifies</h2>
+    <ul>
+      <li>The circuit uses linear (ohmic) channels. Real channels, and the particle model, follow the GHK current equation, so the particle voltage settles at the GHK value, close to but not exactly the circuit's conductance-weighted average.</li>
+      <li>The particle model is the one on the Membrane potential page with Cl⁻ folded into the impermeant anions, no pump, and gated Na⁺ channels added. Both sides are held at fixed concentrations far from the membrane.</li>
+      <li>Ion counts are tiny compared with a real cell, so the particle traces are noisy; the voltage is averaged over many steps. Time is in simulation steps, not milliseconds.</li>
+      <li>Real Na⁺ channels open with voltage and then inactivate, which gives an action potential. Here they only open and close when you tell them to.</li>
+    </ul>
+  </div>
+</section>
+</div>
+
+<script>
+// ---------- shared: colours, number formats, charts ----------
+const $ = id => document.getElementById(id);
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+let C = {};
+const colorHooks = [];
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  ['bg','surface','ink','muted','line','accent','k','na','a','pos','neg','cyto','bath','mem','memdark'].forEach(n => C[n] = cs.getPropertyValue('--' + n).trim());
+  colorHooks.forEach(f => f());
+}
+function rgb(hex) { const h = hex.replace('#', ''); const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+const mixc = (a, b, t) => { const p = rgb(a), q = rgb(b); return `rgb(${p.map((v, i) => Math.round(v * t + q[i] * (1 - t))).join(',')})`; };
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readColors);
+new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+readColors();
+const fmtSigned = (v, d = 1, u = ' mV') => isFinite(v) ? (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d) + u : '—';
+function setupCanvas(cv, w, h) { cv.width = w * dpr; cv.height = h * dpr; const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); return c; }
+function bindRange(id, fmt, onv) {
+  const el = $(id), out = $(id + 'o');
+  const h = () => { const v = parseFloat(el.value); out.textContent = fmt(v); onv(v); };
+  el.addEventListener('input', h); h();
+}
+function niceStep(span) { const p = Math.pow(10, Math.floor(Math.log10(span))), f = span / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+
+// A line chart: series share an x array; shade marks spans where `on` is true; refs are horizontal lines.
+// The y range grows to fit and shrinks slowly, so it doesn't jump around with every frame.
+const CHW = 640, CHH = 340;
+function drawChart(c, o) {
+  const L = 62, R = 96, T = 14, B = 30, pw = CHW - L - R, ph = CHH - T - B;
+  c.fillStyle = C.surface; c.fillRect(0, 0, CHW, CHH);
+  let lo = o.fixed ? o.fixed[0] : 0, hi = o.fixed ? o.fixed[1] : 0;
+  if (!o.fixed) {
+    for (const s of o.series) for (const v of s.ys) if (isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    for (const r of o.refs || []) if (isFinite(r.v)) { lo = Math.min(lo, r.v); hi = Math.max(hi, r.v); }
+    const pad = (hi - lo || 1) * 0.08; lo -= pad; hi += pad;
+    const st = o.state;   // remembered range
+    if (st.lo == null) { st.lo = lo; st.hi = hi; }
+    st.lo = lo < st.lo ? lo : st.lo + (lo - st.lo) * 0.02; st.hi = hi > st.hi ? hi : st.hi + (hi - st.hi) * 0.02;
+    lo = st.lo; hi = st.hi;
+    if (hi - lo < (o.minSpan || 1)) { const m = (hi + lo) / 2; lo = m - (o.minSpan || 1) / 2; hi = m + (o.minSpan || 1) / 2; }
+  }
+  const x0 = o.x0, x1 = o.x1;
+  const sx = x => L + (x - x0) / (x1 - x0) * pw, sy = v => T + (hi - Math.max(lo, Math.min(hi, v))) / (hi - lo) * ph;
+  // shading
+  if (o.on && o.xs.length > 1) {
+    c.fillStyle = C.na; c.globalAlpha = 0.10;
+    let a = -1;
+    for (let i = 0; i <= o.xs.length; i++) {
+      const on = i < o.xs.length && o.on[i];
+      if (on && a < 0) a = i;
+      if (!on && a >= 0) { const xa = sx(o.xs[a]), xb = sx(o.xs[i - 1]); c.fillRect(Math.max(L, xa), T, Math.min(L + pw, xb) - Math.max(L, xa), ph); a = -1; }
+    }
+    c.globalAlpha = 1;
+  }
+  // grid
+  const stp = niceStep((hi - lo) / 5);
+  c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle'; c.textAlign = 'right';
+  for (let v = Math.ceil(lo / stp) * stp; v <= hi + 1e-9; v += stp) {
+    const y = sy(v); c.strokeStyle = C.line; c.lineWidth = Math.abs(v) < stp / 1e3 ? 1.4 : 0.8;
+    c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke();
+    c.fillStyle = C.muted; c.fillText((Math.abs(v) < stp / 1e3 ? 0 : +v.toPrecision(4)) + '', L - 6, y);
+  }
+  c.save(); c.translate(14, T + ph / 2); c.rotate(-Math.PI / 2); c.textAlign = 'center'; c.fillText(o.ylabel, 0, 0); c.restore();
+  c.textAlign = 'left'; c.fillText(o.xlabel, L, CHH - 9);
+  // reference lines
+  const labels = [];
+  for (const r of o.refs || []) {
+    if (!isFinite(r.v)) continue;
+    const y = sy(r.v);
+    c.strokeStyle = r.color; c.lineWidth = r.width || 1.2; c.setLineDash(r.dash || [6, 4]);
+    c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke(); c.setLineDash([]);
+    labels.push({ y, t: r.label, c: r.color });
+  }
+  // series
+  c.save(); c.beginPath(); c.rect(L, T, pw, ph); c.clip();
+  for (const s of o.series) {
+    if (o.xs.length < 2) break;
+    c.strokeStyle = s.color; c.lineWidth = s.width || 2; c.lineJoin = 'round'; c.setLineDash(s.dash || []);
+    c.beginPath();
+    // with o.restart, a line starts afresh where `on` changes (counts that reset there)
+    for (let i = 0; i < o.xs.length; i++) { const x = sx(o.xs[i]), y = sy(s.ys[i]); i && !(o.restart && o.on[i] !== o.on[i - 1]) ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.stroke(); c.setLineDash([]);
+    if (s.label) labels.push({ y: sy(s.ys[s.ys.length - 1]), t: s.label, c: s.color });
+  }
+  c.restore();
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
+  c.font = '600 11px "IBM Plex Sans", sans-serif'; c.textAlign = 'left';
+  labels.forEach(l => { c.fillStyle = l.c; c.fillText(l.t, L + pw + 6, Math.max(T + 4, Math.min(CHH - 6, l.y))); });
+  c.strokeStyle = C.line; c.lineWidth = 1; c.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
+  c.textBaseline = 'alphabetic';
+}
+function chipGroup(attr, onPick) {
+  const bs = document.querySelectorAll(`[data-${attr}]`);
+  bs.forEach(b => b.addEventListener('click', () => { bs.forEach(x => x.setAttribute('aria-pressed', String(x === b))); onPick(b.dataset[attr]); }));
+}
+
+// =====================================================================================
+// Part 1: the circuit. Two nodes (inside, outside) joined by parallel branches. Each
+// branch current is counted from inside to outside; the capacitor takes whatever the
+// others don't, I_C = −Σ I, and C dV/dt = I_C. Units: µF/cm², mS/cm², mV, ms, µA/cm².
+// =====================================================================================
+(() => {
+  const cv = $('circ'), CWd = 780, CHd = 470, c = setupCanvas(cv, CWd, CHd);
+  const vc = setupCanvas($('cVchart'), CHW, CHH), ic = setupCanvas($('cIchart'), CHW, CHH);
+  const TOP = 70, BOT = 410, MID = 240, XS = [140, 400, 640];
+  const SP = 20, Q0 = 4;                // dot spacing (px); charge per dot and per plate mark (nC/cm²)
+  const KPX = SP / Q0;                   // px a dot moves per nC/cm² of charge through its wire
+  let mode = 'g', sw = false, pulseEnd = -1, t = 0, V = -86, speed = 1;
+  const p = { C: 1, gL: 0.5, I: 20, gK: 0.5, EK: -86, gNa: 0.7, ENa: 60, dur: 12 };
+  let cum = [0, 0, 0];                    // since the last switch: ion branch 1 in, branch 2 out, stored
+  const hist = { t: [], V: [], i1: [], i2: [], iC: [], q1: [], q2: [], qC: [], on: [] };
+  const WIN = 40, SAMPLE_MS = 0.04;      // chart window and sample interval (ms)
+  let sampleAcc = 0, cview = 'i';
+  const vState = {}, iState = {};
+
+  function currents(v) {      // [branch 1, branch 2], inside → outside
+    if (mode === 'inj') return [sw ? -p.I : 0, p.gL * v];
+    return [sw ? p.gNa * (v - p.ENa) : 0, p.gK * (v - p.EK)];
+  }
+  function steady() {
+    const G = mode === 'inj' ? p.gL : p.gK + (sw ? p.gNa : 0);
+    const I = mode === 'inj' ? (sw ? p.I : 0) : p.gK * p.EK + (sw ? p.gNa * p.ENa : 0);
+    return { G, Vinf: I / G, tau: p.C / G };
+  }
+  function restV() { return mode === 'inj' ? 0 : p.EK; }
+  function setSwitch(on) {
+    if (on === sw) return;
+    sw = on; cum = [0, 0, 0];
+    $('cSwitch').setAttribute('aria-pressed', String(sw));
+    $('cSwitch').textContent = sw ? 'Open switch' : 'Close switch';
+  }
+  // Exact exponential step toward V∞ (the circuit is linear), in small pieces so pulses end on time.
+  function advance(dt) {
+    let left = dt;
+    while (left > 1e-9) {
+      let h = Math.min(left, 0.01);
+      if (pulseEnd >= 0 && t + h >= pulseEnd) { h = Math.max(0, pulseEnd - t); }
+      const { Vinf, tau } = steady();
+      const v0 = V;
+      V = Vinf + (V - Vinf) * Math.exp(-h / tau);
+      const vm = (v0 + V) / 2, I = currents(vm), iC = p.C * (V - v0) / (h || 1);
+      if (h > 0) {
+        cum[0] += -I[0] * h; cum[1] += I[1] * h; cum[2] += p.C * (V - v0);
+        moveDots(I, iC, h);
+      }
+      t += h; left -= h;
+      if (pulseEnd >= 0 && t >= pulseEnd - 1e-9) { pulseEnd = -1; setSwitch(false); }
+      sampleAcc += h;
+      if (sampleAcc >= SAMPLE_MS) { sampleAcc -= SAMPLE_MS; record(I, iC); }
+    }
+  }
+  function record(I, iC) {
+    const push = (k, v) => hist[k].push(v);
+    push('t', t); push('V', V); push('i1', I[0]); push('i2', I[1]); push('iC', iC);
+    push('q1', cum[0]); push('q2', cum[1]); push('qC', cum[2]); push('on', sw);
+    while (hist.t.length && hist.t[0] < t - WIN) for (const k in hist) hist[k].shift();
+  }
+
+  // ---------- moving charges ----------
+  // Each wire is a straight segment with its own offset; dots sit every SP px and move with the
+  // segment's current (positive = from a to b). Rails carry the running sum of branch currents.
+  const segs = [];
+  function seg(ax, ay, bx, by, color, skip) { segs.push({ ax, ay, bx, by, L: Math.hypot(bx - ax, by - ay), o: Math.random() * SP, color, skip: skip || [], I: 0 }); return segs.length - 1; }
+  let SB = [], ST = [], SBot = [];
+  function buildSegs() {
+    segs.length = 0;
+    const isG = mode === 'g';
+    SB = [
+      seg(XS[0], TOP, XS[0], BOT, isG ? 'na' : 'pos', isG ? [[MID - 112, MID - 72]] : [[MID - 26, MID + 26]]),
+      seg(XS[1], TOP, XS[1], BOT, isG ? 'k' : 'pos'),
+      seg(XS[2], TOP, XS[2], BOT, 'pos', [[MID - 10, MID + 10]]),
+    ];
+    ST = [seg(XS[0], TOP, XS[1], TOP, 'pos'), seg(XS[1], TOP, XS[2], TOP, 'pos')];
+    SBot = [seg(XS[0], BOT, XS[1], BOT, 'pos'), seg(XS[1], BOT, XS[2], BOT, 'pos')];
+  }
+  function moveDots(I, iC, h) {
+    const b = [I[0], I[1], iC];
+    for (let k = 0; k < 3; k++) segs[SB[k]].I = b[k];
+    segs[ST[0]].I = -b[0]; segs[ST[1]].I = -(b[0] + b[1]);
+    segs[SBot[0]].I = b[0]; segs[SBot[1]].I = b[0] + b[1];
+    for (const s of segs) s.o = ((s.o + s.I * KPX * h) % SP + SP) % SP;
+  }
+
+  // ---------- drawing ----------
+  function wire(x0, y0, x1, y1) { c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
+  function label(t_, x, y, col, align = 'left', font = '500 13px "IBM Plex Sans", sans-serif') { c.font = font; c.fillStyle = col || C.ink; c.textAlign = align; c.fillText(t_, x, y); }
+  function blank(x, y0, y1) { c.fillStyle = C.surface; c.fillRect(x - 3, y0, 6, y1 - y0); }
+  function resistor(x, yc, col) {
+    blank(x, yc - 30, yc + 30);
+    c.strokeStyle = col; c.lineWidth = 2.2; c.lineJoin = 'round'; c.beginPath(); c.moveTo(x, yc - 30);
+    for (let k = 0; k < 6; k++) c.lineTo(x + (k % 2 ? -11 : 11), yc - 25 + k * 10);
+    c.lineTo(x, yc + 30); c.stroke();
+  }
+  function battery(x, yc, E, col) {
+    blank(x, yc - 8, yc + 8);
+    const up = E >= 0;   // the long (+) plate faces the side it makes positive
+    c.strokeStyle = col; c.lineCap = 'round';
+    c.lineWidth = 2.4; wire(x - 20, up ? yc - 6 : yc + 6, x + 20, up ? yc - 6 : yc + 6);
+    c.lineWidth = 4.5; wire(x - 10, up ? yc + 6 : yc - 6, x + 10, up ? yc + 6 : yc - 6);
+    c.lineCap = 'butt';
+    label('+', x - 30, up ? yc - 2 : yc + 12, C.muted, 'center');
+  }
+  function switchSym(x, yc, closed, col) {
+    blank(x, yc - 20, yc + 20);
+    c.fillStyle = col; c.beginPath(); c.arc(x, yc - 20, 3.5, 0, 6.283); c.arc(x, yc + 20, 3.5, 0, 6.283); c.fill();
+    c.strokeStyle = col; c.lineWidth = 2.6; c.lineCap = 'round';
+    if (closed) wire(x, yc + 20, x, yc - 20); else wire(x, yc + 20, x - 24, yc - 14);
+    c.lineCap = 'butt';
+  }
+  function source(x, yc) {
+    blank(x, yc - 26, yc + 26);
+    c.strokeStyle = C.ink; c.lineWidth = 2; c.beginPath(); c.arc(x, yc, 24, 0, 6.283); c.stroke();
+    const up = p.I >= 0;
+    c.beginPath(); c.moveTo(x, yc + (up ? 13 : -13)); c.lineTo(x, yc + (up ? -13 : 13)); c.stroke();
+    c.beginPath(); c.moveTo(x - 6, yc + (up ? -6 : 6)); c.lineTo(x, yc + (up ? -13 : 13)); c.lineTo(x + 6, yc + (up ? -6 : 6)); c.stroke();
+  }
+  function capacitor(x, yc) {
+    blank(x, yc - 10, yc + 10);
+    c.strokeStyle = C.ink; c.lineWidth = 4;
+    wire(x - 70, yc - 8, x + 70, yc - 8); wire(x - 70, yc + 8, x + 70, yc + 8);
+    // charge on the plates: one mark per Q0
+    const q = p.C * V, n = Math.min(84, Math.round(Math.abs(q) / Q0));
+    const topCol = q >= 0 ? C.pos : C.neg, botCol = q >= 0 ? C.neg : C.pos;
+    c.font = '700 12px "IBM Plex Mono", monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let k = 0; k < n; k++) {
+      const row = Math.floor(k / 14), col = k % 14, xx = x - 65 + col * 10;
+      c.fillStyle = topCol; c.fillText(q >= 0 ? '+' : '−', xx, yc - 18 - row * 11);
+      c.fillStyle = botCol; c.fillText(q >= 0 ? '−' : '+', xx, yc + 19 + row * 11);
+    }
+    c.textBaseline = 'alphabetic';
+  }
+  function dots() {
+    for (const s of segs) {
+      const col = C[s.color], ux = (s.bx - s.ax) / s.L, uy = (s.by - s.ay) / s.L;
+      c.fillStyle = col; c.strokeStyle = C.surface; c.lineWidth = 1;
+      c.beginPath();
+      for (let d = s.o; d < s.L; d += SP) {
+        const x = s.ax + ux * d, y = s.ay + uy * d;
+        if (s.skip.some(([a, b]) => y > a && y < b)) continue;
+        c.moveTo(x + 4, y); c.arc(x, y, 4, 0, 6.283);
+      }
+      c.fill(); c.stroke();
+    }
+  }
+  function arrowLabel(x, I, name, col) {
+    // a small arrow showing the direction of the branch current, and its value
+    const y = MID + 112, up = I < 0, a = Math.min(1, Math.abs(I) / 5);
+    c.globalAlpha = 0.25 + 0.75 * a; c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 2;
+    if (Math.abs(I) > 0.05) { c.beginPath(); c.moveTo(x + 18, y - 10 * (up ? -1 : 1)); c.lineTo(x + 18, y + 10 * (up ? -1 : 1)); c.stroke();
+      c.beginPath(); c.moveTo(x + 13, y + (up ? -4 : 4)); c.lineTo(x + 18, y + (up ? -11 : 11)); c.lineTo(x + 23, y + (up ? -4 : 4)); c.stroke(); }
+    c.globalAlpha = 1;
+    label(name + ' ' + fmtSigned(I, 1, ''), x + 30, y + 4, col, 'left', '600 12.5px "IBM Plex Mono", monospace');
+  }
+  function draw() {
+    c.fillStyle = C.surface; c.fillRect(0, 0, CWd, CHd);
+    // rails and branches
+    c.strokeStyle = C.ink; c.lineWidth = 2.2;
+    wire(XS[0], TOP, XS[2], TOP); wire(XS[0], BOT, XS[2], BOT);
+    XS.forEach(x => wire(x, TOP, x, BOT));
+    c.fillStyle = C.ink; XS.forEach(x => { c.beginPath(); c.arc(x, TOP, 4, 0, 6.283); c.arc(x, BOT, 4, 0, 6.283); c.fill(); });
+    label('INSIDE', 20, TOP - 22, C.muted, 'left', '700 13px "IBM Plex Sans", sans-serif');
+    label('OUTSIDE (ground)', 20, BOT + 34, C.muted, 'left', '700 13px "IBM Plex Sans", sans-serif');
+    // voltmeter on the right
+    c.strokeStyle = C.muted; c.lineWidth = 1.2; c.setLineDash([3, 4]);
+    wire(XS[2], TOP, 740, TOP); wire(XS[2], BOT, 740, BOT); wire(740, TOP, 740, MID - 22); wire(740, MID + 22, 740, BOT); c.setLineDash([]);
+    c.beginPath(); c.arc(740, MID, 22, 0, 6.283); c.fillStyle = C.surface; c.fill(); c.stroke();
+    label('V', 740, MID + 5, C.muted, 'center', '600 15px "IBM Plex Sans", sans-serif');
+    label(fmtSigned(V, 0), 740, MID - 32, C.ink, 'center', '600 13px "IBM Plex Mono", monospace');
+    dots();
+    const I = currents(V), iC = -(I[0] + I[1]);
+    if (mode === 'g') {
+      switchSym(XS[0], MID - 92, sw, C.na); label(sw ? 'Na⁺ channels open' : 'Na⁺ channels closed', XS[0] + 30, MID - 88, C.na);
+      resistor(XS[0], MID, C.na); label(`g_Na ${p.gNa.toFixed(2)} mS/cm²`, XS[0] + 26, MID + 4, C.na);
+      battery(XS[0], MID + 72, p.ENa, C.na); label(`E_Na ${fmtSigned(p.ENa, 0)}`, XS[0] + 30, MID + 77, C.na);
+      resistor(XS[1], MID, C.k); label(`g_K ${p.gK.toFixed(2)} mS/cm²`, XS[1] + 26, MID + 4, C.k);
+      battery(XS[1], MID + 72, p.EK, C.k); label(`E_K ${fmtSigned(p.EK, 0)}`, XS[1] + 30, MID + 77, C.k);
+      arrowLabel(XS[0], I[0], 'I_Na', C.na); arrowLabel(XS[1], I[1], 'I_K', C.k);
+    } else {
+      source(XS[0], MID); label(sw ? `I_inj ${fmtSigned(p.I, 0, '')}` : 'source off', XS[0] + 32, MID + 4, C.ink);
+      resistor(XS[1], MID, C.ink); label(`R = 1/g, g ${p.gL.toFixed(2)} mS/cm²`, XS[1] + 26, MID + 4, C.ink);
+      arrowLabel(XS[0], I[0], 'I_src', C.ink); arrowLabel(XS[1], I[1], 'I_R', C.ink);
+    }
+    capacitor(XS[2], MID); label(`C ${p.C.toFixed(1)} µF/cm²`, XS[2] - 76, MID - 30, C.ink, 'right');
+    arrowLabel(XS[2], iC, 'I_C', C.pos);
+    label('currents in µA/cm², + = outward', CWd - 12, CHd - 10, C.muted, 'right', '500 11.5px "IBM Plex Sans", sans-serif');
+  }
+  function drawCharts() {
+    const { Vinf } = steady();
+    const refs = mode === 'g'
+      ? [{ v: p.EK, color: C.k, label: 'E_K' }, { v: p.ENa, color: C.na, label: 'E_Na' }, { v: Vinf, color: C.accent, dash: [2, 3], width: 2, label: 'V∞' }]
+      : [{ v: Vinf, color: C.accent, dash: [2, 3], width: 2, label: 'V∞' }];
+    drawChart(vc, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, state: vState, minSpan: 20,
+      series: [{ ys: hist.V, color: C.ink, width: 2.4 }], refs, ylabel: 'mV', xlabel: `last ${WIN} ms` });
+    const n1 = mode === 'g' ? 'Na⁺' : 'source', n2 = mode === 'g' ? 'K⁺' : 'R', c1 = mode === 'g' ? C.na : C.muted, c2 = mode === 'g' ? C.k : C.ink;
+    if (cview === 'i') drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, state: iState, minSpan: 10,
+      series: [{ ys: hist.i1, color: c1, label: 'I ' + n1 }, { ys: hist.i2, color: c2, label: 'I ' + n2 }, { ys: hist.iC, color: C.pos, width: 2.6, label: 'I_C' }],
+      ylabel: 'µA/cm², outward +', xlabel: `last ${WIN} ms` });
+    else drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, restart: true, state: iState, minSpan: 10,
+      series: [{ ys: hist.q1, color: c1, label: n1 + ' in' }, { ys: hist.q2, color: c2, label: n2 + ' out' }, { ys: hist.qC, color: C.pos, width: 2.6, label: 'on C' }],
+      ylabel: 'nC/cm² since the switch', xlabel: `last ${WIN} ms` });
+  }
+  function readouts() {
+    const { Vinf, tau } = steady(), I = currents(V);
+    $('cV').textContent = fmtSigned(V);
+    $('cVinf').textContent = fmtSigned(Vinf);
+    $('cTau').textContent = tau.toFixed(2) + ' ms';
+    $('cIC').textContent = fmtSigned(-(I[0] + I[1]), 1, ' µA/cm²');
+    $('cIR').textContent = mode === 'g' ? fmtSigned(I[0], 1, '') + ' / ' + fmtSigned(I[1], 1, ' µA/cm²') : fmtSigned(I[1], 1, ' µA/cm²');
+    $('cQ').textContent = fmtSigned(p.C * V, 0, ' nC/cm²');
+  }
+  function captions() {
+    $('cIRlab').innerHTML = mode === 'g' ? 'I<sub>Na</sub> / I<sub>K</sub>' : 'resistor current I<sub>R</sub>';
+    $('cIcap').innerHTML = cview === 'i'
+      ? (mode === 'g' ? 'Right after the switch closes, the Na⁺ current flows almost entirely into the capacitor (I<sub>C</sub> = −I<sub>Na</sub> − I<sub>K</sub>). As V approaches V<sub>∞</sub>, I<sub>C</sub> falls to zero and the Na⁺ current inward is matched by K⁺ current outward.'
+                      : 'Right after the source turns on, all of its current charges the capacitor and none goes through the resistor. As V rises, more flows through R, until all of it does.')
+      : 'Charge carried since the switch last changed. The gap between the inward and outward lines is the charge stored on the capacitor; once it stops growing, the two lines rise in parallel: current flows all the way around the circuit.';
+    $('cLegNa').hidden = $('cLegK').hidden = mode !== 'g';
+    document.querySelectorAll('[data-for]').forEach(r => r.hidden = r.dataset.for !== mode);
+  }
+  function reset() {
+    sw = true; setSwitch(false); pulseEnd = -1; V = restV(); t = 0; cum = [0, 0, 0]; sampleAcc = 0;
+    for (const k in hist) hist[k].length = 0;
+    vState.lo = iState.lo = null;
+    buildSegs();
+  }
+
+  chipGroup('mode', m => { mode = m; reset(); captions(); });
+  chipGroup('cview', v => { cview = v; iState.lo = null; captions(); });
+  $('cSwitch').addEventListener('click', () => { pulseEnd = -1; setSwitch(!sw); });
+  $('cPulse').addEventListener('click', () => { setSwitch(true); pulseEnd = t + p.dur; });
+  $('cReset').addEventListener('click', reset);
+  const speedFrom = v => Math.pow(10, -1 + v * 0.02);   // ms of model time per second: 0.1 to 10
+  bindRange('cSpeed', v => { const s = speedFrom(v); return (s < 1 ? s.toFixed(2) : s.toFixed(1)) + ' ms/s'; }, v => speed = speedFrom(v));
+  bindRange('cC', v => v.toFixed(1) + ' µF/cm²', v => p.C = v);
+  bindRange('cGL', v => v.toFixed(2) + ' mS/cm²', v => p.gL = v);
+  bindRange('cI', v => fmtSigned(v, 0, ' µA/cm²'), v => p.I = v);
+  bindRange('cGK', v => v.toFixed(2) + ' mS/cm²', v => p.gK = v);
+  bindRange('cEK', v => fmtSigned(v, 0), v => p.EK = v);
+  bindRange('cGNa', v => v.toFixed(2) + ' mS/cm²', v => p.gNa = v);
+  bindRange('cENa', v => fmtSigned(v, 0), v => p.ENa = v);
+  bindRange('cDur', v => v + ' ms', v => p.dur = v);
+
+  reset(); captions();
+  let last = performance.now(), frame = 0;
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    advance(dt * speed);
+    draw(); drawCharts();
+    if (frame++ % 6 === 0) readouts();
+    requestAnimationFrame(loop);
+  }
+  colorHooks.push(() => { draw(); drawCharts(); });
+  requestAnimationFrame(loop);
+})();
+
+// =====================================================================================
+// Part 2: ions. The engine is the one in membrane_potential.html (Brownian ions, a 1D
+// Poisson field, low-dielectric membrane, selective channels, clamped far reservoirs),
+// cut down to K⁺, Na⁺ and impermeant anions, with gated Na⁺ channels and a count of
+// every crossing, so the currents can be measured.
+// =====================================================================================
+(() => {
+  // ---------- geometry & constants ----------
+  const W = 1200, MX = W / 2, MW = 8, PH = 18, SLOT = 36, H_REF = 100;
+  const NSLOT = 24, H = NSLOT * SLOT;         // simulated membrane length (periodic in y)
+  const VZ = 1.25, CW = 900, CH = 540;         // view: zoom, canvas size; shows the top of the patch
+  const VX0 = MX - CW / (2 * VZ);
+  const XIN = MX - MW, XOUT = MX + MW;
+  const KT = 25.7;                             // RT/F, mV
+  const Z = [1, 1, -1];                        // K, Na, A
+  const DIFF = [1.0, 1.0, 0.6];
+  const D_PORE = 2.0, D_BULK = 24.0, D_RAMP = 70;
+  const Dx = new Float32Array(W + 1), dDx = new Float32Array(W + 1);
+  for (let i = 0; i <= W; i++) {
+    const dist = i < MX ? XIN - i : i - XOUT;
+    if (dist < 0) { Dx[i] = D_PORE; dDx[i] = 0; }
+    else if (dist >= D_RAMP) { Dx[i] = D_BULK; dDx[i] = 0; }
+    else { Dx[i] = D_PORE + (D_BULK - D_PORE) * dist / D_RAMP; dDx[i] = (i < MX ? -1 : 1) * (D_BULK - D_PORE) / D_RAMP; }
+  }
+  const CIN = [140, 14], COUT = [5, 145];      // mM; anions balance the cations on each side
+  const RES_GAP = 220, CLAMP_IN = XIN - RES_GAP, CLAMP_X = XOUT + RES_GAP;
+  const REF_IN = CLAMP_IN + 10, REF_OUT = CLAMP_X - 10;
+  const MAXN = 20000, density = 0.5, MM_PER_RHO = 92500;
+  const BIN = 16, NB = W / BIN;
+
+  const px = new Float32Array(MAXN), py = new Float32Array(MAXN);
+  const sp = new Uint8Array(MAXN), pore = new Int16Array(MAXN), side = new Int8Array(MAXN);
+  let N = 0;
+
+  // ---------- channels ----------
+  const BW = 8, BH = SLOT * 0.74;
+  const RAD = [2.8, 2.8, 3.6].map(v => v * 1.1);
+  let bodyAt = new Uint8Array(NSLOT), pores = [], slotPore = [], nCh = [9, 12], naOpen = false;
+  const wrapY = y => (y < 0 ? y + H : y >= H ? y - H : y);
+  const leftLimit = (s, y) => (bodyAt[(wrapY(y) / SLOT) | 0] ? XIN - BW : XIN) - RAD[s];
+  const rightLimit = (s, y) => (bodyAt[(wrapY(y) / SLOT) | 0] ? XOUT + BW : XOUT) + RAD[s];
+  function sanitize() {
+    for (let i = 0; i < N; i++) {
+      if (pore[i] >= 0) continue;
+      const s = sp[i], y = py[i];
+      if (px[i] < MX) { const L = leftLimit(s, y); if (px[i] > L) px[i] = L - 0.3; }
+      else { const R = rightLimit(s, y); if (px[i] < R) px[i] = R + 0.3; }
+    }
+  }
+  // K⁺ and Na⁺ channels spread evenly down the membrane, interleaved
+  function buildChannels() {
+    pores = []; slotPore = [];
+    const items = [];
+    for (let s = 0; s < 2; s++) for (let j = 0; j < nCh[s]; j++) items.push({ s, f: (j + 0.5) / nCh[s] });
+    items.sort((a, b) => a.f - b.f || a.s - b.s);
+    const assign = new Array(NSLOT).fill(-1);
+    items.forEach((it, k) => { assign[Math.floor((k + 0.5) * NSLOT / items.length)] = it.s; });
+    for (let i = 0; i < NSLOT; i++) {
+      const yc = (i + 0.5) * SLOT;
+      if (assign[i] < 0) { slotPore.push(-1); continue; }
+      slotPore.push(pores.length);
+      pores.push({ y0: yc - PH / 2, y1: yc + PH / 2, yc, s: assign[i], slot: i });
+    }
+    for (let i = 0; i < NSLOT; i++) bodyAt[i] = slotPore[i] >= 0 ? 1 : 0;
+  }
+  const isOpen = p => p.s === 0 || naOpen;
+  // ions in a channel that is gone, or now shut, step back out the way they came in
+  function ejectFromPores(oldSlot) {
+    for (let i = 0; i < N; i++) {
+      if (pore[i] < 0 && oldSlot[i] < 0) continue;
+      const sl = oldSlot[i], k = sl >= 0 ? slotPore[sl] : -1;
+      if (k >= 0 && pores[k].s === sp[i] && isOpen(pores[k])) { pore[i] = k; continue; }
+      if (pore[i] >= 0 || sl >= 0) { pore[i] = -1; px[i] = side[i] < 0 ? XIN - BW - RAD[sp[i]] - 0.5 : XOUT + BW + RAD[sp[i]] + 0.5; }
+    }
+    sanitize();
+  }
+  function poreSlots() { const o = new Int16Array(N); for (let i = 0; i < N; i++) o[i] = pore[i] >= 0 ? pores[pore[i]].slot : -1; return o; }
+  function relayout() { const o = poreSlots(); buildChannels(); ejectFromPores(o); }
+
+  // ---------- state ----------
+  let V = 0, qin = 0, steps = 0, running = true, speed = 60, stepAcc = 0, qmv = 11, tintOn = true, stepLimited = 0;
+  const lambda = 40;
+  let cTot = 1.9;
+  const cross = [0, 0];                         // net outward crossings this sample window, K and Na
+  let cumNaIn = 0, cumKOut = 0, pulseEnd = -1;
+  const SAMPLE = 100, TRACE_LEN = 500;
+  let sampleAcc = 0, vSum = 0, vAvg = 0, iSm = [0, 0, 0];
+  const tr = { x: [], V: [], iK: [], iNa: [], iC: [], qNa: [], qK: [], qC: [], on: [] };
+  const crossings = [];
+
+  const hist = new Float32Array(W + 1), E = new Float32Array(W + 1), kap = new Float32Array(W + 1);
+  const GN = 1 << 16, GTAB = new Float32Array(GN);
+  for (let i = 0; i < GN; i++) GTAB[i] = (Math.random() + Math.random() + Math.random() - 1.5) * 2;
+  let rngState = (Math.random() * 0xffffffff) | 0 || 1;
+
+  const perPx2 = c => c * density / MM_PER_RHO;
+  const conc = (cs, s) => s < 2 ? cs[s] : cs[0] + cs[1];
+  const inCount = s => perPx2(conc(CIN, s)) * XIN * H;
+  const bathCount = s => perPx2(conc(COUT, s)) * (W - XOUT) * H;
+  function setKappa() {
+    const kMem = qmv / (KT * 2 * MW) * (H_REF / H);
+    const kWat = 1 / (lambda * lambda * cTot);
+    for (let i = 0; i <= W; i++) kap[i] = (i >= XIN && i < XOUT) ? kMem : kWat;
+  }
+  function addParticle(s, x, y) {
+    if (N >= MAXN) return;
+    px[N] = x; py[N] = y; sp[N] = s; pore[N] = -1; side[N] = x < MX ? -1 : 1; N++;
+  }
+  function removeAt(i) { N--; px[i] = px[N]; py[i] = py[N]; sp[i] = sp[N]; pore[i] = pore[N]; side[i] = side[N]; }
+  function reset() {
+    N = 0;
+    const inN = [0, 1].map(s => Math.round(inCount(s))); inN.push(inN[0] + inN[1]);
+    inN.forEach((n, s) => { for (let k = 0; k < n; k++) addParticle(s, 5 + Math.random() * (XIN - BW - 12), Math.random() * H); });
+    const outN = [0, 1].map(s => Math.round(bathCount(s))); outN.push(outN[0] + outN[1]);
+    outN.forEach((n, s) => { for (let k = 0; k < n; k++) addParticle(s, XOUT + BW + 7 + Math.random() * (W - XOUT - BW - 12), Math.random() * H); });
+    cTot = inN.reduce((a, b) => a + b, 0) / XIN;
+    setKappa();
+    // start near rest: move the charge a K⁺-only membrane holds at E_K from inside to outside. The
+    // diffuse charge layers are a second capacitor in series with the bilayer (about 0.6 e/mV per
+    // 1000 px of membrane, measured), so the charge is less than the bilayer's C × E_K.
+    const cMem = H / (H_REF * qmv), cLayers = 0.6 * H / 1000, cEff = 1 / (1 / cMem + 1 / cLayers);   // e per mV
+    setMembraneCharge(Math.round(cEff * KT * Math.log(COUT[0] / CIN[0])));
+    steps = 0; stepAcc = 0; sampleAcc = 0; vSum = 0; cross.fill(0); cumNaIn = cumKOut = 0; iSm = [0, 0, 0];
+    for (const k in tr) tr[k].length = 0;
+    crossings.length = 0; dens.fill(0);
+    sanitize(); binAndField(); countIn();
+    vAvg = V;
+    $('patchInfo').textContent = `Simulated patch: ${H.toLocaleString()} px of membrane (the view shows the top ${Math.round(CH / VZ)} px), ${N.toLocaleString()} ions. Each channel lets only its own ion through; the Na⁺ channels have a gate on their inner mouth.`;
+  }
+  function setMembraneCharge(target) {
+    let q = 0; for (let i = 0; i < N; i++) if (px[i] < MX) q += Z[sp[i]];
+    let d = q - target, guard = 0;
+    while (d !== 0 && guard++ < 5000) {
+      const fromIn = d > 0;
+      let pick = -1;
+      for (let t = 0; t < 300 && pick < 0; t++) {
+        const i = Math.floor(Math.random() * N);
+        if (pore[i] >= 0 || sp[i] !== 0) continue;
+        if (fromIn ? (px[i] < XIN && px[i] > XIN - 160) : (px[i] > XOUT && px[i] < XOUT + 160)) pick = i;
+      }
+      if (pick < 0) break;
+      // spread like a relaxed diffuse layer: exponential with the Debye length
+      const dd = Math.min(4 * lambda, -lambda * Math.log(1 - Math.random()));
+      px[pick] = fromIn ? XOUT + BW + RAD[0] + 1 + dd : XIN - BW - RAD[0] - 1 - dd;
+      py[pick] = Math.random() * H; side[pick] = fromIn ? 1 : -1;
+      d += fromIn ? -1 : 1;
+    }
+  }
+  function countIn() { qin = 0; for (let i = 0; i < N; i++) if (px[i] < MX) qin += Z[sp[i]]; }
+  function binAndField() { hist.fill(0); for (let i = 0; i < N; i++) { let b = px[i] | 0; if (b > W) b = W; hist[b] += Z[sp[i]]; } computeField(); }
+  function computeField() {
+    let qc = 0, v = 0;
+    for (let i = 0; i <= W; i++) { E[i] = kap[i] * (qc + 0.5 * hist[i]); qc += hist[i]; }
+    for (let i = REF_IN; i < REF_OUT; i++) v += E[i];
+    V = KT * v;
+  }
+
+  // ---------- one Brownian step ----------
+  function step() {
+    let q = 0, rs = rngState;
+    hist.fill(0);
+    for (let i = 0; i < N; i++) {
+      const s = sp[i], p = pore[i];
+      const pr = p >= 0 ? pores[p] : null;
+      const x = px[i];
+      let xi = x | 0; if (xi > W) xi = W; if (xi < 0) xi = 0;
+      const Dl = pr ? D_PORE : Dx[xi] * DIFF[s];
+      const sg = Math.sqrt(2 * Dl);
+      rs ^= rs << 13; rs ^= rs >>> 17; rs ^= rs << 5;
+      let nx = x + sg * GTAB[rs & 0xffff] + Dl * Z[s] * (E[xi] - 0.5 * kap[xi] * Z[s]) + (pr ? 0 : dDx[xi] * DIFF[s]);
+      let ny = py[i] + sg * GTAB[(rs >>> 16) & 0xffff];
+      if (pr) {
+        const lo = pr.y0 + RAD[s], hi = pr.y1 - RAD[s];
+        if (ny < lo) ny = 2 * lo - ny; if (ny > hi) ny = 2 * hi - ny;
+        if (ny < lo || ny > hi) ny = py[i];
+        if (nx <= XIN - BW - RAD[s] || nx >= XOUT + BW + RAD[s]) {
+          pore[i] = -1;
+          const ns = nx <= XIN ? -1 : 1;
+          if (ns !== side[i]) {
+            side[i] = ns; cross[s] += ns;
+            if (crossings.length < 200) crossings.push({ x: nx, y: ny, s, age: 0 });
+          }
+        }
+      } else {
+        const left = x < MX;
+        const over = left ? nx > leftLimit(s, ny) : nx < rightLimit(s, ny);
+        if (over) {
+          const k = s === 2 ? -1 : slotPore[(wrapY(ny) / SLOT) | 0];
+          const p2 = k >= 0 ? pores[k] : null;
+          const wy = wrapY(ny);
+          if (p2 && p2.s === s && isOpen(p2) && wy >= p2.y0 + RAD[s] && wy <= p2.y1 - RAD[s] &&
+              (left ? nx > XIN - BW - RAD[s] : nx < XOUT + BW + RAD[s])) { pore[i] = k; ny = wy; }
+          else { nx = x; ny = py[i]; }
+        }
+      }
+      if (nx < 0) nx = -nx; else if (nx > W) nx = 2 * W - nx;
+      if (pore[i] < 0) { if (ny < 0) ny += H; else if (ny >= H) ny -= H; }
+      px[i] = nx; py[i] = ny;
+      let b = nx | 0; if (b > W) b = W; hist[b] += Z[s];
+      if (nx < MX) q += Z[s];
+    }
+    qin = q; rngState = rs;
+    steps++;
+    if (steps % 25 === 0) clampBath();
+    computeField();
+    sampleAcc++; vSum += V;
+    if (pulseEnd >= 0 && steps >= pulseEnd) { pulseEnd = -1; setGate(false); }
+    if (sampleAcc >= SAMPLE) sample();
+  }
+  function sample() {
+    const vm = vSum / SAMPLE; sampleAcc = 0; vSum = 0;
+    vAvg += (vm - vAvg) * 0.05;
+    // currents in ions per 1000 steps, outward positive; the capacitor takes the rest
+    const iK = cross[0] * 1000 / SAMPLE, iNa = cross[1] * 1000 / SAMPLE;
+    cumKOut += cross[0]; cumNaIn -= cross[1]; cross.fill(0);
+    const a = 0.12; iSm[0] += (iK - iSm[0]) * a; iSm[1] += (iNa - iSm[1]) * a; iSm[2] = -(iSm[0] + iSm[1]);
+    const push = (k, v) => tr[k].push(v);
+    push('x', steps / 1000); push('V', vm); push('iK', iSm[0]); push('iNa', iSm[1]); push('iC', iSm[2]);
+    push('qNa', cumNaIn); push('qK', cumKOut); push('qC', cumNaIn - cumKOut); push('on', naOpen);
+    if (tr.x.length > TRACE_LEN) for (const k in tr) tr[k].shift();
+  }
+  // Far reservoirs hold their composition with charge-neutral moves only (from membrane_potential.html)
+  function clampRegion(xa, xb, targets) {
+    const idx = [[], [], []];
+    for (let i = 0; i < N; i++) if (pore[i] < 0 && px[i] > xa && px[i] < xb) idx[sp[i]].push(i);
+    const d = targets.map((t, s) => Math.round(t) - idx[s].length);
+    const rm = [];
+    const newPos = () => [xa + 1 + Math.random() * (xb - xa - 2), 2 + Math.random() * (H - 4)];
+    for (let it = 0; it < 300; it++) {
+      const cHi = d[0] >= d[1] ? 0 : 1, cLo = 1 - cHi;
+      if (d[cHi] > 0 && d[cLo] < 0 && idx[cLo].length) { const i = idx[cLo].pop(); sp[i] = cHi; idx[cHi].push(i); d[cHi]--; d[cLo]++; }
+      else if (d[cHi] > 0 && d[2] > 0) { addParticle(cHi, ...newPos()); addParticle(2, ...newPos()); d[cHi]--; d[2]--; }
+      else if (d[cLo] < 0 && d[2] < 0 && idx[cLo].length && idx[2].length) { rm.push(idx[cLo].pop(), idx[2].pop()); d[cLo]++; d[2]++; }
+      else break;
+    }
+    rm.sort((a, b) => b - a).forEach(removeAt);
+  }
+  function clampBath() {
+    clampRegion(CLAMP_X, W, [0, 1, 2].map(s => bathCount(s) * (W - CLAMP_X) / (W - XOUT)));
+    clampRegion(0, CLAMP_IN, [0, 1, 2].map(s => inCount(s) * CLAMP_IN / XIN));
+    binAndField();
+  }
+
+  function setGate(open) {
+    if (open === naOpen) return;
+    const o = poreSlots();
+    naOpen = open; cumNaIn = cumKOut = 0;
+    if (!open) ejectFromPores(o);
+    const b = $('gate'); b.setAttribute('aria-pressed', String(open)); b.textContent = open ? 'Close Na⁺ channels' : 'Open Na⁺ channels';
+  }
+
+  // ---------- readouts ----------
+  const nernst = s => KT * Math.log(COUT[s] / CIN[s]);
+  const ghk = (pK, pNa) => { const n = pK * COUT[0] + pNa * COUT[1], d = pK * CIN[0] + pNa * CIN[1]; return n > 0 && d > 0 ? KT * Math.log(n / d) : NaN; };
+  function readouts() {
+    $('pV').textContent = fmtSigned(vAvg);
+    $('pE').textContent = fmtSigned(nernst(0), 0) + ' / ' + fmtSigned(nernst(1), 0);
+    $('pGHK').textContent = fmtSigned(ghk(nCh[0], 0), 0) + ' / ' + fmtSigned(ghk(nCh[0], nCh[1]), 0);
+    $('pQ').textContent = (qin > 0 ? '+' : qin < 0 ? '−' : '') + Math.abs(qin) + ' e';
+    $('pCum').textContent = cumNaIn + ' / ' + cumKOut;
+  }
+
+  // ---------- drawing ----------
+  const cv = $('sim'), ctx = setupCanvas(cv, CW, CH);
+  const vc = setupCanvas($('pVchart'), CHW, CHH), ic = setupCanvas($('pIchart'), CHW, CHH);
+  const vState = {}, iState = {};
+  let pview = 'q', tint = [], lipid = '';
+  colorHooks.push(() => { tint = [C.k, C.na].map(c => mixc(c, C.surface, 0.24)); lipid = mixc(C.mem, C.surface, 0.45); lutDark = null; });
+  tint = [C.k, C.na].map(c => mixc(c, C.surface, 0.24)); lipid = mixc(C.mem, C.surface, 0.45);
+
+  // 2D Gaussian charge density, as in membrane_potential.html
+  const CG = 6, GX = Math.round(W / CG), GY = Math.round(H / CG);
+  const qgrid = new Float32Array(GX * GY), tmpg = new Float32Array(GX * GY), rowAcc = new Float32Array(GX), dens = new Float32Array(GX * GY);
+  const dCanvas = document.createElement('canvas'), dctx = dCanvas.getContext('2d');
+  dCanvas.width = GX; dCanvas.height = GY; const dImg = dctx.createImageData(GX, GY);
+  const sig = 16 / VZ / CG, kR = Math.ceil(3 * sig), kern = new Float32Array(2 * kR + 1);
+  { let sum = 0; for (let k = -kR; k <= kR; k++) { kern[k + kR] = Math.exp(-(k * k) / (2 * sig * sig)); sum += kern[k + kR]; } for (let k = 0; k < kern.length; k++) kern[k] /= sum; }
+  let dScale = 0.02, densTau = 600;
+  function updateDensity(alpha) {
+    qgrid.fill(0);
+    for (let i = 0; i < N; i++) {
+      let gx = (px[i] / CG) | 0, gy = (py[i] / H * GY) | 0;
+      if (gx >= GX) gx = GX - 1; if (gy >= GY) gy = GY - 1; if (gy < 0) gy = 0;
+      qgrid[gy * GX + gx] += Z[sp[i]];
+    }
+    for (let y = 0; y < GY; y++) { const o = y * GX;
+      for (let x = 0; x < GX; x++) { let a = 0;
+        if (x >= kR && x < GX - kR) for (let k = -kR; k <= kR; k++) a += qgrid[o + x + k] * kern[k + kR];
+        else for (let k = -kR; k <= kR; k++) { let xx = x + k; if (xx < 0) xx = -xx - 1; else if (xx >= GX) xx = 2 * GX - xx - 1; a += qgrid[o + xx] * kern[k + kR]; }
+        tmpg[o + x] = a; } }
+    let mx = 0;
+    for (let y = 0; y < GY; y++) {
+      rowAcc.fill(0);
+      for (let k = -kR; k <= kR; k++) { let yy = (y + k) % GY; if (yy < 0) yy += GY; const r = yy * GX, w = kern[k + kR]; for (let x = 0; x < GX; x++) rowAcc[x] += tmpg[r + x] * w; }
+      const o = y * GX;
+      for (let x = 0; x < GX; x++) { const j = o + x; dens[j] += (rowAcc[x] - dens[j]) * alpha; const m = Math.abs(dens[j]); if (m > mx) mx = m; }
+    }
+    dScale += (Math.max(mx * 0.75, 0.004) - dScale) * 0.05;
+    paintDensity();
+  }
+  const alphaLut = new Uint8Array(257); let lutDark = null;
+  function paintDensity() {
+    const bgc = rgb(C.bg), dark = (0.2126 * bgc[0] + 0.7152 * bgc[1] + 0.0722 * bgc[2]) < 90;
+    const P = dark ? [255, 92, 104] : rgb(C.pos), Nn = dark ? [84, 150, 255] : rgb(C.neg), d = dImg.data;
+    if (lutDark !== dark) { const gam = dark ? 0.95 : 1.2, amax = dark ? 200 : 150; for (let k = 0; k <= 256; k++) alphaLut[k] = Math.round(Math.pow(k / 256, gam) * amax); lutDark = dark; }
+    const inv = 256 / dScale;
+    for (let j = 0; j < GX * GY; j++) {
+      const v = dens[j], c = v > 0 ? P : Nn, o = j * 4;
+      let k = (Math.abs(v) * inv) | 0; if (k > 256) k = 256;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = alphaLut[k];
+    }
+    dctx.putImageData(dImg, 0, 0);
+  }
+
+  function drawSim() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, CW, CH);
+    ctx.setTransform(dpr * VZ, 0, 0, dpr * VZ, -dpr * VZ * VX0, 0);
+    const ly1 = CH / VZ;
+    ctx.fillStyle = C.cyto; ctx.fillRect(0, 0, MX, H);
+    ctx.fillStyle = C.bath; ctx.fillRect(MX, 0, W - MX, H);
+    if (tintOn) { ctx.imageSmoothingEnabled = true; ctx.drawImage(dCanvas, 0, 0, W, H); }
+    // lipid bilayer
+    ctx.fillStyle = lipid; ctx.fillRect(XIN, 0, XOUT - XIN, ly1);
+    ctx.strokeStyle = C.memdark; ctx.lineWidth = 0.7; ctx.lineCap = 'round'; ctx.beginPath();
+    for (let y = 3; y < ly1 + 6; y += 6) {
+      ctx.moveTo(XIN + 3, y - 1); ctx.lineTo(MX - 1, y - 1.3); ctx.moveTo(XIN + 3, y + 1); ctx.lineTo(MX - 1, y + 1.3);
+      ctx.moveTo(XOUT - 3, y - 1); ctx.lineTo(MX + 1, y - 1.3); ctx.moveTo(XOUT - 3, y + 1); ctx.lineTo(MX + 1, y + 1.3);
+    }
+    ctx.stroke();
+    ctx.fillStyle = C.mem; ctx.beginPath();
+    for (let y = 3; y < ly1 + 6; y += 6) { ctx.moveTo(XIN + 4.5, y); ctx.arc(XIN + 2.2, y, 2.3, 0, 6.283); ctx.moveTo(XOUT + 0.1, y); ctx.arc(XOUT - 2.2, y, 2.3, 0, 6.283); }
+    ctx.fill();
+    // channels; Na⁺ channels have a gate across the inner mouth
+    pores.forEach(p => {
+      if (p.yc - BH > ly1) return;
+      const col = C[['k', 'na'][p.s]];
+      const bx = XIN - BW, bw = XOUT - XIN + 2 * BW, by = p.yc - BH / 2;
+      ctx.fillStyle = tint[p.s]; ctx.strokeStyle = col; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, BH, BH * 0.32); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.surface; ctx.fillRect(bx, p.y0, bw, p.y1 - p.y0);
+      const fx = XOUT + 2, th = 2.2;
+      ctx.fillStyle = col; ctx.beginPath();
+      ctx.moveTo(fx - 5, p.y0); ctx.lineTo(fx, p.y0 + th); ctx.lineTo(fx + 5, p.y0);
+      ctx.moveTo(fx - 5, p.y1); ctx.lineTo(fx, p.y1 - th); ctx.lineTo(fx + 5, p.y1);
+      ctx.fill();
+      if (p.s === 1) {
+        ctx.strokeStyle = col; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.beginPath();
+        if (naOpen) { ctx.moveTo(bx - 1, p.y0 + 1); ctx.lineTo(bx - 9, p.y0 - 5); }   // swung open
+        else { ctx.moveTo(bx + 1, p.y0 + 1); ctx.lineTo(bx + 1, p.y1 - 1); }         // across the mouth
+        ctx.stroke(); ctx.lineCap = 'butt';
+      }
+    });
+    // ions
+    for (let s = 2; s >= 0; s--) {
+      const rad = RAD[s];
+      ctx.fillStyle = C[['k', 'na', 'a'][s]]; ctx.strokeStyle = C.surface; ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        if (sp[i] !== s) continue;
+        const x = px[i], y = py[i];
+        if (x < VX0 - rad || y > ly1 + rad) continue;
+        ctx.moveTo(x + rad, y); ctx.arc(x, y, rad, 0, 6.283);
+      }
+      ctx.fill(); ctx.stroke();
+    }
+    for (const c of crossings) {
+      if (c.y < ly1 + 10) { ctx.globalAlpha = 1 - c.age / 40; ctx.strokeStyle = C[['k', 'na'][c.s]]; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.arc(c.x, c.y, 4 + c.age * 0.35, 0, 6.283); ctx.stroke(); }
+    }
+    ctx.globalAlpha = 1;
+    for (let k = crossings.length - 1; k >= 0; k--) if (++crossings[k].age > 40) crossings.splice(k, 1);
+    // labels
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const region = (t, x, align) => {
+      ctx.font = '700 18px "IBM Plex Sans", sans-serif';
+      const w = ctx.measureText(t).width + 22, h = 32, y0 = 12, bx = align === 'left' ? x : x - w;
+      ctx.fillStyle = C.ink; ctx.beginPath(); ctx.roundRect(bx, y0, w, h, 6); ctx.fill();
+      ctx.fillStyle = C.surface; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, bx + w / 2, y0 + h / 2 + 1);
+      ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    };
+    region('INSIDE', 12, 'left'); region('OUTSIDE', CW - 12, 'right');
+  }
+  function drawCharts() {
+    const x1 = Math.max(TRACE_LEN * SAMPLE / 1000, steps / 1000), x0 = x1 - TRACE_LEN * SAMPLE / 1000;
+    drawChart(vc, { xs: tr.x, x0, x1, on: tr.on, fixed: [-110, 80],
+      series: [{ ys: tr.V, color: C.ink, width: 2.2 }],
+      refs: [{ v: nernst(0), color: C.k, label: 'E_K' }, { v: nernst(1), color: C.na, label: 'E_Na' },
+             { v: ghk(nCh[0], naOpen ? nCh[1] : 0), color: C.accent, dash: [2, 3], width: 2, label: 'GHK' }],
+      ylabel: 'mV', xlabel: 'thousands of steps' });
+    if (pview === 'q') drawChart(ic, { xs: tr.x, x0, x1, on: tr.on, restart: true, state: iState, minSpan: 20,
+      series: [{ ys: tr.qNa, color: C.na, label: 'Na⁺ in' }, { ys: tr.qK, color: C.k, label: 'K⁺ out' }, { ys: tr.qC, color: C.pos, width: 2.6, label: 'on membrane' }],
+      ylabel: 'ions since the last change', xlabel: 'thousands of steps' });
+    else drawChart(ic, { xs: tr.x, x0, x1, on: tr.on, state: iState, minSpan: 4,
+      series: [{ ys: tr.iNa, color: C.na, label: 'I_Na' }, { ys: tr.iK, color: C.k, label: 'I_K' }, { ys: tr.iC, color: C.pos, width: 2.6, label: 'I_C' }],
+      ylabel: 'ions per 1000 steps, outward +', xlabel: 'thousands of steps' });
+  }
+  function captions() {
+    $('pIcap').innerHTML = pview === 'q'
+      ? 'Ions that crossed since the Na⁺ channels last opened or closed. "On membrane" is Na⁺ in minus K⁺ out: the charge that piled up at the membrane, the capacitor\'s charge. It grows at first and then levels off; after that, every Na⁺ that comes in is matched by a K⁺ going out.'
+      : 'Crossing rates, smoothed. As in the circuit, I<sub>C</sub> = −I<sub>Na</sub> − I<sub>K</sub>: right after the channels open most of the Na⁺ current charges the membrane; later it is balanced by K⁺ current. Counts are small, so these are noisy; the Ions moved view adds them up.';
+  }
+
+  // ---------- UI ----------
+  const speedFromSlider = v => Math.pow(10, -1.7 + v * 0.04);
+  const fmtSpeed = s => s >= 1 ? Math.round(s) + ' steps/fr' : '1 step/' + Math.round(1 / s) + ' fr';
+  bindRange('speed', v => fmtSpeed(speedFromSlider(v)), v => speed = speedFromSlider(v));
+  bindRange('nK', v => v + ' channels', v => { nCh[0] = v; fixTotal(1); });
+  bindRange('nNa', v => v + ' channels', v => { nCh[1] = v; fixTotal(0); });
+  function fixTotal(other) {
+    // at most one channel per slot: lower the other slider if needed
+    if (nCh[0] + nCh[1] > NSLOT) { nCh[other] = NSLOT - nCh[1 - other]; const id = other ? 'nNa' : 'nK'; $(id).value = nCh[other]; $(id + 'o').textContent = nCh[other] + ' channels'; }
+    if (N) relayout(); else buildChannels();
+  }
+  let pulseDur = 15000;
+  bindRange('pDur', v => (v * 1000).toLocaleString() + ' steps', v => pulseDur = v * 1000);
+  bindRange('qmv', v => (H / (H_REF * v)).toFixed(2) + ' e/mV', v => { qmv = v; setKappa(); computeField(); });
+  $('tint').addEventListener('change', e => tintOn = e.target.checked);
+  $('gate').addEventListener('click', () => { pulseEnd = -1; setGate(!naOpen); });
+  $('pPulse').addEventListener('click', () => { setGate(true); pulseEnd = steps + pulseDur; });
+  const playBtn = $('play');
+  const setRunning = r => { running = r; playBtn.textContent = r ? 'Pause' : 'Play'; };
+  playBtn.addEventListener('click', () => setRunning(!running));
+  $('reset').addEventListener('click', () => { pulseEnd = -1; setGate(false); reset(); iState.lo = null; });
+  chipGroup('pview', v => { pview = v; iState.lo = null; captions(); });
+  colorHooks.push(() => { drawSim(); drawCharts(); });
+
+  // ---------- loop ----------
+  buildChannels(); reset(); captions();
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setRunning(false);
+  const FRAME_MS = 24; let restMs = 4, frame = 0;
+  function loop() {
+    let ran = 0;
+    if (running) {
+      if (speed >= 1) {
+        const want = Math.round(speed), t0 = performance.now(), budget = Math.max(6, FRAME_MS - restMs);
+        for (let k = 0; k < want; k++) { step(); ran++; if ((k & 3) === 3 && performance.now() - t0 > budget) break; }
+        stepLimited = ran < want ? ran : 0;
+      } else { stepAcc += speed; if (stepAcc >= 1) { stepAcc -= 1; step(); ran = 1; } }
+    }
+    const t1 = performance.now();
+    if (tintOn && ran) updateDensity(1 - Math.exp(-ran / densTau));
+    drawSim(); drawCharts();
+    if (frame++ % 6 === 0) readouts();
+    restMs += (performance.now() - t1 - restMs) * 0.1;
+    requestAnimationFrame(loop);
+  }
+  readouts();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

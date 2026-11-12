@@ -9,9 +9,9 @@ to another page or a new one; each block is shown under its page's name ("Baseli
 What you change is kept in the session folder, in pages.json:
   renamed  {stimulus page's label: the name you gave it}
   moved    {block file stem: the page you put it in}
-  colors   {page's name: the colour you gave it}
-  page_map the colour map across the pages (colours.PAGE_STYLES)
-  trial_map how the trials of a page are drawn (colours.TRIAL_STYLES)
+  colors   {page's name: the color you gave it}
+  page_map the color map across the pages (colors.PAGE_STYLES)
+  trial_map how the trials of a page are drawn (colors.TRIAL_STYLES)
   gains    {channel: the amplifier gain its data is divided by when read}
   stim_fit the fit applied to the stimulus channel when it's read (analysis.FITS)
   hidden_groups, hidden_trials  the pages and block file stems left out of everything

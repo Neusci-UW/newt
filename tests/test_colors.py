@@ -1,15 +1,15 @@
-"""Trace colours: choosing them, keeping them, and recolouring recorded blocks."""
+"""Trace colors: choosing them, keeping them, and recoloring recorded blocks."""
 import h5py
 import numpy as np
 import pytest
 
-from neusci_daq import colours, config, session, trialfile
-from neusci_daq.colours import PALETTE
+from neusci_daq import colors, config, session, trialfile
+from neusci_daq.colors import PALETTE
 from neusci_daq.config import Channel
 
 from test_channels import app, edit, make_cfg, pump, win  # noqa: F401  (fixtures)
 
-P = [colours.normalize_color(c) for c in PALETTE]
+P = [colors.normalize_color(c) for c in PALETTE]
 RED = "#ff0000"
 
 
@@ -27,27 +27,27 @@ def pen_hex(curve):
 
 
 def stored_colors(path):
-    """The colours a trial is shown in: the file's, with any changed since beside it."""
+    """The colors a trial is shown in: the file's, with any changed since beside it."""
     return trialfile.block_info(path)["colors"]
 
 
 # ---------------------------------------------------------------- config
 def test_color_parsing():
-    assert colours.normalize_color("#E69F00") == "#e69f00"
-    assert colours.normalize_color("abc") == "#aabbcc"
-    with pytest.raises(ValueError, match="isn't a colour"):
-        colours.normalize_color("blue-ish")
+    assert colors.normalize_color("#E69F00") == "#e69f00"
+    assert colors.normalize_color("abc") == "#aabbcc"
+    with pytest.raises(ValueError, match="isn't a color"):
+        colors.normalize_color("blue-ish")
 
 
 def test_new_channels_get_unused_palette_colors():
     chans = [Channel("ai0", "A", color=P[1]), Channel("ai1", "B"), Channel("ai2", "C")]
-    colours.fill_colors(chans)
+    colors.fill_colors(chans)
     assert [c.color for c in chans] == [P[1], P[0], P[2]]
 
 
 def test_color_saved_with_channel_setup(tmp_path):
     cfg = make_cfg(tmp_path)
-    colours.fill_colors(cfg.channels)
+    colors.fill_colors(cfg.channels)
     cfg.channels[1].color = RED
     back = config.load(config.save(cfg, tmp_path / "c.toml"))
     assert [c.color for c in back.channels] == [P[0], RED]
@@ -146,7 +146,7 @@ def test_append_uses_the_sessions_colors(app, win, tmp_path):
     folder = tmp_path / "saved"
     win.save_as(folder)
     win.new_session()
-    win.set_channel_color(0, P[3])                 # a different colour in the new session
+    win.set_channel_color(0, P[3])                 # a different color in the new session
     win.append_session(folder)
     assert win.rows[0].ch.color == RED and pen_hex(win.curves[0]) == RED
 
@@ -179,7 +179,7 @@ def test_remembered_never(app, win):
     assert stored_colors(win.blocks[0])[0] == P[0]
 
 
-def test_append_notice_lists_rules_and_colour_changes(app, win, tmp_path):
+def test_append_notice_lists_rules_and_color_changes(app, win, tmp_path):
     win.set_channel_color(0, RED)
     record_block(app, win)
     win.btn_run.setChecked(False)
@@ -189,8 +189,8 @@ def test_append_notice_lists_rules_and_colour_changes(app, win, tmp_path):
     win.set_channel_color(0, P[3])
     notes = " ".join(win._append_notes(folder))
     assert "same channel names" in notes and "matched by name" in notes
-    assert f"Ch1 → {RED}" in notes                          # custom colour: hex code
-    assert colours.color_label(P[0]) == "orange" and "Ch2" not in notes.split("switch colour:")[1]
+    assert f"Ch1 → {RED}" in notes                          # custom color: hex code
+    assert colors.color_label(P[0]) == "orange" and "Ch2" not in notes.split("switch color:")[1]
 
 
 def test_append_notice_can_be_turned_off(win, tmp_path):

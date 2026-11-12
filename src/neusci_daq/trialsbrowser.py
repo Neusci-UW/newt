@@ -49,11 +49,12 @@ class TrialsBrowser(QtWidgets.QWidget):
     move_requested = QtCore.Signal(int, str)     # block, page ("" asks for a new page's name)
     stim_channel_picked = QtCore.Signal(str)     # "" for None
     reset_requested = QtCore.Signal()
-    color_requested = QtCore.Signal(str)         # a page's name: pick its colour
-    color_cleared = QtCore.Signal(str)           # a page's name: back to the default colour
+    color_requested = QtCore.Signal(str)         # a page's name: pick its color
+    color_cleared = QtCore.Signal(str)           # a page's name: back to the default color
     hide_changed = QtCore.Signal(object, bool)   # ("page", name) or ("block", i), and whether it's hidden
     group_moved = QtCore.Signal(str, int)        # a page's name, the row it goes to
     sort_picked = QtCore.Signal(str)             # "frequency", "amplitude" or "" for your order
+    tick_highlighted = QtCore.Signal(list, list, bool)   # blocks, pages; True: untick everything else
 
     def __init__(self, for_analysis: bool = False):
         super().__init__()
@@ -97,7 +98,7 @@ class TrialsBrowser(QtWidgets.QWidget):
         if for_analysis:
             group_top.addStretch(1)
         self.btn_groups = QtWidgets.QPushButton("Groups…")
-        self.btn_groups.setToolTip("The colours of groups and trials, Spread, and Reset groups")
+        self.btn_groups.setToolTip("The colors of groups and trials, Spread, and Reset groups")
         if for_analysis:
             lay.addWidget(self.btn_groups)
         lay.addSpacing(6)
@@ -115,6 +116,24 @@ class TrialsBrowser(QtWidgets.QWidget):
             lay.addLayout(sort)
         else:
             self.sort_box.hide()
+        self.btn_tick_hl = QtWidgets.QPushButton("Tick highlighted")
+        self.btn_tick_hl.setToolTip("Tick the highlighted groups and trials, leaving the others as they are. "
+                                    "Highlight many with shift-click, or by dragging down the list")
+        self.btn_only_hl = QtWidgets.QPushButton("Only highlighted")
+        self.btn_only_hl.setToolTip("Tick the highlighted groups and trials and untick everything else, so the "
+                                    "charts and the spike search use just those")
+        for b, only in ((self.btn_tick_hl, False), (self.btn_only_hl, True)):
+            b.setEnabled(False)
+            b.clicked.connect(lambda _=False, only=only: self.tick_highlighted.emit(
+                self.selected_blocks(), self.selected_pages(), only))
+        hl = QtWidgets.QHBoxLayout()
+        hl.addWidget(self.btn_tick_hl)
+        hl.addWidget(self.btn_only_hl)
+        if for_analysis:
+            lay.addLayout(hl)
+        else:
+            self.btn_tick_hl.hide()
+            self.btn_only_hl.hide()
         self.tree = GroupTree()
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(12)
@@ -134,6 +153,7 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.tree.itemDoubleClicked.connect(lambda item, *_: self.later(lambda d=item.data(0, ROLE): self._double(d)))
         self.tree.itemSelectionChanged.connect(
             lambda: self.later(lambda picked=self.selected_blocks(): self.selection.emit(picked)))
+        self.tree.itemSelectionChanged.connect(self._highlight_changed)
         lay.addWidget(self.tree, 1)
         self.btn_select = QtWidgets.QPushButton("Select all")
         self.btn_select.setToolTip("Tick every group and trial")
@@ -147,10 +167,6 @@ class TrialsBrowser(QtWidgets.QWidget):
         else:
             self.btn_select.hide()
             self.btn_deselect.hide()
-        self.btn_all = QtWidgets.QPushButton("Analyze all trials")
-        self.btn_all.setToolTip("Clear the selection: every trial is analyzed")
-        self.btn_all.setVisible(for_analysis)
-        lay.addWidget(self.btn_all)
         self._open: set[str] = set()              # the pages you've expanded
         self.tree.itemExpanded.connect(lambda item: self._opened(item, True))
         self.tree.itemCollapsed.connect(lambda item: self._opened(item, False))
@@ -223,7 +239,7 @@ class TrialsBrowser(QtWidgets.QWidget):
                 head.setIcon(0, style.dot_icon(colors[g % len(colors)]))
             self._tick(head, name in hidden_pages, True)
             head.setToolTip(0, "Click to see this group's average; double-click to rename it; right-click "
-                               "to change its colour" if self.for_analysis else
+                               "to change its color" if self.for_analysis else
                             "Double-click to rename this group; its trials take the new name")
             tree.addTopLevelItem(head)
             for k, i in enumerate(blocks, 1):
@@ -311,6 +327,11 @@ class TrialsBrowser(QtWidgets.QWidget):
                               data[0] == "block" and data[1] in blocks))
         self.tree.blockSignals(False)
 
+    def _highlight_changed(self) -> None:
+        on = bool(self.tree.selectedItems())
+        self.btn_tick_hl.setEnabled(on)
+        self.btn_only_hl.setEnabled(on)
+
     def selected_blocks(self) -> list[int]:
         """The blocks selected; a selected page counts as all its blocks."""
         picked = set()
@@ -340,8 +361,8 @@ class TrialsBrowser(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         if data[0] == "page":
             menu.addAction("Rename group…", lambda: self.later(lambda: self.rename_requested.emit(data[1])))
-            menu.addAction("Colour…", lambda: self.later(lambda: self.color_requested.emit(data[1])))
-            menu.addAction("Default colour", lambda: self.later(lambda: self.color_cleared.emit(data[1])))
+            menu.addAction("Color…", lambda: self.later(lambda: self.color_requested.emit(data[1])))
+            menu.addAction("Default color", lambda: self.later(lambda: self.color_cleared.emit(data[1])))
         else:
             i = int(data[1])
             here = next((name for name, blocks in self._pages if i in blocks), None)

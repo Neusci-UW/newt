@@ -120,7 +120,7 @@ def test_import_makes_a_session_and_never_changes_the_file(tmp_path):
     assert [c[1] for c in blk["comments"]] == ["start", "on stim only [Stim]"]
     info = trialfile.block_info(blocks[0])
     assert info["backend"] == "imported" and len(set(info["colors"])) == 2
-    assert trialfile.block_info(blocks[1])["colors"][0] == info["colors"][0]   # same colour in every block
+    assert trialfile.block_info(blocks[1])["colors"][0] == info["colors"][0]   # same color in every block
     assert notes and "Trial 3" in notes[0]
     assert hashlib.md5(src.read_bytes()).hexdigest() == before
 

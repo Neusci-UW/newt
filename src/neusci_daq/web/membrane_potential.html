@@ -192,7 +192,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 </header>
 
 <div class="top">
-<section class="card stage">
+<section class="card stage" id="sim-stage">
     <div class="toolbar">
       <span class="sect-title">View</span>
       <button class="chip" id="zFit">Fit view (1×)</button>
@@ -236,7 +236,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     </div>
     <p class="caption">Each channel has a selectivity filter at its outer mouth. The sliders set how many of each there are.</p>
   </section>
-  <aside class="side">
+  <aside class="side" id="sim-controls">
     <div class="card panel">
       
       
@@ -297,12 +297,12 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   </div>
 
   <div class="row3">
-    <section class="card stage">
+    <section class="card stage" id="sim-profile">
       <p class="sect-title">Charge and potential across the membrane</p>
       <canvas id="profile" aria-label="Net charge per column and electric potential across the simulation"></canvas>
       <p class="caption">Bars: net charge in the solution in each 16 px column, averaged over recent steps. The hatched bar over the membrane is the charge held inside the channels (mostly K⁺ near their inner end). Line: electric potential, extracellular side at 0 mV. The shaded band is the part of the box in view.</p>
     </section>
-    <section class="card stage">
+    <section class="card stage" id="sim-trace">
       <p class="sect-title">Membrane potential, intracellular relative to extracellular</p>
       <canvas id="trace" aria-label="Voltage trace with Nernst and GHK reference lines"></canvas>
       <p class="caption">Each point averages 100 steps. Dashed lines are Nernst potentials; dotted is the GHK prediction.</p>
@@ -313,7 +313,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 
 
   <section class="card ghk" id="ghk-equation">
-    <div class="deriv">
+    <div class="deriv" id="ghk-intro">
       <h2>The Goldman–Hodgkin–Katz equation</h2>
       <p class="caption mj-fail">The equation renderer (MathJax) could not load, so equations appear as TeX source. Without internet, add a local copy (see tools/fetch_mathjax.py in Argus).</p>
       <p>The GHK voltage equation gives the membrane potential at which several permeant ions together carry zero net current. It reduces to the Nernst equation when only one ion can cross.</p>
@@ -321,7 +321,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
 
     </div>
 
-    <div class="calc card">
+    <div class="calc card" id="ghk-calc">
       <div class="calc-head">
         <span class="sect-title">GHK calculator</span>
         <div class="seg" role="group" aria-label="Model">
@@ -377,7 +377,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
       </div>
     </div>
 
-    <div class="deriv">
+    <div class="deriv" id="ghk-derivation">
       <h3>Definitions</h3>
       <dl class="defs">
         <dt>\(V_m\)</dt><dd>membrane potential, \(\phi_{\text{in}} - \phi_{\text{out}}\)</dd>
@@ -432,7 +432,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
     </div>
   </section>
 
-<section class="notes card">
+<section class="notes card" id="notes">
   <div>
     <h2>What the model does</h2>
     <ul>
@@ -1586,6 +1586,49 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(calcGHK, 0));
   new MutationObserver(() => setTimeout(calcGHK, 0)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
+  // ---------- lessons ----------
+  // What a lesson (web/lesson.js; lesson files in ../lessons/) may read, set up and hide on this page
+  let lessonSrc = 'P';                        // which calculator sliders a lesson set last: P or G
+  const calcControl = (id, label, unit) => ({ label, unit, get: () => num(id), set: v => { setG(id, +v); if (gGIds.includes(id)) lessonSrc = 'G'; } });
+  const calcRead = (id, label) => ({ label, unit: 'mV', get: () => parseFloat($(id).textContent.replace('−', '-')) });
+  const checkbox = (id, label) => ({ label: label + ' (1 on, 0 off)', get: () => $(id).checked ? 1 : 0, set: v => { if ($(id).checked !== !!+v) $(id).click(); } });
+  window.LESSON_ADAPTER = {
+    sim: 'membrane',
+    lessons: ['membrane_ghk'],
+    values: {
+      calcVm: calcRead('gV', 'Calculator: V_m'),
+      calcEK: calcRead('gEK', 'Calculator: E_K'), calcENa: calcRead('gENa', 'Calculator: E_Na'), calcECl: calcRead('gECl', 'Calculator: E_Cl'),
+      simVm: { label: 'Simulation: V_m (averaged)', unit: 'mV', get: () => vAvg },
+      simGHK: { label: 'Simulation: GHK prediction', unit: 'mV', get: () => { measureBulk(); return ghk() ?? NaN; } },
+      simSteps: { label: 'Simulation: steps run', get: () => steps },
+    },
+    controls: {
+      calcModel: { label: 'Calculator: model (ghk or chord)', get: () => gMode, set: v => setModel(v === 'chord' ? 'chord' : 'ghk') },
+      gPK: calcControl('gPK', 'Calculator: P_K'), gPNa: calcControl('gPNa', 'Calculator: P_Na'), gPCl: calcControl('gPCl', 'Calculator: P_Cl'),
+      gGK: calcControl('gGK', 'Calculator: G_K', 'mS/cm²'), gGNa: calcControl('gGNa', 'Calculator: G_Na', 'mS/cm²'), gGCl: calcControl('gGCl', 'Calculator: G_Cl', 'mS/cm²'),
+      gKi: calcControl('gKi', 'Calculator: [K⁺] inside', 'mM'), gKo: calcControl('gKo', 'Calculator: [K⁺] outside', 'mM'),
+      gNai: calcControl('gNai', 'Calculator: [Na⁺] inside', 'mM'), gNao: calcControl('gNao', 'Calculator: [Na⁺] outside', 'mM'),
+      gCli: calcControl('gCli', 'Calculator: [Cl⁻] inside', 'mM'), gClo: calcControl('gClo', 'Calculator: [Cl⁻] outside', 'mM'),
+      gT: calcControl('gT', 'Calculator: temperature', '°C'),
+      simRunning: { label: 'Simulation: running (1 or 0)', get: () => running ? 1 : 0, set: v => setRunning(!!+v) },
+      simPump: checkbox('pump', 'Simulation: Na⁺/K⁺ pump'),
+      simClampIn: checkbox('clampIn', 'Simulation: hold inside concentrations'),
+      simClampOut: checkbox('clamp', 'Simulation: hold outside concentrations'),
+    },
+    afterSet: () => { calcGHK(lessonSrc); lessonSrc = 'P'; markCustom(); },
+    regions: {
+      sim: { label: 'Simulation', sel: '#sim-stage' },
+      simControls: { label: 'Simulation controls', sel: '#sim-controls' },
+      profile: { label: 'Charge and potential profile', sel: '#sim-profile' },
+      trace: { label: 'Voltage trace', sel: '#sim-trace' },
+      ghkIntro: { label: 'GHK equation', sel: '#ghk-intro' },
+      calc: { label: 'GHK calculator', sel: '#ghk-calc' },
+      derivation: { label: 'GHK derivation', sel: '#ghk-derivation' },
+      notes: { label: 'Notes on the model', sel: '#notes' },
+    },
+    actions: { pause: () => setRunning(false) },
+  };
+
   // ---------- loop ----------
   reset();
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setRunning(false);
@@ -1621,7 +1664,7 @@ table.conc input{width:76px;font:inherit;font-family:var(--font-mono);font-size:
   requestAnimationFrame(loop);
 })();
 </script>
-<!-- Student questions for the GHK lesson. Delete this line to remove them. -->
-<script src="ghk_questions.js"></script>
+<!-- Lessons: questions on this page and parts of it locked until they are answered (lessons folder). Delete this line to turn them off. -->
+<script src="lesson.js"></script>
 </body>
 </html>

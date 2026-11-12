@@ -17,7 +17,6 @@ MAX_SHOWN = 150                    # spikes of each unit drawn behind its averag
 
 
 class ShapeChart(Chart):
-    group = "Waveforms"
     help = "waveforms"
     title = ""
 
@@ -93,7 +92,7 @@ class ShapeChart(Chart):
 
 class PhasePlotChart(ShapeChart):
     kind = "V against dV/dt"
-    tip = "The phase plot: how fast the voltage changes at each voltage"
+    tip = "How fast does the voltage change at each voltage (the phase plot)?"
     title = "V against dV/dt"
 
     def xy(self, t, v, d):
@@ -112,7 +111,7 @@ class PhasePlotChart(ShapeChart):
 
 class VoltsChart(ShapeChart):
     kind = "V"
-    tip = "The spikes against time"
+    tip = "What does the voltage do through a spike?"
     link = "spike"
     title = "V"
 
@@ -126,7 +125,7 @@ class VoltsChart(ShapeChart):
 
 class SlopeChart(ShapeChart):
     kind = "dV/dt"
-    tip = "How fast the voltage changes through each spike"
+    tip = "How fast does the voltage rise and fall through a spike?"
     link = "spike"
     title = "dV/dt"
 

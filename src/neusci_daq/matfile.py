@@ -4,7 +4,7 @@
 The .mat is read once and turned into a normal session folder of blocks
 (<data_dir>/imported/<name>/block_001.h5, ...), which review mode opens like
 any other session. The original .mat is never changed: comments you add or
-colours you change go into the imported copy. Opening the same .mat again
+colors you change go into the imported copy. Opening the same .mat again
 reuses that copy (unless the .mat has changed since), so they're kept.
 
 LabChart's layout (see export.py, which writes the same thing):
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .colours import next_color, normalize_color
+from .colors import next_color, normalize_color
 from . import trialfile
 
 MARKER = "imported_from.json"

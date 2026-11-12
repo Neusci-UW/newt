@@ -199,7 +199,7 @@ class MeasureTool(QtCore.QObject):
         if unit == M.PHASE:
             x0, x1 = max(0.0, x0), min(360.0, x1)
         channel = chart.measure_channel(k)
-        key = "spikes" if chart.group == "Spikes" else ("mean" if unit == M.PHASE else "max")
+        key = "spikes" if chart.counts_spikes else ("mean" if unit == M.PHASE else "max")
         if self.page.canvas.first(DataPadTableChart.kind) is None:
             self.page.canvas.add(DataPadTableChart.kind)
         self.add(unit, x0, x1 - x0, channel, key)
@@ -256,8 +256,7 @@ class _WindowBox(QtWidgets.QGroupBox):
 
 class DataPadTableChart(Chart):
     kind = "DataPad table"
-    group = "Measure"
-    tip = "The Measure tool's numbers: a column for each window, a row for each trial or group"
+    tip = "What did each Measure window measure, trial by trial or group by group?"
     uses_units = False
     help = "datapad"
 
@@ -376,8 +375,7 @@ class DataPadTableChart(Chart):
 
 class ScatterChart(Chart):
     kind = "Scatter"
-    group = "Measure"
-    tip = "One of the DataPad table's columns (or the stimulus) against another, with a fitted curve"
+    tip = "How does one measurement change with another (or with the stimulus)?"
     uses_units = False
 
     def __init__(self, page, cid: str = ""):

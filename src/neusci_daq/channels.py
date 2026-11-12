@@ -1,7 +1,7 @@
 """Per-channel controls shown to the left of each live plot.
 
 Each row is one channel: switch it on or off, rename it, pick which DAQ input
-(ai0, ai1, ...) it reads, change its trace colour, or remove it. Only
+(ai0, ai1, ...) it reads, change its trace color, or remove it. Only
 switched-on rows are acquired and recorded.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
-from .colours import PALETTE, PALETTE_NAMES, normalize_color
+from .colors import CHOICES, CHOICE_NAMES, normalize_color
 from .config import Channel
 
 STRIP_WIDTH = 180
@@ -19,18 +19,18 @@ OFF_COLOR = "#9aa0a6"
 
 @dataclass
 class ChannelRow:
-    ch: Channel     # ch.enabled is the on/off switch; ch.color is the trace colour
+    ch: Channel     # ch.enabled is the on/off switch; ch.color is the trace color
 
 
 class ColorButton(QtWidgets.QToolButton):
-    """A coloured bar. Click it to pick a palette colour or a custom one.
+    """A colored bar. Click it to pick a palette color or a custom one.
 
-    Calls on_pick(hex) with the chosen colour. Used next to live plots (in the
+    Calls on_pick(hex) with the chosen color. Used next to live plots (in the
     channel strip) and review plots. With on_opacity, its menu also has an Opacity slider,
     which calls on_opacity(0 to 1) as it moves.
     """
 
-    def __init__(self, color: str, on_pick, tooltip: str = "Change this channel's trace colour",
+    def __init__(self, color: str, on_pick, tooltip: str = "Change this channel's trace color",
                  enabled_look: bool = True, opacity: float = 1.0, on_opacity=None):
         super().__init__()
         self._on_pick = on_pick
@@ -49,7 +49,7 @@ class ColorButton(QtWidgets.QToolButton):
 
     def _show_menu(self):
         menu = QtWidgets.QMenu(self)
-        for c, name in zip(PALETTE, PALETTE_NAMES):
+        for c, name in zip(CHOICES, CHOICE_NAMES):
             pix = QtGui.QPixmap(14, 14)
             pix.fill(QtGui.QColor(c))
             painter = QtGui.QPainter(pix)          # border, so white shows on a white menu
@@ -89,7 +89,7 @@ class ColorButton(QtWidgets.QToolButton):
         self._on_opacity(self.opacity)
 
     def _custom(self):
-        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.color), self, "Trace colour")
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.color), self, "Trace color")
         if c.isValid():
             self._pick(c.name())
 
@@ -105,9 +105,9 @@ LINE_MIN, LINE_MAX = 0.5, 20.0
 
 
 class ChannelStrip(QtWidgets.QFrame):
-    """On/off, name, input, line thickness, colour and remove controls for one channel.
+    """On/off, name, input, line thickness, color and remove controls for one channel.
 
-    In split view the strip is compact (colour bar and name) and shows its full
+    In split view the strip is compact (color bar and name) and shows its full
     controls while the mouse is over it, or while you're editing one of them.
     """
 
@@ -124,7 +124,7 @@ class ChannelStrip(QtWidgets.QFrame):
         outer = QtWidgets.QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        # Colour stays changeable while recording: it's display-only.
+        # Color stays changeable while recording: it's display-only.
         self.color_btn = ColorButton(row.ch.color, lambda c: on_color(self, c),
                                      enabled_look=row.ch.enabled)
         outer.addWidget(self.color_btn)
@@ -204,7 +204,7 @@ class ChannelStrip(QtWidgets.QFrame):
         self._collapse_timer = QtCore.QTimer(self, interval=250, timeout=self._maybe_collapse)
 
     def set_locked(self, locked: bool) -> None:
-        """While recording, lock everything except the colour and line thickness."""
+        """While recording, lock everything except the color and line thickness."""
         for w in (self.on, self.name, self.input, self.stim):
             w.setEnabled(not locked)
         self.remove.setEnabled(self._can_remove and not locked)

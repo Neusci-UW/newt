@@ -184,7 +184,7 @@ class CameraPanel(QtWidgets.QFrame):
         self._offset = 0.0
         self._devices = QMediaDevices() if QMediaDevices is not None else None
         self.fill_cameras()
-        if self._devices is not None:          # a camera plugged in or out while Argus is open
+        if self._devices is not None:          # a camera plugged in or out while NEWT is open
             self._devices.videoInputsChanged.connect(self.fill_cameras)
         self.btn_refresh.clicked.connect(self.fill_cameras)
         self.camera_box.currentIndexChanged.connect(lambda *_: self.set_camera(self.camera_box.currentData()))

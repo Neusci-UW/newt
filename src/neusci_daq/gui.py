@@ -53,11 +53,11 @@ from .trialsbrowser import TrialsBrowser
 from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
 from .simpage import SimPage
-from .membranepage import MembranePage   # imports QtWebEngine, which must come before the QApplication
+from .membranepage import RC_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
-from . import colours
+from . import colors
 from .channelsetup import ChannelSetupMixin
 from .commentcontrol import CommentsMixin
 from .liveview import LiveMixin
@@ -91,7 +91,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # Live session: each Record press is one block, like LabChart.
         self.session_dir: Path | None = None
         self.session_saved = False   # False while it lives in data/unsaved/
-        self.argus_path: Path | None = None       # the .argus file this session was saved in or opened from
+        self.argus_path: Path | None = None       # the .newt file this session was saved in or opened from
         self._argus_folder: Path | None = None    # ...for this session folder
         self._argus_files: dict | None = None     # what the folder held when it was saved (argusfile.files_of)
         self.blocks: list[Path] = []
@@ -109,7 +109,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.review_blocks: list[Path] = []
         self.review_block: dict | None = None
         self.review_color_btns: list[ColorButton] = []
-        # "Recolour recorded blocks?" answer remembered for this session: None (ask), True, False.
+        # "Recolor recorded blocks?" answer remembered for this session: None (ask), True, False.
         self._recolor_policy: bool | None = None
         self._live_comments_dirty = False    # a saved session's .mat needs re-exporting
         self._review_mat_stale = False
@@ -120,7 +120,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self._block_on_screen = False      # is the last block's data in this run?
         self._popup = None
         # The channel setup the user edits in the strips next to each plot.
-        colours.fill_colors(cfg.channels + cfg.spare_channels)
+        colors.fill_colors(cfg.channels + cfg.spare_channels)
         self.rows = [ChannelRow(c) for c in cfg.channels + cfg.spare_channels]
 
         # Stimulator
@@ -266,7 +266,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         cl2.addWidget(self.btn_theme)
         self.logo = QtWidgets.QLabel()
         self.logo.setPixmap(app_icon().pixmap(QtCore.QSize(26, 26)))
-        self.logo.setToolTip("Argus")
+        self.logo.setToolTip("NEWT")
         cl2.addWidget(self.logo)
         self._tb_corner = A(self.tab_corner)
         self._update_theme_button()
@@ -372,6 +372,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
         # Ions crossing a membrane, Nernst and GHK: a teaching page, always available.
         self.membrane_page = MembranePage(self)
+        # The membrane as an RC circuit, then the same charging done by ions.
+        self.rc_page = MembranePage(self, page=RC_PAGE, what="RC circuit")
         placeholder = lambda title, text: self._placeholder(title, text)
         # Record, Stimulator and Trials are sub-pages of Acquisition. Either half of
         # a split can show any page, two of Acquisition's included.
@@ -381,10 +383,11 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("trials", "Protocols", self.trials_page),
             ("analysis", "Analysis", self.analysis_page),
         ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else [])
-          + [("membrane", "Membrane potential", self.membrane_page)], groups=[
+          + [("membrane", "Membrane potential", self.membrane_page),
+             ("rc", "RC circuit", self.rc_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
             ("analysis", "Analysis", ["analysis"]),
-            ("sim", "Simulation", ["sim", "membrane"]),
+            ("sim", "Simulation", ["sim", "membrane", "rc"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -410,7 +413,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         m.addSeparator()
         self.act_save = m.addAction("&Save", self.save)
         self.act_save.setShortcut(QtGui.QKeySequence.StandardKey.Save)
-        self.act_save.setToolTip("Save everything in one .argus file, which reopens Argus as it is now")
+        self.act_save.setToolTip("Save everything in one .newt file, which reopens NEWT as it is now")
         self.act_save_as = m.addAction("Save &As…", self.save_file_dialog)
         self.act_save_as.setShortcut(QtGui.QKeySequence("Ctrl+Shift+S"))
         self.act_save_folder = m.addAction("Save Session F&older As…", self.save_as_dialog)
@@ -476,7 +479,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.act_separate_y.setChecked(self.settings.value("overlay_separate_axes", True, type=bool))
         self.act_separate_y.toggled.connect(self.set_overlay_axes)
         self.act_separate_y.setToolTip("With Overlay channels: each channel gets its own y axis (in its "
-                                       "colour) and is scaled to fill the plot. Off: one shared axis.")
+                                       "color) and is scaled to fill the plot. Off: one shared axis.")
         tm = v.addMenu("&Zoomed-out traces")
         group = QtGui.QActionGroup(self)
         self.act_trace_mode = {}
@@ -499,7 +502,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
     def _set_curve_color(self, k: int, color: str) -> None:
         """Draw trace k in `color` (adjusted for contrast on the current background)."""
         self.curve_colors[k] = color
-        self.curves[k].setPen(pg.mkPen(colours.display_color(color, self.plot_mode), width=self.curve_widths[k]))
+        self.curves[k].setPen(pg.mkPen(colors.display_color(color, self.plot_mode), width=self.curve_widths[k]))
 
     def _channel_width(self, strip: ChannelStrip, width: float) -> None:
         self.set_channel_width(self.rows.index(strip.row), width)
@@ -536,7 +539,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         return style.DARK if self.plot_mode == theme.DARK else style.LIGHT
 
     def _apply_app_theme(self) -> None:
-        """The window's own colours (the plots are styled separately)."""
+        """The window's own colors (the plots are styled separately)."""
         mode = self._app_mode()
         style.restyle(mode)
         self.comments_panel.link_color = style.tokens(mode)["link"]
@@ -547,6 +550,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.sim_page.apply_theme(mode)
         if getattr(self, "membrane_page", None):
             self.membrane_page.apply_theme(mode)
+        if getattr(self, "rc_page", None):
+            self.rc_page.apply_theme(mode)
         if hasattr(self, "analysis_page"):
             self.analysis_page.apply_theme(mode)
         self._update_theme_button()
@@ -677,7 +682,7 @@ _WINDOWS: list = []        # windows opened by Setup › Input device, kept aliv
 
 
 class _FileOpener(QtCore.QObject):
-    """Files macOS asks Argus to open (a double-clicked .argus file), kept until the window
+    """Files macOS asks NEWT to open (a double-clicked .newt file), kept until the window
     is ready."""
 
     def __init__(self, app):
@@ -702,7 +707,7 @@ class _FileOpener(QtCore.QObject):
 
 
 def run(cfg: Config, config_path: str | Path | None = None, open_path: str | None = None):
-    app = pg.mkQApp("Argus")
+    app = pg.mkQApp("NEWT")
     opener = _FileOpener(app)
     # pyqtgraph sets its own icon and Windows taskbar ID in mkQApp; replace both
     # before the window opens, or the taskbar keeps showing pyqtgraph's icon.
@@ -710,7 +715,8 @@ def run(cfg: Config, config_path: str | Path | None = None, open_path: str | Non
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("neusci.daq.visualizer")
     app.setWindowIcon(app_icon())
-    splash = QtWidgets.QSplashScreen(QtGui.QIcon(str(ICON_DIR / "icon_512.png")).pixmap(QtCore.QSize(360, 360)))
+    splash = QtWidgets.QSplashScreen(QtGui.QPixmap(str(ICON_DIR / "logo.png")).scaledToWidth(
+        420, QtCore.Qt.TransformationMode.SmoothTransformation))
     splash.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
     splash.show()
     app.processEvents()                                # the logo, while the window is made

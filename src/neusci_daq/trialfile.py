@@ -8,7 +8,7 @@
 
 A trial file is written once, while it's recorded (recorder.py) or imported (matfile.py),
 and never opened for writing again: the original recording doesn't change. What you change
-afterwards, a trial's comments and its channels' colours, is kept beside it in
+afterwards, a trial's comments and its channels' colors, is kept beside it in
 trial_edits.json, and reading a trial puts those over what the file holds:
 
   {"comments": {"block_003": [{"t", "sample_index", "text"}]},
@@ -22,7 +22,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from .colours import PALETTE, normalize_color
+from .colors import PALETTE, normalize_color
 
 EDITS = "trial_edits.json"
 COMMENT_DT = np.dtype([("t", "f8"), ("sample_index", "i8"), ("text", h5py.string_dtype())])
@@ -89,7 +89,7 @@ def edits_stamp(path: str | Path) -> tuple:
 
 
 def with_edits(path: str | Path, block: dict) -> dict:
-    """A trial as read (read_block or block_info), with its edited comments and colours."""
+    """A trial as read (read_block or block_info), with its edited comments and colors."""
     path = Path(path)
     edits = load_edits(path.parent)
     comments = edits["comments"].get(path.stem)
@@ -109,7 +109,7 @@ def with_edits(path: str | Path, block: dict) -> dict:
 
 # -- reading ------------------------------------------------------------------------------------
 def _colors(attrs, n: int) -> list[str]:
-    """Saved trace colours, or palette colours for trials recorded before colours were saved."""
+    """Saved trace colors, or palette colors for trials recorded before colors were saved."""
     saved = [str(c) for c in attrs["colors"]] if "colors" in attrs else []
     out = []
     for i in range(n):
@@ -214,7 +214,7 @@ def write_comments(path: str | Path, comments: list[dict]) -> None:
 
 
 def recolor_blocks(blocks, colors: dict[str, str]) -> list[Path]:
-    """Set the colour of channels (by name) of these trials, beside their files. Returns the
+    """Set the color of channels (by name) of these trials, beside their files. Returns the
     trials that couldn't be read."""
     failed, by_folder = [], {}
     for b in blocks:

@@ -11,10 +11,12 @@ keeps its charts while you look at another, and how you left it is remembered.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import board as B
+from . import figure
 from . import style
 from .measurecharts import DataPadTableChart, ScatterChart
 from .plotzoom import AxisGroup
@@ -28,7 +30,14 @@ CHARTS = (StimulusChart, BlocksChart, RasterChart, RateChart, PcaChart, Waveform
           TracesChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
           LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart, DataPadTableChart, ScatterChart)
 KINDS = {c.kind: c for c in CHARTS}
-GROUPS = ("Spikes", "Response", "Waveforms", "Measure")
+# the Add chart menu's headings: what runs along each chart's x axis
+GROUPS = {"Over the trial (time)": ("Traces", "Stimulus", "Trials", "Raster", "Rate", "Stimulus-triggered rate",
+                                    "Stimulus fit"),
+          "Over one cycle (phase)": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase",
+                                     "Response against stimulus"),
+          "Around each spike (spike shape)": ("Waveforms", "Spike-triggered average", "V", "dV/dt", "V against dV/dt"),
+          "Sorting spikes": ("PCA map", "AP sizes", "Intervals"),
+          "One value per trial (measurements)": ("DataPad table", "Scatter")}
 BOARD = "Board"                    # the board you work on; Save… keeps it as a layout of your own
 SIZE = {"DataPad table": (560, 260), "Traces": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
 
@@ -49,7 +58,10 @@ class _Toolbar(QtWidgets.QFrame):
                                                 "middle button)"),
                                (B.MEASURE, "Measure", "Drag across a chart to measure that stretch of it: in Time on "
                                                       "charts against time, in Phase on charts against phase. The "
-                                                      "numbers go in a DataPad table")):
+                                                      "numbers go in a DataPad table"),
+                               (B.EXPORT, "Export", "Drag a box anywhere, over the charts too, to save what's in it "
+                                                    "as a figure: PDF, SVG, PNG or TIFF, or copy it. Click to export "
+                                                    "the last box again")):
             b = QtWidgets.QToolButton(text=text, checkable=True, autoRaise=True)
             b.setToolTip(tip)
             self.tools.addButton(b)
@@ -87,6 +99,11 @@ class _Toolbar(QtWidgets.QFrame):
         self.btn_fit.setToolTip("Show every chart")
         for w in (self.btn_out, self.zoom, self.btn_in, self.btn_fit):
             row.addWidget(w)
+        row.addSpacing(8)
+        self.btn_grid = QtWidgets.QToolButton(text="Grid", checkable=True, autoRaise=True)
+        self.btn_grid.setToolTip("Show or hide the board's dots. The charts still snap to them when hidden")
+        self.btn_grid.setChecked(True)
+        row.addWidget(self.btn_grid)
 
     def restyle(self, mode: str) -> None:
         t = style.tokens(mode)
@@ -128,6 +145,7 @@ class ChartCanvas(QtWidgets.QWidget):
         self.floating.btn_in.clicked.connect(lambda: self.space.zoom_about(self.space.zoom * 1.25))
         self.floating.btn_out.clicked.connect(lambda: self.space.zoom_about(self.space.zoom / 1.25))
         self.floating.btn_fit.clicked.connect(lambda: self.space.fit_all())
+        self.floating.btn_grid.toggled.connect(lambda on: self.space.set_grid(on))
         self.btn_add = self.floating.btn_add
 
         self.layouts = QtWidgets.QComboBox()
@@ -159,6 +177,7 @@ class ChartCanvas(QtWidgets.QWidget):
         self._list_layouts()
         self.layouts.currentTextChanged.connect(self.show_layout)
         QtWidgets.QApplication.instance().focusChanged.connect(self._focus_moved)
+        QtWidgets.QApplication.instance().installEventFilter(self)     # a click in a chart picks it
 
     # -- tools ---------------------------------------------------------------------------------
     def tool(self) -> str:
@@ -209,6 +228,9 @@ class ChartCanvas(QtWidgets.QWidget):
         self.space = self.spaces[name]
         self.stack.setCurrentWidget(self.space)
         self.space.set_toolbar(self.floating)
+        self.floating.btn_grid.blockSignals(True)
+        self.floating.btn_grid.setChecked(self.space.grid)
+        self.floating.btn_grid.blockSignals(False)
         self.layouts.blockSignals(True)
         self.layouts.setCurrentText(name)
         self.layouts.blockSignals(False)
@@ -232,6 +254,7 @@ class ChartCanvas(QtWidgets.QWidget):
         space.moved.connect(self.changed)
         space.context_requested.connect(self._context_menu)
         space.delete_requested.connect(self.close_picked)
+        space.export_requested.connect(self.export)
         space.zoom_changed.connect(lambda z: self.floating.zoom.setText(f"{round(z * 100)}%"))
         self.spaces[name] = space
         self.stack.addWidget(space)
@@ -349,14 +372,14 @@ class ChartCanvas(QtWidgets.QWidget):
             self.reset()
 
     def app_state(self) -> dict:
-        """Every layout opened, and the one showing, for an .argus file."""
+        """Every layout opened, and the one showing, for a .newt file."""
         self.save()
         return {"layout": self.space.name if self.space is not None else BOARD,
                 "layouts": {name: self.state_of(space) for name, space in self.spaces.items()},
                 "own": self.own_layouts(), "lock": self.lock.isChecked(), "bars": self.bars.isChecked()}
 
     def restore_app_state(self, s: dict) -> None:
-        """The layouts of an .argus file, in place of what's on screen. Your own layouts stay
+        """The layouts of a .newt file, in place of what's on screen. Your own layouts stay
         in the menu; one of the same name as the file's takes the file's charts."""
         own = self.own_layouts()
         self.settings.setValue("analysis/layouts", json.dumps(own + [n for n in s["own"] if n not in own]))
@@ -390,14 +413,15 @@ class ChartCanvas(QtWidgets.QWidget):
 
     def _fill_add_menu(self, menu: QtWidgets.QMenu, at) -> None:
         menu.clear()
-        for group in GROUPS:
+        for group, kinds in GROUPS.items():
             menu.addSection(group)
-            for c in CHARTS:
-                if c.group == group:
-                    n = sum(x.kind == c.kind for x in self.here())
-                    action = menu.addAction(c.kind + (f"  ({n} open)" if n else ""))
-                    action.setToolTip(c.tip)
-                    action.triggered.connect(lambda _=False, k=c.kind: self.add(k, at=at))
+            for kind in kinds:
+                c = KINDS[kind]
+                n = sum(x.kind == c.kind for x in self.here())
+                action = menu.addAction(c.kind + (f"  ({n} open)" if n else ""))
+                action.setToolTip(c.tip)
+                action.setStatusTip(c.tip)
+                action.triggered.connect(lambda _=False, k=c.kind: self.add(k, at=at))
         menu.setToolTipsVisible(True)
 
     def _context_menu(self, at: QtCore.QPointF, where: QtCore.QPoint) -> None:
@@ -497,6 +521,42 @@ class ChartCanvas(QtWidgets.QWidget):
     def open_settings(self, chart) -> None:
         """Show this chart's settings beside the board."""
         self.select(chart)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() == QtCore.QEvent.Type.MouseButtonPress and isinstance(obj, QtWidgets.QWidget) \
+                and self.space is not None:
+            w = obj
+            while w is not None and not isinstance(w, B.ChartFrame):
+                if isinstance(w, (B.TitleBar, B.Grip)):     # they pick for themselves
+                    return False
+                w = w.parentWidget()
+            if w is not None and w.board is self.space and not w.picked:
+                shift = bool(ev.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
+                self.space.pick([w], add=shift)
+        return False
+
+    # -- figures -------------------------------------------------------------------------------
+    def export(self, area: QtCore.QRectF) -> None:
+        """Save the part of the board in `area` as a figure, asking how."""
+        dlg = figure.ExportDialog(self, area, self.settings)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        dlg.remember()
+        fmt = dlg.format()
+        path = None
+        if fmt != "copy":
+            folder = self.settings.value("export/folder", str(Path.home()))
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save figure", str(Path(folder) / f"figure.{fmt}"),
+                                                            f"{fmt.upper()} (*.{fmt})")
+            if not path:
+                return
+            self.settings.setValue("export/folder", str(Path(path).parent))
+        try:
+            figure.save(self.space, area, fmt, path, dpi=dlg.dpi.value(), light=dlg.light.isChecked())
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(self, "Export figure", str(e))
+            return
+        self.page.main.statusBar().showMessage("Figure copied" if fmt == "copy" else f"Figure saved: {path}", 6000)
 
     def _focus_moved(self, _old, new) -> None:
         w = new

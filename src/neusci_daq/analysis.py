@@ -298,11 +298,17 @@ class Events:
 def find_events(blocks: list[tuple[int, np.ndarray, float]], *, threshold: float = 5.0, fixed: bool = False,
                 bimodal: bool = False, polarity: str = "negative", dead_ms: float = 1.0,
                 biphasic: float | None = None, biphasic_ms: float = 1.0, pre_ms: float = 1.0,
-                post_ms: float = 2.0, n_units: int | None = None) -> Events:
+                post_ms: float = 2.0, n_units: int | None = None, memo: dict | None = None,
+                keys: list | None = None, progress=None) -> Events:
     """Detect and sort events in `blocks`: (block index, trace, sample rate). The
     threshold is in noise SDs (the median noise of the blocks), or with fixed=True a
     level in trace units from the baseline, or with bimodal=True found from the peak
-    sizes (falling back to `threshold` SDs, with a note, if they don't form two groups)."""
+    sizes (falling back to `threshold` SDs, with a note, if they don't form two groups).
+
+    With `memo` (a dict kept between searches) and `keys` (one per block, naming what its
+    trace is), each block's noise and the events found in it are kept, so searching again
+    with another block added only looks through that one; sorting into units is always done
+    over them all. progress(done, total) is called after each block."""
     if not blocks:
         raise ValueError("No trials to search.")
     fs = blocks[0][2]
@@ -313,19 +319,28 @@ def find_events(blocks: list[tuple[int, np.ndarray, float]], *, threshold: float
     if bimodal:
         level, note = bimodal_level([y for _, y, _ in blocks], fs, polarity, dead_ms)
         notes.append(note + ("" if level is not None else f"; used {abs(threshold):g} noise SDs instead") + ".")
+    memo = {} if memo is None else memo
+    keys = keys if keys is not None else [object() for _ in blocks]      # nothing to remember
     if level is None:
-        level = abs(threshold) if fixed else abs(threshold) * float(np.median([noise_sd(y) for _, y, _ in blocks]))
+        noise = [memo.setdefault(("noise", k), noise_sd(y)) if not fixed else 0.0 for k, (_, y, _) in zip(keys, blocks)]
+        level = abs(threshold) if fixed else abs(threshold) * float(np.median(noise))
     if level <= 0:
         raise ValueError("The threshold is 0: these trials look flat.")
     bi, ts, amps, ws = [], [], [], []
-    for b, y, _ in blocks:
-        idx = detect(y, fs, level, polarity, dead_ms, biphasic, biphasic_ms)
-        w, keep = waveforms(y, idx, fs, pre_ms, post_ms)
-        base = np.median(y)
-        bi.append(np.full(len(keep), b))
-        ts.append(keep / fs)
-        amps.append(y[keep] - base)
+    how = (level, polarity, dead_ms, biphasic, biphasic_ms, pre_ms, post_ms)
+    for n, ((b, y, _), k) in enumerate(zip(blocks, keys)):
+        found = memo.get(("events", k, how))
+        if found is None:
+            idx = detect(y, fs, level, polarity, dead_ms, biphasic, biphasic_ms)
+            w, keep = waveforms(y, idx, fs, pre_ms, post_ms)
+            found = memo[("events", k, how)] = (keep / fs, y[keep] - np.median(y), w)
+        t, a, w = found
+        bi.append(np.full(len(t), b))
+        ts.append(t)
+        amps.append(a)
         ws.append(w)
+        if progress is not None:
+            progress(n + 1, len(blocks))
     pre = int(round(pre_ms / 1000 * fs))
     waves = np.concatenate(ws) if ws else np.empty((0, 0))
     ev = Events(np.concatenate(bi), np.concatenate(ts), np.empty(0, int), np.concatenate(amps), waves,
@@ -335,6 +350,31 @@ def find_events(blocks: list[tuple[int, np.ndarray, float]], *, threshold: float
     if len(waves) < 3 and len(waves):
         ev.notes.append("Too few events to sort into units.")
     return ev
+
+
+def match_units(before: Events, after: Events) -> np.ndarray:
+    """after's unit numbers, changed so each unit that looks like one of before's (by its mean
+    waveform) has that one's number: searching more trials sorts the units again, and the same
+    unit should keep its number, and so its color. New units take the numbers left."""
+    if not len(before.unit) or not len(after.unit) or before.waves.shape[1:] != after.waves.shape[1:]:
+        return after.unit
+    old = {u: before.waves[before.unit == u].mean(axis=0) for u in np.unique(before.unit) if u >= 0}
+    new = {u: after.waves[after.unit == u].mean(axis=0) for u in np.unique(after.unit) if u >= 0}
+    pairs = sorted((float(np.linalg.norm(a - b)), n, o) for n, a in new.items() for o, b in old.items())
+    to, taken = {}, set()
+    for _, n, o in pairs:                          # closest first
+        if n not in to and o not in taken:
+            to[n] = o
+            taken.add(o)
+    free = (u for u in range(len(old) + len(new)) if u not in taken)
+    for n in sorted(new):
+        if n not in to:
+            to[n] = next(free)
+    out = np.array([to.get(u, u) for u in after.unit], dtype=after.unit.dtype)
+    used = sorted(set(out.tolist()) - {-1})
+    if used != list(range(len(used))):             # a unit went: close the gap, keeping their order
+        out = np.array([used.index(u) if u >= 0 else u for u in out], dtype=after.unit.dtype)
+    return out
 
 
 # -- comparing signals ---------------------------------------------------------
@@ -400,7 +440,7 @@ def triggered_rates(event_times: dict[int, np.ndarray], triggers: dict[int, np.n
                     before_ms: float, after_ms: float, bin_ms: float):
     """Spikes/s in bins around each trigger, one row per trigger (trial): from before_ms
     before it to after_ms after. `event_times` and `triggers` are seconds within each
-    block. Returns (bin centres ms, rates: triggers × bins)."""
+    block. Returns (bin centeres ms, rates: triggers × bins)."""
     edges = np.arange(-before_ms, after_ms + bin_ms / 2, bin_ms)
     rows = []
     for b, trig in triggers.items():
@@ -414,9 +454,9 @@ def triggered_rates(event_times: dict[int, np.ndarray], triggers: dict[int, np.n
 def triggered_rate(event_times: dict[int, np.ndarray], triggers: dict[int, np.ndarray],
                    before_ms: float, after_ms: float, bin_ms: float):
     """Stimulus-triggered spike rate (a PSTH): the trials' rates (triggered_rates)
-    averaged. Returns (bin centres ms, rate, n triggers)."""
-    centres, rates = triggered_rates(event_times, triggers, before_ms, after_ms, bin_ms)
-    return centres, rates.mean(0) if len(rates) else np.zeros(len(centres)), len(rates)
+    averaged. Returns (bin centeres ms, rate, n triggers)."""
+    centeres, rates = triggered_rates(event_times, triggers, before_ms, after_ms, bin_ms)
+    return centeres, rates.mean(0) if len(rates) else np.zeros(len(centeres)), len(rates)
 
 
 def mean_spread(rows: np.ndarray):

@@ -25,7 +25,7 @@ class RepeatFinder(View):
         self.cycle_skip.setToolTip("Leave out this many cycles at the start of each trial, "
                                    "while the response settles")
         self.cycle_len = UnitSpinBox(0, 600000, "ms", step=10)
-        self.cycle_len.setToolTip("How long one repeat is. 0: Argus finds it, from what was sent if the trial saved "
+        self.cycle_len.setToolTip("How long one repeat is. 0: NEWT finds it, from what was sent if the trial saved "
                                   "it, else by matching the stimulus's shape against itself, or from its rises "
                                   "through its middle level")
         self._cycle_start: float | None = None      # where you marked a repeat (s)

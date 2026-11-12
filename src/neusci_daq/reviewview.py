@@ -87,7 +87,7 @@ class ReviewMixin:
                 self.block_combo.setCurrentIndex(int(data[1]))
 
     def overlay_blocks(self, blocks: list[int]) -> None:
-        """Overlay these blocks on the plots, each from its start and coloured by page,
+        """Overlay these blocks on the plots, each from its start and colored by page,
         with the block shown on top. Fewer than two: no overlay. From live mode, this
         first opens the session's blocks (as clicking one does)."""
         self._overlay_sel = list(blocks) if len(blocks) >= 2 else []

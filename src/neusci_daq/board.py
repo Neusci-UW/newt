@@ -10,6 +10,9 @@ Pan by scrolling, or with the Hand tool (or the middle button). Zoom with the âˆ
 the toolbar, âŒ˜/Ctrl and the scroll wheel, or a pinch; zooming makes the charts smaller or
 bigger on screen and leaves where they are on the board alone. The minimap shows the
 whole board and the part of it on screen; click it to go there.
+
+With the Export tool, drag a box anywhere, over the charts too, to save what's in it as a
+figure (see figure.py).
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ GRID = 20                       # snapping, in board pixels
 NEAR = 10                       # how close an edge must come to snap to another chart's
 MIN_W, MIN_H = 160, 120         # the smallest a chart can be made
 ZOOMS = (0.25, 2.0)
-SELECT, HAND, MEASURE = "select", "hand", "measure"
+SELECT, HAND, MEASURE, EXPORT = "select", "hand", "measure", "export"
 
 
 def snap(v: float) -> float:
@@ -49,6 +52,7 @@ class TitleBar(QtWidgets.QWidget):
         self.tag.setObjectName("chartTag")
         for w in (self.name, self.tag):       # a long name gives way, so a narrow chart can be narrow
             w.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
+            w.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)   # dragging the name moves the chart
         row.addWidget(self.name, 2)
         row.addWidget(self.tag, 1)
         self.btn_copy = self._button("Copy", "Open another of this chart, with the same settings", row)
@@ -111,10 +115,11 @@ class ChartFrame(QtWidgets.QFrame):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(1, 1, 1, 1)
         lay.setSpacing(0)
-        self.bar = TitleBar(self)
-        lay.addWidget(self.bar)
         lay.addWidget(chart, 1)
         chart.setMinimumSize(1, 1)
+        self.bar = TitleBar(self)                 # over the chart's top, shown while the mouse is on it
+        self.bar.setParent(self)
+        self.bar.hide()
         self.grip = Grip(self)
         self.picked = False
 
@@ -130,8 +135,20 @@ class ChartFrame(QtWidgets.QFrame):
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        self.bar.setGeometry(1, 1, self.width() - 2, self.bar.sizeHint().height())
         self.grip.move(self.width() - self.grip.width() - 1, self.height() - self.grip.height() - 1)
         self.grip.raise_()
+
+    # the title bar shows only while the mouse is on the chart, so the board can be a figure
+    def enterEvent(self, ev):
+        super().enterEvent(ev)
+        self.bar.show()
+        self.bar.raise_()
+
+    def leaveEvent(self, ev):
+        super().leaveEvent(ev)
+        if self.board.dragging() is not self:
+            self.bar.hide()
 
     def restyle(self) -> None:
         t = self.board.tokens
@@ -146,12 +163,35 @@ class ChartFrame(QtWidgets.QFrame):
 
 
 class _Overlay(QtWidgets.QWidget):
-    """Guides and the selection box, over the charts. Clicks go through it."""
+    """Guides and the selection box, over the charts. Clicks go through it, except with the
+    Export tool, when it takes the box being dragged over the charts."""
 
     def __init__(self, board: "Board"):
         super().__init__(board)
         self.board = board
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+
+    def mousePressEvent(self, ev):
+        if ev.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.board.box = QtCore.QRectF(ev.position(), ev.position())
+            self.update()
+
+    def mouseMoveEvent(self, ev):
+        if self.board.box is not None:
+            self.board.box = QtCore.QRectF(self.board.box.topLeft(), ev.position())
+            self.update()
+
+    def mouseReleaseEvent(self, ev):
+        b = self.board
+        r, b.box = (b.box.normalized() if b.box is not None else QtCore.QRectF()), None
+        self.update()
+        if r.width() < 4 and r.height() < 4:          # a click: the last box again, if there is one
+            if b.last_export is not None:
+                b.export_requested.emit(QtCore.QRectF(b.last_export))
+            return
+        b.last_export = QtCore.QRectF(b.to_board(r.topLeft()), b.to_board(r.bottomRight()))
+        b.export_requested.emit(QtCore.QRectF(b.last_export))
 
     def paintEvent(self, ev):
         b = self.board
@@ -242,6 +282,7 @@ class Board(QtWidgets.QWidget):
     context_requested = QtCore.pyqtSignal(QtCore.QPointF, QtCore.QPoint)   # board place, screen place
     delete_requested = QtCore.pyqtSignal()
     zoom_changed = QtCore.pyqtSignal(float)
+    export_requested = QtCore.pyqtSignal(QtCore.QRectF)   # the part of the board to save, in board pixels
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -254,7 +295,10 @@ class Board(QtWidgets.QWidget):
         self.guide_x: float | None = None
         self.guide_y: float | None = None
         self.box: QtCore.QRectF | None = None
+        self.last_export: QtCore.QRectF | None = None
+        self.grid = True                                  # the dots
         self._drag: dict | None = None
+        self._at: QtCore.QPoint | None = None         # where the board's corner is in the window
         self.setMouseTracking(False)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents)
@@ -311,8 +355,17 @@ class Board(QtWidgets.QWidget):
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        # a panel folding out beside the board moves its edge: keep the charts still on screen
+        at = self.mapTo(self.window(), QtCore.QPoint(0, 0))
+        if self._at is not None and self.isVisible():
+            self.offset -= QtCore.QPointF(at - self._at)
+        self._at = at
         self._place_floating()
         self.place_all()
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self._at = self.mapTo(self.window(), QtCore.QPoint(0, 0))
 
     # -- the charts ---------------------------------------------------------------------------
     def add(self, chart, place: QtCore.QRectF) -> ChartFrame:
@@ -454,9 +507,16 @@ class Board(QtWidgets.QWidget):
         self.guide_x, self.guide_y = gx, gy
         self.place_all()
 
+    def dragging(self) -> ChartFrame | None:
+        """The chart being moved or resized, if one is."""
+        return self._drag["frame"] if self._drag is not None and "frame" in self._drag else None
+
     def drag_done(self) -> None:
         if self._drag is not None and self._drag["mode"] in ("move", "size"):
             self.moved.emit()
+            me = self._drag["frame"]
+            if not me.underMouse():
+                me.bar.hide()
         self._drag = None
         self.guide_x = self.guide_y = None
         self.overlay.update()
@@ -520,8 +580,8 @@ class Board(QtWidgets.QWidget):
         if ev.type() == QtCore.QEvent.Type.Gesture:
             pinch = ev.gesture(QtCore.Qt.GestureType.PinchGesture)
             if pinch is not None:
-                centre = self.mapFromGlobal(pinch.centerPoint().toPoint())
-                self.zoom_about(self.zoom * pinch.scaleFactor(), QtCore.QPointF(centre))
+                centere = self.mapFromGlobal(pinch.centerPoint().toPoint())
+                self.zoom_about(self.zoom * pinch.scaleFactor(), QtCore.QPointF(centere))
                 return True
         if ev.type() == QtCore.QEvent.Type.NativeGesture and \
                 ev.gestureType() == QtCore.Qt.NativeGestureType.ZoomNativeGesture:
@@ -538,6 +598,12 @@ class Board(QtWidgets.QWidget):
     def set_tool(self, tool: str) -> None:
         self.tool = tool
         self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor if tool == HAND else QtCore.Qt.CursorShape.ArrowCursor)
+        self.overlay.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, tool != EXPORT)
+
+    def set_grid(self, on: bool) -> None:
+        self.grid = on
+        self.update()
+        self.moved.emit()
 
     # -- the view --------------------------------------------------------------------------
     def zoom_about(self, z: float, at: QtCore.QPointF | None = None) -> None:
@@ -592,6 +658,8 @@ class Board(QtWidgets.QWidget):
         t = self.tokens
         p = QtGui.QPainter(self)
         p.fillRect(self.rect(), QtGui.QColor(t["ground"]))
+        if not self.grid:
+            return
         step = GRID * self.zoom
         while step < 12:
             step *= 2
@@ -610,10 +678,11 @@ class Board(QtWidgets.QWidget):
         p.drawPoints(pts)
 
     def state(self) -> dict:
-        return {"zoom": self.zoom, "x": self.offset.x(), "y": self.offset.y()}
+        return {"zoom": self.zoom, "x": self.offset.x(), "y": self.offset.y(), "grid": self.grid}
 
     def restore(self, s: dict) -> None:
         self.zoom = float(s.get("zoom", 1.0))
         self.offset = QtCore.QPointF(float(s.get("x", 24)), float(s.get("y", 24)))
+        self.grid = bool(s.get("grid", True))
         self.place_all()
         self.zoom_changed.emit(self.zoom)

@@ -11,7 +11,7 @@ WIDTH, PANEL_H = 860, 150
 
 
 class _Pen:
-    """Drawing a row of numbered steps, in the app's colours."""
+    """Drawing a row of numbered steps, in the app's colors."""
 
     def __init__(self, steps: list[tuple[str, str]]):
         pal = QtWidgets.QApplication.palette()
@@ -45,13 +45,13 @@ class _Pen:
         f.setBold(True)
         p.setFont(f)
         p.setPen(self.fg)
-        centred = QtCore.Qt.AlignmentFlag.AlignHCenter
-        p.drawText(QtCore.QRectF(x, PANEL_H + 8, w, 20), centred, f"{k + 1}. {title}")
+        centered = QtCore.Qt.AlignmentFlag.AlignHCenter
+        p.drawText(QtCore.QRectF(x, PANEL_H + 8, w, 20), centered, f"{k + 1}. {title}")
         f.setBold(False)
         f.setPixelSize(12)
         p.setFont(f)
         p.setPen(self.muted)
-        p.drawText(QtCore.QRectF(x, PANEL_H + 27, w, 20), centred, sub)
+        p.drawText(QtCore.QRectF(x, PANEL_H + 27, w, 20), centered, sub)
 
     def line(self, xs, ys, color, width=1.2, alpha=255) -> None:
         c = QtGui.QColor(color)
@@ -110,7 +110,7 @@ def _spike_sorting_picture() -> QtGui.QPixmap:
                    d.fg, 0.8, 90)
     peak = d.xs[1] + 12 + (0 - t[0]) / np.ptp(t) * (w - 24)
     d.dashed(peak, 8, peak, ph - 8, d.muted, QtCore.Qt.PenStyle.DotLine)
-    # 3 and 4: the same points, then in their units with k-means' centres
+    # 3 and 4: the same points, then in their units with k-means' centeres
     a = np.clip(rng.normal((-0.5, 0.25), (0.14, 0.13), (40, 2)), -0.8, 0.6)
     b = np.clip(rng.normal((0.5, -0.25), (0.14, 0.13), (40, 2)), -0.6, 0.8)
     for k, (ca, cb) in ((2, (d.fg, d.fg)), (3, (U1, U2))):
@@ -229,7 +229,7 @@ TOPICS = {
     "spike_sorting": {
         "title": "How Find action potentials works",
         "picture": _spike_sorting_picture,
-        "text": "Argus finds every place the trace passes the <b>threshold</b> and cuts out a short <b>waveform</b> "
+        "text": "NEWT finds every place the trace passes the <b>threshold</b> and cuts out a short <b>waveform</b> "
                 "around each peak. Spikes from the same cell look alike, so it reduces each waveform to its 3 "
                 "<b>principal components</b>, which turns each spike into a point, and <b>k-means</b> groups "
                 "nearby points into <b>units</b>.",
@@ -239,15 +239,15 @@ TOPICS = {
             ("Baseline", "The trace's middle level (its median). Thresholds are measured from here."),
             ("Noise SD", "How much the trace wobbles without spikes. 5 SD means 5 times that wobble."),
             ("Threshold", "How far from the baseline the trace must go to count as an event."),
-            ("Method", "Manual: you set the threshold. Bimodal: Argus puts it between noise and spikes."),
+            ("Method", "Manual: you set the threshold. Bimodal: NEWT puts it between noise and spikes."),
             ("Direction", "Which way spikes go from the baseline: down, up or either."),
             ("Biphasic", "Keep only events that also swing the other way, as real spikes do."),
             ("Dead time", "After an event, no other can start for this long."),
             ("Waveform before / after", "How much of each spike to cut out around its peak."),
             ("Units", "How many groups to sort spikes into. Auto picks the number that separates best."),
             ("Unit", "A group of spikes with the same shape, likely from one cell."),
-            ("Principal components", "The main ways the spike shapes differ. Argus uses the first 3."),
-            ("k-means", "Groups points around k centres (the × marks), each point joining its nearest."),
+            ("Principal components", "The main ways the spike shapes differ. NEWT uses the first 3."),
+            ("k-means", "Groups points around k centeres (the × marks), each point joining its nearest."),
         ),
     },
     "comparison": {
@@ -273,18 +273,18 @@ TOPICS = {
     "cycles": {
         "title": "How Stimulus cycles work",
         "picture": _cycles_picture,
-        "text": "With a repeating stimulus, Argus cuts the chosen trials into single <b>cycles</b> and overlays them "
+        "text": "With a repeating stimulus, NEWT cuts the chosen trials into single <b>cycles</b> and overlays them "
                 "by stimulus <b>phase</b> instead of time. If the trial saved what was sent, it lines that up with the "
                 "recording; otherwise it matches the stimulus's shape against itself, then uses its rises through its "
                 "middle level. Or give the <b>repeat length</b>, or mark one on the Traces or Stimulus chart. Picked "
                 "groups show their average and picked "
-                "trials their own, with every cycle behind it coloured from first to last.",
+                "trials their own, with every cycle behind it colored from first to last.",
         "warning": "A fixed delay lands at a different phase at each frequency: 5 ms is 18° at 10 Hz but 90° at 50 Hz. "
                    "Cycles are stretched to line up, so compare timing between frequencies with care.",
         "glossary": (
             ("Cycle", "One repeat of the stimulus, from one rise through its middle to the next."),
             ("Phase", "How far through a cycle: 0° at the rise, 180° halfway, 360° at the next rise."),
-            ("Repeat length", "How long one repeat is. 0 lets Argus find it."),
+            ("Repeat length", "How long one repeat is. 0 lets NEWT find it."),
             ("Left out", "Repeats too unlike the rest to use, counted in the Stimulus title."),
             ("Skip first", "Leaves out the first cycles of each trial, while the response settles."),
             ("Spikes per phase", "A histogram of when in the cycle spikes happen, per cycle."),

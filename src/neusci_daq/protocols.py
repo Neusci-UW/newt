@@ -331,7 +331,7 @@ def template(wave: np.ndarray, out_rate: float, in_rate: float, pad_s: float = 0
 def find_stimulus(x: np.ndarray, tpl: np.ndarray) -> tuple[int, float]:
     """Where `tpl` best matches inside `x`: (index of the template's start, match 0–1).
 
-    Normalised cross-correlation, so it doesn't matter how strongly the stimulus
+    Normalized cross-correlation, so it doesn't matter how strongly the stimulus
     was recorded, or whether the input has an offset.
     """
     from scipy.signal import correlate

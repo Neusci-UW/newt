@@ -1,6 +1,6 @@
-"""Make Argus.app: a small Mac app that starts Argus from this folder's .venv, so the Dock
-and the app switcher say Argus and show its icon, instead of python3.12, and .argus files
-open in it with a double-click. Mac only: Windows runs Argus as before.
+"""Make NEWT.app: a small Mac app that starts NEWT from this folder's .venv, so the Dock
+and the app switcher say NEWT and show its icon, instead of python3.12, and .newt files
+open in it with a double-click. Mac only: Windows runs NEWT as before.
 
     .venv/bin/python tools/make_mac_app.py [--backend simulated] [--to ~/Applications]
 
@@ -21,7 +21,7 @@ ICONS = ROOT / "src" / "neusci_daq" / "icons"
 def icns(to: Path) -> None:
     """The app's icon, from the PNGs, with macOS's iconutil."""
     with tempfile.TemporaryDirectory() as tmp:
-        folder = Path(tmp) / "argus.iconset"
+        folder = Path(tmp) / "newt.iconset"
         folder.mkdir()
         for size in (16, 32, 128, 256, 512):
             shutil.copy(ICONS / f"icon_{size}.png", folder / f"icon_{size}x{size}.png")
@@ -34,31 +34,31 @@ def icns(to: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--backend", help="the backend to start with (default: the one in config.toml)")
-    ap.add_argument("--to", default=str(ROOT), help="the folder to put Argus.app in")
+    ap.add_argument("--to", default=str(ROOT), help="the folder to put NEWT.app in")
     args = ap.parse_args()
-    app = Path(args.to).expanduser() / "Argus.app"
+    app = Path(args.to).expanduser() / "NEWT.app"
     if app.exists():
         shutil.rmtree(app)
     (app / "Contents" / "MacOS").mkdir(parents=True)
     (app / "Contents" / "Resources").mkdir()
-    icns(app / "Contents" / "Resources" / "argus.icns")
+    icns(app / "Contents" / "Resources" / "newt.icns")
     with (app / "Contents" / "Info.plist").open("wb") as f:
-        plistlib.dump({"CFBundleName": "Argus", "CFBundleDisplayName": "Argus", "CFBundleExecutable": "Argus",
-                       "CFBundleIdentifier": "edu.uw.neuroscience.argus", "CFBundleIconFile": "argus",
+        plistlib.dump({"CFBundleName": "NEWT", "CFBundleDisplayName": "NEWT", "CFBundleExecutable": "NEWT",
+                       "CFBundleIdentifier": "edu.uw.neuroscience.newt", "CFBundleIconFile": "newt",
                        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0",
                        "NSHighResolutionCapable": True,
-                       "CFBundleDocumentTypes": [{"CFBundleTypeName": "Argus file", "CFBundleTypeRole": "Editor",
-                                                  "LSHandlerRank": "Owner", "CFBundleTypeIconFile": "argus",
-                                                  "LSItemContentTypes": ["edu.uw.neuroscience.argus.file"]}],
-                       "UTExportedTypeDeclarations": [{"UTTypeIdentifier": "edu.uw.neuroscience.argus.file",
-                                                       "UTTypeDescription": "Argus file",
+                       "CFBundleDocumentTypes": [{"CFBundleTypeName": "NEWT file", "CFBundleTypeRole": "Editor",
+                                                  "LSHandlerRank": "Owner", "CFBundleTypeIconFile": "newt",
+                                                  "LSItemContentTypes": ["edu.uw.neuroscience.newt.file"]}],
+                       "UTExportedTypeDeclarations": [{"UTTypeIdentifier": "edu.uw.neuroscience.newt.file",
+                                                       "UTTypeDescription": "NEWT file",
                                                        "UTTypeConformsTo": ["public.data", "public.zip-archive"],
-                                                       "UTTypeIconFile": "argus",
-                                                       "UTTypeTagSpecification": {"public.filename-extension": ["argus"]}}],
-                       "NSCameraUsageDescription": "Argus records video with each trial.",
-                       "NSMicrophoneUsageDescription": "Argus can record from an audio input."}, f)
+                                                       "UTTypeIconFile": "newt",
+                                                       "UTTypeTagSpecification": {"public.filename-extension": ["newt", "argus"]}}],
+                       "NSCameraUsageDescription": "NEWT records video with each trial.",
+                       "NSMicrophoneUsageDescription": "NEWT can record from an audio input."}, f)
     backend = f" --backend {shlex.quote(args.backend)}" if args.backend else ""
-    run = app / "Contents" / "MacOS" / "Argus"
+    run = app / "Contents" / "MacOS" / "NEWT"
     run.write_text(f"#!/bin/sh\ncd {shlex.quote(str(ROOT))}\n"
                    f"exec .venv/bin/python -m neusci_daq -c config.toml{backend} \"$@\"\n")
     run.chmod(0o755)

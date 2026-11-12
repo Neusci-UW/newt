@@ -398,7 +398,7 @@ class MultiAxis:
     """Overlaid traces on one plot, each with its own y axis by default.
 
     The first trace uses the plot's own (left) axis; each other one gets a view and an
-    axis on the right, in its colour. Every trace starts fitted to the plot's height, so
+    axis on the right, in its color. Every trace starts fitted to the plot's height, so
     they overlay as closely as they can. The wheel (Cmd) or a drag on the plot scales
     them all together; on a trace's own axis, it scales just that trace.
     With separate=False they all share the left axis.
@@ -411,7 +411,7 @@ class MultiAxis:
         self.axes: list[pg.AxisItem] = []     # the extra (right) axes
         self.items: list = []
         self._added: list = []                # items this put in the plot (not ones already there)
-        self._labels: list = []               # (axis, name, unit, colour) to restore after a restyle
+        self._labels: list = []               # (axis, name, unit, color) to restore after a restyle
         self._timer: QtCore.QTimer | None = None
         self._auto = True
         self._prev = self._last = tuple(plot.vb.viewRange()[1])
@@ -455,7 +455,7 @@ class MultiAxis:
         return [vb for vb in self.views if vb is not self.plot.vb]
 
     def recolor(self) -> None:
-        """Put the axes' colours and labels back (after a theme restyled the plot)."""
+        """Put the axes' colors and labels back (after a theme restyled the plot)."""
         for args in list(self._labels):
             self._label(*args, keep=False)
 

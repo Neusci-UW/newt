@@ -2,7 +2,7 @@
 
 A session is a folder of numbered trials (blocks), `block_001.h5`, `block_002.h5`, ...,
 one per Record press, with the files kept beside them (pages.json for the groups,
-trial_edits.json for edited comments and colours, the saved analysis, the exported
+trial_edits.json for edited comments and colors, the saved analysis, the exported
 `.mat`). These helpers find the trials and check whether a session can be appended to
 with the current config; trialfile.py reads and writes one trial.
 """
@@ -91,7 +91,7 @@ def append_check(folder: str | Path, cfg: Config) -> tuple[list[str], list[str]]
 
 
 def session_colors(folder: str | Path) -> dict[str, str]:
-    """Channel name -> colour, as last used in this session (later blocks win)."""
+    """Channel name -> color, as last used in this session (later blocks win)."""
     out: dict[str, str] = {}
     for b in list_blocks(folder):
         try:

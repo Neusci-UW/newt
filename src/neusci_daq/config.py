@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import simulation
-from .colours import fill_colors
+from .colors import fill_colors
 from .dsp import Calculation
 
 # USB-6003 limits (NI spec): one multiplexed ADC, 100 kS/s aggregate,
@@ -41,7 +41,7 @@ class Channel:
     offset: float = 0.0
     range: tuple[float, float] = USB6003_RANGE
     enabled: bool = True
-    color: str = ""               # "#rrggbb"; empty = next palette colour
+    color: str = ""               # "#rrggbb"; empty = next palette color
     width: float = 1.0            # trace thickness in px (display only)
 
     def to_units(self, volts):
@@ -69,7 +69,7 @@ class Config:
     stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
     # Simulated backend only: the cells it simulates and what each input records
     sim_network: simulation.Network = field(default_factory=simulation.default_network)
-    # Calculated channels (filters, arithmetic: see dsp.py), shown and analysed, never recorded
+    # Calculated channels (filters, arithmetic: see dsp.py), shown and analyzed, never recorded
     calculations: list = field(default_factory=list)
 
     @property

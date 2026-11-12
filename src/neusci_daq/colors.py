@@ -1,6 +1,6 @@
-"""Every colour the data is drawn in, in one place: the channels' palette, the units', the
-groups', the colour maps that run across groups and across a group's trials, and how a
-trace's colour is adjusted to stay visible on a white or black plot. (The window's own look
+"""Every color the data is drawn in, in one place: the channels' palette, the units', the
+groups', the color maps that run across groups and across a group's trials, and how a
+trace's color is adjusted to stay visible on a white or black plot. (The window's own look
 is in style.py, the plots' backgrounds in theme.py.)
 
 Plain hex strings throughout; the few functions that hand back QColors import Qt when called,
@@ -8,11 +8,15 @@ so the config and analysis code can use this module without it.
 """
 from __future__ import annotations
 
-# Trace colours, in the order new channels get them. Based on the Okabe-Ito
-# colour-blind-safe palette, ordered so the first few are bright on black.
+# Trace colors, in the order new channels get them. Based on the Okabe-Ito
+# color-blind-safe palette, ordered so the first few are bright on black.
 PALETTE = ("#E69F00", "#56B4E9", "#009E73", "#F0E442",
            "#D55E00", "#CC79A7", "#FFFFFF", "#3D8FD1")
 PALETTE_NAMES = ("Orange", "Sky blue", "Green", "Yellow", "Red-orange", "Pink", "White", "Blue")
+# what can be picked: the palette, then black (never given out on its own; on a black plot
+# it's drawn light, as white is drawn dark on a white one)
+CHOICES = PALETTE + ("#000000",)
+CHOICE_NAMES = PALETTE_NAMES + ("Black",)
 
 
 def normalize_color(c: str) -> str:
@@ -21,21 +25,21 @@ def normalize_color(c: str) -> str:
     if len(h) == 3:
         h = "".join(ch * 2 for ch in h)
     if len(h) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in h):
-        raise ValueError(f"{c!r} isn't a colour; use #rrggbb, e.g. #e69f00.")
+        raise ValueError(f"{c!r} isn't a color; use #rrggbb, e.g. #e69f00.")
     return "#" + h.lower()
 
 
 def color_label(c: str) -> str:
-    """'Orange' for palette colours, otherwise the hex code, for messages."""
+    """'Orange' for palette colors, otherwise the hex code, for messages."""
     c = normalize_color(c)
-    for p, name in zip(PALETTE, PALETTE_NAMES):
+    for p, name in zip(CHOICES, CHOICE_NAMES):
         if normalize_color(p) == c:
             return name.lower()
     return c
 
 
 def next_color(used) -> str:
-    """First palette colour not already used; cycles once all are taken."""
+    """First palette color not already used; cycles once all are taken."""
     used = {normalize_color(u) for u in used if u}
     for c in PALETTE:
         if normalize_color(c) not in used:
@@ -44,7 +48,7 @@ def next_color(used) -> str:
 
 
 def fill_colors(channels) -> None:
-    """Give every channel without a colour the next unused palette colour, in order."""
+    """Give every channel without a color the next unused palette color, in order."""
     for ch in channels:
         if ch.color:
             ch.color = normalize_color(ch.color)
@@ -52,22 +56,22 @@ def fill_colors(channels) -> None:
         if not ch.color:
             ch.color = next_color(c.color for c in channels)
 
-# Groups' colours: a palette in a different order from the channels' and units', so a group
+# Groups' colors: a palette in a different order from the channels' and units', so a group
 # doesn't look like a unit.
 GROUP_PALETTE = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#999999")
 
 
 def unit_color(u: int) -> str:
-    """Unit u's colour (0-based), until one is picked for it."""
+    """Unit u's color (0-based), until one is picked for it."""
     return PALETTE[u % len(PALETTE)]
 
 
 def group_color(g: int) -> str:
-    """Group g's colour from the palette (0-based)."""
+    """Group g's color from the palette (0-based)."""
     return GROUP_PALETTE[g % len(GROUP_PALETTE)]
 
 
-# -- colour maps ----------------------------------------------------------------------
+# -- color maps ----------------------------------------------------------------------
 MAPS = {
     "Viridis": ("#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"),
     "Plasma": ("#0d0887", "#7e03a8", "#cc4778", "#f89540", "#f0f921"),
@@ -94,7 +98,7 @@ def sample(name: str, f: float):
 
 
 def spread(style: str, color: str, n: int) -> list:
-    """How n trials in order are drawn (QColors), in a group of this colour."""
+    """How n trials in order are drawn (QColors), in a group of this color."""
     from pyqtgraph.Qt import QtGui
     out = []
     for k in range(n):
@@ -118,7 +122,7 @@ def _luminance(c) -> float:
 
 
 def display_color(color: str, mode: str) -> str:
-    """The colour to draw a trace in. On white, too-light colours are darkened
+    """The color to draw a trace in. On white, too-light colors are darkened
     until they reach about 3:1 contrast; on black, too-dark ones are lightened."""
     from pyqtgraph.Qt import QtGui
     c = QtGui.QColor(color)

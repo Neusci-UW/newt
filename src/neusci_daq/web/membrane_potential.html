@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Membrane Potential, Ion by Ion</title>
+<title>Exploring the membrane potential</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -43,17 +43,25 @@ html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.5;padding:24px 20px 48px}
 .wrap{max-width:2400px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
 header h1{font-family:var(--font-display);font-weight:600;font-size:26px;letter-spacing:-0.01em;margin:0 0 6px;text-wrap:balance}
-header p{margin:0;color:var(--muted);max-width:76ch}
+header p{margin:0;color:var(--muted);max-width:90ch}
+.pagesec{font-family:var(--font-display);font-size:22px;font-weight:600;letter-spacing:-0.01em;margin:8px 0 -6px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.intro{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:12px 16px;margin-top:12px;max-width:1500px}
+.introbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+.introbox ul{margin:0;padding-left:18px;font-size:13.5px}
+.introbox li::marker{color:var(--muted)}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.steps .chip{margin-right:6px}
 /* The simulation with the tabbed settings panel under it, and the two charts. Narrow: stacked, charts side by
    side. Wide: the charts get their own column, as wide as the window height lets both fit stacked; the
    simulation is capped so it also fits on screen, and the panel sits below it. */
 .lab{display:grid;gap:20px;align-items:start;grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "side" "charts"}
 #sim-stage{grid-area:stage}
-#sim-controls{grid-area:side;display:flex;flex-direction:column;gap:14px}
+.sidecol{grid-area:side;display:flex;flex-direction:column;gap:20px;min-width:0}
+#sim-controls{display:flex;flex-direction:column;gap:14px}
 .charts{grid-area:charts;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}
 @media (max-width:820px){.charts{grid-template-columns:1fr}}
 @media (min-width:1500px){
-  .lab{grid-template-columns:minmax(0,calc((100vh - 370px) * 1.78)) clamp(380px,calc((100vh - 550px) * 0.8),860px);
+  .lab{grid-template-columns:minmax(0,calc((100vh - 430px) * 1.78)) clamp(380px,calc((100vh - 550px) * 0.8),860px);
        grid-template-areas:"stage charts" "side charts";grid-template-rows:auto 1fr;justify-content:center}
   .charts{grid-template-columns:1fr}
 }
@@ -228,6 +236,18 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
 .qfill{position:absolute;top:0;bottom:0;width:0}
 #qInBar{right:50%}
 #qOutBar{left:50%}
+.units{display:flex;flex-direction:column;gap:8px}
+.unitcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:12px 32px}
+.unithead{margin:0 0 4px;font-size:13px;font-weight:600}
+.unitlist{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:0;font-size:13px}
+.unitlist dt{font-family:var(--font-mono);font-weight:500}
+.unitlist dd{margin:0;color:var(--muted)}
+/* "How to read" tabs on each graph */
+.charts .tabs button{padding:6px 10px;font-size:14px}
+.help h4{margin:0 0 4px;font-size:13.5px;font-weight:600}
+.help ul{margin:0 0 10px;padding-left:18px;font-size:13.5px;max-width:90ch}
+.help li{margin-bottom:8px}
+.help li::marker{color:var(--muted)}
 .tally{display:flex;flex-direction:column;gap:8px}
 [role=tabpanel][hidden]{display:none}
 .tallynums{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
@@ -247,12 +267,38 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
 <body>
 <div class="wrap">
 <header>
-  <h1>Membrane potential, ion by ion</h1>
-  <p>Each dot is an ion doing a random walk. Ions cross only through channels selective for them, and every ion feels the electric field made by all the others. Nothing here is told the Nernst or GHK equation, yet the voltage settles onto those values, and the excess charge gathers in thin layers on the two faces of the membrane, like charge on a capacitor.</p>
+  <h1>Exploring the membrane potential</h1>
+  <p>Why is the inside of a resting neuron about 70 mV below the outside? Watch that voltage build up from individual ions, then explain it with the equations below.</p>
+  <div class="intro">
+    <section class="introbox" aria-labelledby="goalsTitle">
+      <span class="sect-title" id="goalsTitle">You'll be able to</span>
+      <ul>
+        <li>explain how a tiny separation of charge makes the membrane potential (Q = C<sub>m</sub>V<sub>m</sub>)</li>
+        <li>predict the resting potential from concentrations and conductances, with the Nernst, chord conductance and GHK equations</li>
+        <li>explain why no net current flows at rest even though ions keep crossing</li>
+      </ul>
+    </section>
+    <section class="introbox" aria-labelledby="startTitle">
+      <span class="sect-title" id="startTitle">Start here</span>
+      <ol class="steps">
+        <li><button class="chip" data-try="preset:k">1 · K⁺ only</button> The voltage trace settles on the dashed E<sub>K</sub> line.</li>
+        <li><button class="chip" data-try="preset:rest">2 · Resting neuron</button> With Na⁺ and Cl⁻ channels open too, it settles between E<sub>K</sub> and E<sub>Na</sub>.</li>
+        <li><button class="chip" data-try="zoom">3 · Zoom to membrane</button> The voltage is made by a thin layer of charge on each face, Q = C<sub>m</sub>V<sub>m</sub>.</li>
+      </ol>
+    </section>
+  </div>
 </header>
 
+<h2 class="pagesec" id="simulation">Simulation</h2>
 <div class="lab">
 <section class="card stage" id="sim-stage">
+    <div class="tabs" role="tablist" aria-label="Simulation">
+      <button type="button" role="tab" id="tab-sim" aria-controls="pane-sim" aria-selected="true">Ion simulation</button>
+      <button type="button" role="tab" id="tab-simhelp" aria-controls="pane-simhelp" aria-selected="false" tabindex="-1">How to read</button>
+      <button type="button" role="tab" id="tab-simhow" aria-controls="pane-simhow" aria-selected="false" tabindex="-1">How it works</button>
+      <button type="button" role="tab" id="tab-notes" aria-controls="notes" aria-selected="false" tabindex="-1">Caveats</button>
+    </div>
+    <div class="stage" role="tabpanel" id="pane-sim" aria-labelledby="tab-sim">
     <div class="toolbar">
       <span class="sect-title">View</span>
       <button class="chip" id="zFit">Fit view (1×)</button>
@@ -274,27 +320,70 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
       <output id="speedo" for="speed"></output>
       <span class="runhint">slide left for slow motion: below 1 step per frame, ions glide between steps</span>
     </div>
+    </div>
+    <div class="help" role="tabpanel" id="pane-simhelp" aria-labelledby="tab-simhelp" hidden>
+      <ul>
+        <li><b>Dots:</b> each one is a single ion; the Key tab below shows which colour is which. Intracellular (inside the cell) is on the left, extracellular on the right.</li>
+        <li><b>Membrane:</b> the vertical band in the middle. Ions cross only through channels, each coloured by the ion it lets through; the teal blocks are Na⁺/K⁺ pumps.</li>
+        <li><b>Rings:</b> an ion that has just crossed the membrane.</li>
+        <li><b>Background tint:</b> the charge map, red where there is extra positive charge and blue where there is extra negative charge. At rest a thin blue layer lines the inside of the membrane and a red layer the outside: that is the charge Q that makes the voltage.</li>
+        <li><b>View:</b> zoom to the membrane to see those layers; zooming changes only the view, not what is simulated.</li>
+        <li><b>Speed:</b> steps per frame. Slide it left to watch single ions cross.</li>
+      </ul>
+    </div>
+    <div class="help" role="tabpanel" id="pane-simhow" aria-labelledby="tab-simhow" hidden>
+      <ul>
+        <li><b>Random steps:</b> every ion takes small random steps (Brownian motion, the source of diffusion). Steps are smaller inside channels than in the open solution.</li>
+        <li><b>Drift in the field:</b> on top of the random steps, each ion drifts in the electric field: cations toward negative regions, anions toward positive ones. The field is recomputed every step from the positions of all the ions, so every ion feels every other.</li>
+        <li><b>The membrane:</b> its oily core weakens electric fields far less than water does, so the same charge makes a much stronger field inside it. That is why most of the voltage drops across the membrane.</li>
+        <li><b>The charge layers:</b> extra charge is pulled toward the membrane by the opposite charge on the other side and spread out again by diffusion. The balance makes the thin layers, whose width is the Debye length.</li>
+        <li><b>No formulas in charge:</b> nothing in the code uses the Nernst or GHK equation to move ions. With one permeant ion the voltage still settles at its Nernst potential; with several, near the GHK value.</li>
+        <li><b>The patch:</b> the simulated piece of membrane wraps top to bottom, as part of a much longer membrane. The Ion count slider sets its length; a longer patch averages over more ions, so the graphs are steadier.</li>
+      </ul>
+    </div>
+    <div class="help" role="tabpanel" id="notes" aria-labelledby="tab-notes" hidden>
+      <ul>
+          <li>Fields only vary across the membrane (left to right). Ions do not collide, and there is no field along the membrane.</li>
+          <li>Both sides are infinite reservoirs: the far bulk on each side is held at fixed concentrations, the standard simplification for a real cell, where charging the membrane moves only about 1 ion in 100,000. So the pump here cannot build or restore gradients; what it shows is its current, and the leak current that balances it.</li><li>Real diffuse layers are about 1 nm thick. Here they are tens of pixels, so you can see them.</li>
+          <li>All channels are leak channels, always open. There are no voltage-gated channels or action potentials here; each ion's permeability is its number of channels.</li>
+          <li>It is 2D. Ions crowd slightly at busy channel mouths and the charge layers carry a few mV, so GHK is a close but not exact match when several ions are permeant.</li>
+        </ul>
+    </div>
   </section>
   <div class="charts">
     <section class="card stage" id="sim-profile">
-      <p class="sect-title">Charge and potential across the membrane</p>
-      <canvas id="profile" aria-label="Net charge per column and electric potential across the simulation"></canvas>
-      <div class="qbar" aria-label="Charge in each diffuse layer">
-        <span class="qlab"><span>Q<sub>in</sub></span> <b id="qInLab">—</b></span>
-        <div class="qtrack"><span class="qfill" id="qInBar"></span><span class="qfill" id="qOutBar"></span></div>
-        <span class="qlab"><b id="qOutLab">—</b> <span>Q<sub>out</sub></span></span>
+      <div class="tabs" role="tablist" aria-label="Charge chart">
+        <button type="button" role="tab" id="tab-prof" aria-controls="pane-prof" aria-selected="true">Charge and potential</button>
+        <button type="button" role="tab" id="tab-profhelp" aria-controls="pane-profhelp" aria-selected="false" tabindex="-1">How to read</button>
       </div>
-      <p class="caption">Bars: net charge. Curves and bar above: each layer's Q. Line: potential. Details in Key.</p>
+      <div class="stage" role="tabpanel" id="pane-prof" aria-labelledby="tab-prof">
+        <canvas id="profile" aria-label="Net charge per column and electric potential across the simulation"></canvas>
+        <div class="qbar" aria-label="Charge in each diffuse layer">
+          <span class="qlab"><span>Q<sub>in</sub></span> <b id="qInLab">—</b></span>
+          <div class="qtrack"><span class="qfill" id="qInBar"></span><span class="qfill" id="qOutBar"></span></div>
+          <span class="qlab"><b id="qOutLab">—</b> <span>Q<sub>out</sub></span></span>
+        </div>
+        <p class="caption">Across the membrane. Bars: net charge. Curves and bar above: each layer's Q. Line: potential.</p>
+      </div>
+      <div class="help" role="tabpanel" id="pane-profhelp" aria-labelledby="tab-profhelp" hidden>
+        <ul>
+          <li><b>Bars:</b> net charge in the solution in each 16 px column, averaged over recent steps. Red is extra positive charge, blue extra negative. The hatched bar over the membrane is the charge held inside the channels (mostly K⁺ near their inner end).</li>
+          <li><b>Curves:</b> an exponential with the Debye length λ (scale bar at the bottom), scaled so its shaded area equals the charge measured out to 3λ (dashed lines). That area is each layer's charge Q.</li>
+          <li><b>Q bar:</b> the two layers' charges side by side, inside to the left and outside to the right. At rest they are equal and opposite.</li>
+          <li><b>Line:</b> electric potential, with the extracellular side at 0 mV. Most of the drop is the steep straight section across the membrane.</li>
+          <li><b>Tinted band:</b> the part of the box shown in the simulation view when you zoom in.</li>
+        </ul>
+      </div>
     </section>
     <section class="card stage" id="sim-trace">
       <div class="tabs" role="tablist" aria-label="Trace">
-        <button type="button" role="tab" id="tab-vm" aria-controls="pane-vm" aria-selected="true">Membrane potential</button>
-        <button type="button" role="tab" id="tab-tally" aria-controls="tallyBox" aria-selected="false" tabindex="-1">Pump and leak current</button>
+        <button type="button" role="tab" id="tab-vm" aria-controls="pane-vm" aria-selected="true">Voltage</button>
+        <button type="button" role="tab" id="tab-tally" aria-controls="tallyBox" aria-selected="false" tabindex="-1">Pump current</button>
+        <button type="button" role="tab" id="tab-tracehelp" aria-controls="pane-tracehelp" aria-selected="false" tabindex="-1">How to read</button>
       </div>
       <div class="stage" role="tabpanel" id="pane-vm" aria-labelledby="tab-vm">
-        <p class="sect-title">Membrane potential, inside relative to outside</p>
         <canvas id="trace" aria-label="Voltage trace with Nernst and GHK reference lines"></canvas>
-        <p class="caption">Each point averages 100 steps. Dashed: Nernst potentials. Dotted: GHK.</p>
+        <p class="caption">Inside relative to outside, each point averaging 100 steps. Dashed: Nernst potentials. Dotted: GHK.</p>
       </div>
       <div class="tally" role="tabpanel" id="tallyBox" aria-labelledby="tab-tally" hidden>
         <p class="sect-title">Charge carried across the membrane since the pump was turned on</p>
@@ -308,14 +397,29 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
         <p class="caption" id="tRate"></p>
         <p class="caption">Charges counted since the pump was turned on. Each pump cycle carries one net charge out; the leak channels carry charge back in. Once V<sub>m</sub> settles the two lines climb in parallel: at rest the leak current is equal and opposite to the pump current, so the net current is zero even though ions keep crossing.</p>
       </div>
+      <div class="help" role="tabpanel" id="pane-tracehelp" aria-labelledby="tab-tracehelp" hidden>
+        <h4>Membrane potential</h4>
+        <ul>
+          <li><b>Black line:</b> the membrane potential, inside relative to outside. Each point averages 100 steps; the chart shows the last 50,000.</li>
+          <li><b>Dashed lines:</b> each ion's Nernst potential, the voltage at which that ion alone would be at equilibrium.</li>
+          <li><b>Dotted line:</b> the GHK prediction from the current channel numbers and concentrations.</li>
+          <li>The trace settles between the dashed lines, nearest the ion with the most channels. The small wobble is noise from the limited number of ions.</li>
+        </ul>
+        <h4>Pump and leak current</h4>
+        <ul>
+          <li><b>Solid line:</b> total charge the pump has carried out since it was turned on (one charge per cycle).</li>
+          <li><b>Dashed line:</b> net charge the leak channels have carried back in.</li>
+          <li><b>Shaded gap:</b> charge added to the membrane. Once the voltage settles the gap stops growing and the lines run parallel: the leak current is equal and opposite to the pump current.</li>
+        </ul>
+      </div>
     </section>
   </div>
+  <div class="sidecol">
   <aside class="card side" id="sim-controls">
     <div class="tabs" role="tablist" aria-label="Settings and notes">
       <button type="button" role="tab" id="tab-key" aria-controls="pane-key" aria-selected="true">Key</button>
       <button type="button" role="tab" id="tab-ions" aria-controls="pane-ions" aria-selected="false" tabindex="-1">Ions</button>
       <button type="button" role="tab" id="tab-model" aria-controls="pane-model" aria-selected="false" tabindex="-1">Model</button>
-      <button type="button" role="tab" id="tab-notes" aria-controls="notes" aria-selected="false" tabindex="-1">Notes</button>
     </div>
     <div class="panel" role="tabpanel" id="pane-key" aria-labelledby="tab-key">
     <div class="legend" aria-label="Key">
@@ -336,12 +440,6 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
         <span class="sect-title">Charge map</span>
         <div><div class="lbar"></div><div class="lticks"><span>net −</span><span>0</span><span>net +</span></div></div>
         <span class="caption">Each ion's charge spread as a Gaussian and summed.</span>
-      </div>
-      <div class="lgrp">
-        <span class="sect-title">Charge and potential chart</span>
-        <span class="caption">Bars: net charge in the solution in each 16 px column, averaged over recent steps. The hatched bar over the membrane is the charge held inside the channels (mostly K⁺ near their inner end).</span>
-        <span class="caption">Curves: an exponential with the Debye length λ, scaled so its shaded area equals the charge measured out to 3λ (dashed lines); that area is each layer's Q.</span>
-        <span class="caption">Line: electric potential, extracellular side at 0 mV. The tinted band is the part of the box in view.</span>
       </div>
     </div>
     <p class="caption">Each channel has a selectivity filter at its outer mouth. The sliders set how many of each there are.</p>
@@ -409,34 +507,41 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
         <label class="check" for="chargeColor"><input type="checkbox" id="chargeColor">Color ions by charge sign (red +, blue −)</label>
       </fieldset>
     </div>
-    <div class="panel notes" role="tabpanel" id="notes" aria-labelledby="tab-notes" hidden>
-    <div>
-      <h2>What the model does</h2>
-      <ul>
-        <li>Every ion takes random Brownian steps, smaller inside channels than in the bulk solutions (the step size changes smoothly near the membrane, with the drift correction that keeps equilibrium exact). On top of that it drifts in the local electric field, which comes from all charges to its left (a 1D Poisson solve each step, with the bath electrode at the right wall as ground).</li>
-        <li>The membrane has a much lower dielectric constant than water, so the same charge makes a much steeper field inside it. That is why most of the voltage drops across the membrane.</li>
-        <li>Excess charge is pulled toward the membrane by its partner on the other side and spread out by diffusion. The balance gives the diffuse layers whose width is the Debye length.</li>
-        <li>With one permeable ion, the voltage between the two bulk solutions stops at that ion's Nernst potential. With several, it settles near the GHK value.</li>
-        <li>The simulated patch wraps top to bottom, as a piece of a much longer membrane, and its length is set by the Ion count slider. Capacitance is set per length of membrane, so the voltage keeps its meaning as the patch grows or shrinks; a longer patch averages over more ions, so the graphs are steadier.</li>
-      </ul>
-    </div>
-    <div>
-      <h2>What it simplifies</h2>
-      <ul>
-        <li>Fields only vary across the membrane (left to right). Ions do not collide, and there is no field along the membrane.</li>
-        <li>Both sides are infinite reservoirs: the far bulk on each side is held at fixed concentrations, the standard simplification for a real cell, where charging the membrane moves only about 1 ion in 100,000. So the pump here cannot build or restore gradients; what it shows is its current, and the leak current that balances it.</li><li>Real diffuse layers are about 1 nm thick. Here they are tens of pixels, so you can see them.</li>
-        <li>All channels are leak channels, always open. There are no voltage-gated channels or action potentials here; each ion's permeability is its number of channels.</li>
-        <li>It is 2D. Ions crowd slightly at busy channel mouths and the charge layers carry a few mV, so GHK is a close but not exact match when several ions are permeant.</li>
-      </ul>
-    </div>
-    </div>
   </aside>
+  <section class="card units" id="units" aria-labelledby="unitsTitle">
+    <span class="sect-title" id="unitsTitle">Units</span>
+    <div class="unitcols">
+      <div>
+        <p class="unithead">Real units: sliders, calculator and theory</p>
+        <dl class="unitlist">
+          <dt>mV</dt><dd>millivolts, for voltage. V<sub>m</sub> is the inside measured relative to the outside, so a resting neuron sits near −70 mV.</dd>
+          <dt>mM</dt><dd>millimolar (millimoles per litre), for concentration. A typical cell has about 140 mM K⁺ inside and 5 mM outside.</dd>
+          <dt>mS/cm²</dt><dd>millisiemens per cm² of membrane, for conductance, how easily current flows (1/resistance). One siemens passes one amp per volt, from Ohm's law.</dd>
+          <dt>µF/cm²</dt><dd>microfarads per cm², for membrane capacitance, the charge stored per volt. Real membranes are about 1 µF/cm².</dd>
+          <dt>nC/cm²</dt><dd>nanocoulombs per cm², for the charge on the membrane: Q (nC/cm²) = C<sub>m</sub> (µF/cm²) × V<sub>m</sub> (mV).</dd>
+          <dt>°C</dt><dd>temperature, which sets RT/F: 25.7 mV at 25 °C, 26.7 mV at 37 °C.</dd>
+          <dt>P</dt><dd>permeability in the calculator, with no units: only the ratios between ions matter, so K⁺ is usually set to 1.</dd>
+        </dl>
+      </div>
+      <div>
+        <p class="unithead">Simulation units</p>
+        <dl class="unitlist">
+          <dt>e</dt><dd>elementary charge, the charge of one K⁺ or Na⁺ ion (Cl⁻ carries −1 e); 1 e = 1.6 × 10⁻¹⁹ C. The charge chart, the Q bar and the pump tally count charge in ions this way.</dd>
+          <dt>px</dt><dd>pixels, the simulation's unit of distance. It is not to scale: the Debye length is 40 px here but about 0.8 nm in a real cell, so the charge layers are drawn thick enough to see.</dd>
+          <dt>steps</dt><dd>the simulation's unit of time: in each step every ion takes one random move. Steps are not tied to real seconds; the trace, the pump rate and the speed all count them.</dd>
+          <dt>e/mV</dt><dd>the simulation's membrane capacitance: extra charges, per 100 px of membrane, needed to change the voltage by 1 mV. The same idea as µF/cm², charge per volt per area, in simulation units.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+  </div>
   </div>
 
 
 
 
 
+  <h2 class="pagesec" id="theory-section">Theory</h2>
   <section class="card ghk" id="ghk-equation">
     <div class="deriv" id="ghk-intro">
       <h2>What sets the membrane potential</h2>
@@ -656,7 +761,7 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
         <aside class="try">
           <span class="sect-title">Try it</span>
           <p><button class="chip" data-try="model:chord">Chord model in the calculator</button> The voltage does not change when you switch: the conductances shown are the chord conductances at V<sub>m</sub>. Now drag [K⁺]ₒ, then switch back to GHK and compare.</p>
-          <p><button class="chip" data-try="pump">Turn on the pump</button> The Pump and leak current tab beside the voltage trace counts the charge the pump carries out and the charge the leak channels carry back in. At rest they climb together: the leak current is equal and opposite to the pump current.</p>
+          <p><button class="chip" data-try="pump">Turn on the pump</button> The Pump current tab beside the voltage trace counts the charge the pump carries out and the charge the leak channels carry back in. At rest they climb together: the leak current is equal and opposite to the pump current.</p>
         </aside>
       </div>
       </div>
@@ -711,6 +816,7 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
           <div class="tabs" role="tablist" aria-label="Calculator charts">
             <button type="button" role="tab" id="tab-giv" aria-controls="pane-giv" aria-selected="true">Current vs voltage</button>
             <button type="button" role="tab" id="tab-gq" aria-controls="pane-gq" aria-selected="false" tabindex="-1">Charge vs voltage</button>
+            <button type="button" role="tab" id="tab-ghelp" aria-controls="pane-ghelp" aria-selected="false" tabindex="-1">How to read</button>
           </div>
           <div class="stage" role="tabpanel" id="pane-giv" aria-labelledby="tab-giv">
             <canvas id="gChart" aria-label="Current-voltage curves for each ion and their sum"></canvas>
@@ -720,6 +826,20 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
           <div class="stage" role="tabpanel" id="pane-gq" aria-labelledby="tab-gq" hidden>
             <canvas id="gQChart" aria-label="Charge on the membrane against voltage, Q = Cm V, with the steady state marked"></canvas>
             <p class="caption" id="gQCap"></p>
+          </div>
+          <div class="help" role="tabpanel" id="pane-ghelp" aria-labelledby="tab-ghelp" hidden>
+            <h4>Current vs voltage</h4>
+            <ul>
+              <li><b>Coloured curves:</b> one ion's current at each membrane voltage; positive is outward. Each crosses zero at that ion's Nernst potential (the dot).</li>
+              <li><b>GHK model:</b> the curves bend, because current flows more easily from the side with more ions. The faint dashed straight lines are chords; their slopes are the chord conductances.</li>
+              <li><b>Chord model:</b> each current is a straight line, I = G(V − E): Ohm's law with the driving force V − E.</li>
+              <li><b>Bold black curve:</b> the total current. Where it crosses zero (the ring) no net current flows: that is the resting potential.</li>
+            </ul>
+            <h4>Charge vs voltage</h4>
+            <ul>
+              <li><b>Line:</b> Q = C<sub>m</sub>V, the charge on the inside face of the membrane at each voltage. Its slope is C<sub>m</sub>.</li>
+              <li><b>Ring:</b> the resting potential and the charge it takes. <b>Dots:</b> each ion's Nernst potential on the same line.</li>
+            </ul>
           </div>
           <div class="btns">
             <button id="gFromSim">Copy from simulation</button>
@@ -2022,7 +2142,7 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
   const into = id => $(id).scrollIntoView({ behavior: 'smooth', block: 'center' });
   document.querySelectorAll('[data-try]').forEach(b => b.addEventListener('click', () => {
     const [what, arg] = b.dataset.try.split(':');
-    if (what === 'preset') { document.querySelector(`[data-preset="${arg}"]`).click(); setRunning(true); into('sim-trace'); }
+    if (what === 'preset') { document.querySelector(`[data-preset="${arg}"]`).click(); showTab($('tab-sim')); showTab($('tab-vm')); setRunning(true); into('sim-trace'); }
     else if (what === 'model') { setModel(arg); into('ghk-calc'); }
     else if (what === 'show') into(arg);
     else if (what === 'cap') {   // the Membrane C slider is in mV per ion, the inverse of capacitance
@@ -2030,7 +2150,7 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
       q.value = Math.max(+q.min, Math.min(+q.max, Math.round(v))); q.dispatchEvent(new Event('input'));
       setRunning(true); into('sim-profile');
     }
-    else if (what === 'zoom') { $('zMem').click(); into('sim-stage'); }
+    else if (what === 'zoom') { showTab($('tab-sim')); $('zMem').click(); setRunning(true); into('sim-stage'); }
     else if (what === 'pump') {
       if (!$('pump').checked) $('pump').click();
       showTab($('tab-tally')); setRunning(true); into('sim-trace');
@@ -2076,7 +2196,9 @@ table.cmp td:first-child{color:var(--muted);white-space:nowrap}
       ghkIntro: { label: 'Membrane potential equations', sel: '#ghk-intro' },
       calc: { label: 'GHK calculator', sel: '#ghk-calc' },
       theory: { label: 'Theory tabs', sel: '#theory' },
-      notes: { label: 'Notes on the model', sel: '#notes' },
+      notes: { label: 'Simulation caveats', sel: '#notes' },
+      simHow: { label: 'How the simulation works', sel: '#pane-simhow' },
+      units: { label: 'Units', sel: '#units' },
     },
     actions: { pause: () => setRunning(false) },
   };

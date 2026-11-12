@@ -12,7 +12,7 @@ def test_page_ships_with_the_package():
     assert page.exists(), page
     html = page.read_text(encoding="utf-8")
     assert html.lstrip().startswith("<!DOCTYPE html>")
-    assert "<title>Membrane Potential, Ion by Ion</title>" in html
+    assert "<title>Exploring the membrane potential</title>" in html
     assert "vendor/mathjax/tex-svg.js" in html          # local MathJax first, online copy as fallback
 
 

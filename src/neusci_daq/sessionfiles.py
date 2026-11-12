@@ -16,6 +16,7 @@ from . import matfile
 from . import session
 from . import trialfile
 from . import protocols as protocolsmod
+from . import breadboard as bb
 from . import simulation as sim
 from . import newtfile
 from .channels import ChannelRow
@@ -479,12 +480,13 @@ class SessionFilesMixin:
 
     def app_state(self) -> dict:
         """What's on screen and set, for a .newt file: the tabs, Analysis, the stimulus, the
-        protocol, and the simulated network."""
+        protocol, and the simulated network and breadboard."""
         d = {"version": newtfile.VERSION, "tabs": {"shown": list(self.tabs.shown), "layout": self.tabs.layout_mode},
              "analysis": self.analysis_page.app_state(), "stimulus": self.stimulus.to_dict(),
              "protocol": self.trials_page.protocol.to_dict()}
         if self.cfg.backend == "simulated":
             d["sim"] = dataclasses.asdict(self.cfg.sim_network)
+            d["board"] = dataclasses.asdict(self.cfg.sim_breadboard)
         return d
 
     def restore_app_state(self, d: dict) -> None:
@@ -508,6 +510,13 @@ class SessionFilesMixin:
                 self.cfg.sim_network = sim.network_from_dict(d["sim"])
                 self.sim_page.load()
             part("the simulation", network)
+        if "board" in d and self.cfg.backend == "simulated" and getattr(self, "board_page", None) is not None:
+            def board():
+                b = bb.board_from_dict(d["board"])
+                bb.validate(b)
+                self.cfg.sim_breadboard = b
+                self.board_page.load()
+            part("the breadboard", board)
         part("Analysis", lambda: self.analysis_page.restore_app_state(d["analysis"]))
 
         def tabs():

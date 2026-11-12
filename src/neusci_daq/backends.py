@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from . import breadboard as bb
 from . import simulation as sim
 from .config import Config
 
@@ -89,8 +90,9 @@ class Backend:
 class SimulatedBackend(Backend):
     """Fake recordings for developing and teaching without hardware: a small network
     of integrate-and-fire cells, each input recording one of them (see
-    simulation.py, and the Simulation tab). Settings changed while running apply
-    from the next chunk."""
+    simulation.py, and the Neural network simulator page), or a breadboard circuit, an
+    input a probe is set to recording its node (breadboard.py). Settings changed while
+    running apply from the next chunk."""
 
     _pending = None    # (monitor input, waveform at the input rate) from SimulatedOutput
 
@@ -99,6 +101,8 @@ class SimulatedBackend(Backend):
         self._stim = None             # (monitor input, waveform, position) being played
         self._net = None              # NetworkState, made on the first chunk
         self._net_cfg = None          # the settings it was made from
+        self._board = None            # breadboard.BoardState, made when a probe first records
+        self._board_cfg = None
         self._tail: dict[str, np.ndarray] = {}    # per input: spike samples past the last chunk
         self._spike_log: list[tuple[float, int]] = []   # (time s, cell) of recent spikes
         self._time = 0.0
@@ -130,6 +134,18 @@ class SimulatedBackend(Backend):
             self._net.configure(net)
         self._net_cfg = net
         return self._net
+
+    def _breadboard(self, fs: float) -> bb.BoardState:
+        board = self.cfg.sim_breadboard                # may be replaced while running
+        if self._board is None or self._board.dt != 1.0 / fs:
+            self._board = bb.BoardState(board, 1.0 / fs)
+        elif board is not self._board_cfg:
+            try:
+                self._board.configure(board)
+            except ValueError:                         # the page checks first; keep the old circuit
+                pass
+        self._board_cfg = board
+        return self._board
 
     def _record(self, rec: sim.Recording, cell: sim.Cell, v_mv: np.ndarray, spikes_s: list[float],
                 t: np.ndarray, fs: float) -> np.ndarray:
@@ -199,10 +215,19 @@ class SimulatedBackend(Backend):
                 seg = w[pos:pos + cs]
                 stim[:len(seg)] = seg
                 self._stim = None if pos + cs >= len(w) else (monitor, w, pos + cs)
+            # breadboard probes: stepped only while one records, driven by the same stimulus
+            probes = {p.input: p for p in self.cfg.sim_breadboard.probes() if p.input}
+            board_v = {}
+            if probes:
+                tr = self._breadboard(fs).run(stim, [p.a for p in probes.values()])
+                board_v = dict(zip(probes, tr))
             data = np.empty((len(self.cfg.channels), cs))
             for i, ch in enumerate(self.cfg.channels):
                 if ch.physical == self.cfg.stim_monitor:
                     data[i] = 0.002 * self._rng.standard_normal(cs) + stim    # a clean wire
+                    continue
+                if ch.physical in board_v:
+                    data[i] = board_v[ch.physical] + probes[ch.physical].noise_v * self._rng.standard_normal(cs)
                     continue
                 rec = sim.recording_for(net_cfg, ch.physical)
                 c = min(rec.cell, len(net_cfg.cells) - 1)

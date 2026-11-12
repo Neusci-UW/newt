@@ -247,6 +247,8 @@ class StimulatorMixin:
         self.stim_page.sync()
         if self.sim_page:
             self.sim_page.sync()
+        if getattr(self, "board_page", None):
+            self.board_page.sync()
         self.trials_page.sync()
         name = next((r.ch.name for r in self.rows if r.ch.physical == phys), "") if phys else ""
         if name and self._stim_key() is not None:

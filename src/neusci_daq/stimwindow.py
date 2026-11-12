@@ -471,7 +471,7 @@ class StimPage(QtWidgets.QWidget):
                 if driven else "⚡ Simulated: <b>no cell</b> receives the stimulus yet.")
         if self.main.stimulus2 is not None:
             what += f" Only {cfg.stim_output}'s: {self.main.second_output} isn't simulated."
-        self.sim_note.setText(f"{what} <a href='sim'>Choose cells on the Simulation tab</a>")
+        self.sim_note.setText(f"{what} <a href='sim'>Choose cells on the Neural network simulator page</a>")
 
     def _monitor_picked(self):
         phys = self.monitor.currentData() or ""

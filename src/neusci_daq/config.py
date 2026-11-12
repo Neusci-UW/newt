@@ -7,7 +7,7 @@ import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import simulation
+from . import breadboard, simulation
 from .colors import fill_colors
 from .dsp import Calculation
 
@@ -69,6 +69,7 @@ class Config:
     stim_scale: float = 1.0       # stim_units per volt at the output; levels are still stored in volts
     # Simulated backend only: the cells it simulates and what each input records
     sim_network: simulation.Network = field(default_factory=simulation.default_network)
+    sim_breadboard: breadboard.Board = field(default_factory=breadboard.default_board)
     # Calculated channels (filters, arithmetic: see dsp.py), shown and analyzed, never recorded
     calculations: list = field(default_factory=list)
 
@@ -119,6 +120,7 @@ def load(path: str | Path) -> Config:
         stim_units=str(st.get("units", "V")).strip() or "V",
         stim_scale=float(st.get("scale", 1.0)),
         sim_network=simulation.from_toml(sim),
+        sim_breadboard=breadboard.from_toml(sim),
         calculations=[Calculation(str(c.get("name", "")).strip(), str(c.get("formula", "")).strip(),
                                   str(c.get("unit", "")).strip()) for c in raw.get("calculations", [])],
     ).with_channels(chans)
@@ -222,6 +224,8 @@ def dumps(cfg: Config) -> str:
         lines += ["", "[[calculations]]", f"name = {_s(c.name)}", f"formula = {_s(c.formula)}", f"unit = {_s(c.unit)}"]
     if cfg.sim_network != simulation.default_network():      # only when it's been changed
         lines += ["", "[simulated]"] + simulation.to_toml_lines(cfg.sim_network)
+    if cfg.sim_breadboard != breadboard.default_board():
+        lines += breadboard.to_toml_lines(cfg.sim_breadboard)
     for c in cfg.channels + cfg.spare_channels:
         lines += ["", "[[channels]]",
                   f"physical = {_s(c.physical)}",

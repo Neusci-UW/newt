@@ -1,5 +1,5 @@
 """What `--backend simulated` records: a small network of cells, set on the
-Simulation tab and saved in the config's [simulated] section.
+Neural network simulator page and saved in the config's [simulated] section.
 
 The network is 1-10 leaky integrate-and-fire cells:
 

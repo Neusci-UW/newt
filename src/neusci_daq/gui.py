@@ -53,6 +53,7 @@ from .trialsbrowser import TrialsBrowser
 from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
 from .simpage import SimPage
+from .breadpage import BreadboardPage
 from .membranepage import RC_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
@@ -371,6 +372,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
         # What the fake recording contains: only with the simulated backend.
         self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
+        self.board_page = BreadboardPage(self) if self.cfg.backend == "simulated" else None
         # Ions crossing a membrane, Nernst and GHK: a teaching page, always available.
         self.membrane_page = MembranePage(self)
         # The membrane as an RC circuit, then the same charging done by ions.
@@ -383,12 +385,14 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("stim", "Stimulator", self.stim_page),
             ("trials", "Protocols", self.trials_page),
             ("analysis", "Analysis", self.analysis_page),
-        ] + ([("sim", "Simulation", self.sim_page)] if self.sim_page else [])
+        ] + ([("sim", "Neural network simulator", self.sim_page)] if self.sim_page else [])
+          + ([("board", "Breadboard simulator", self.board_page)] if self.board_page else [])
           + [("membrane", "Membrane potential", self.membrane_page),
              ("rc", "RC circuit", self.rc_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
             ("analysis", "Analysis", ["analysis"]),
-            ("sim", "Simulation", ["sim", "membrane", "rc"]),
+            ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
+            ("lessons", "Lessons", ["membrane", "rc"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -549,6 +553,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.trials_page.apply_theme(mode)
         if getattr(self, "sim_page", None):
             self.sim_page.apply_theme(mode)
+        if getattr(self, "board_page", None):
+            self.board_page.apply_theme(mode)
         if getattr(self, "membrane_page", None):
             self.membrane_page.apply_theme(mode)
         if getattr(self, "rc_page", None):

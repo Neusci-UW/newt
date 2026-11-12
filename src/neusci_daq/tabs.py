@@ -1,4 +1,4 @@
-"""Tabs across the top (Acquisition, Analysis, Simulation), some with sub-pages
+"""Tabs across the top (Acquisition, Analysis, Data Simulation, Lessons), some with sub-pages
 under them (Acquisition: Record, Stimulator, Trials), and an optional split: two
 pages side by side or one above the other.
 

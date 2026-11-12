@@ -220,6 +220,8 @@ class ChannelSetupMixin:
         self._sync_setup_controls()
         if self.sim_page:
             self.sim_page.sync()          # inputs and their channel names
+        if getattr(self, "board_page", None):
+            self.board_page.sync()
         if running and hardware_changed and not self.btn_run.isChecked():
             self.btn_run.setChecked(True)
         if what == "channels":

@@ -34,7 +34,7 @@ Programs referred to:
 | Action potential detection (threshold or bimodal) and sorting (PCA + k-means) | Spike2 WaveMark, Backyard Brains, SpikeInterface | ✅ Analysis › Spike Sorting |
 | Raster, rate across the session, ISI histogram, PSTH, spike-triggered average | Spike2, LabChart Spike Histogram module | ✅ Analysis |
 | Blocks grouped by stimulus, as named pages | Spike2 and Clampfit only by hand | ✅ Blocks panel, Analysis › Show |
-| Simulated neurons, with tunable synapses between them | NEURON, Brian2 (much simpler here) | ✅ Simulation tab |
+| Simulated neurons, with tunable synapses between them | NEURON, Brian2 (much simpler here) | ✅ Neural network simulator page |
 
 ## Suggested next
 

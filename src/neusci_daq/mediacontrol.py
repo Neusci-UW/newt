@@ -202,7 +202,7 @@ class MediaMixin:
             a.setToolTip(tip)
             group.addAction(a)
         add("NI DAQ (USB-6003)", "nidaqmx", tip="The National Instruments DAQ, through NI-DAQmx")
-        add("Simulated cells", "simulated", tip="The simulated network (Simulation tab): no hardware")
+        add("Simulated cells", "simulated", tip="The simulated network (Neural network simulator page): no hardware")
         m.addSeparator()
         if audio.available():
             m.addAction(audio.available()).setEnabled(False)

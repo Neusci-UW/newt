@@ -23,7 +23,7 @@ def tab_texts(bar):
 def test_starts_on_acquisition_record_with_sub_pages(win):
     assert shown(win) == ["acq"]
     pane = win.tabs.panes[0]
-    assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "Simulation"]
+    assert tab_texts(pane.bar) == ["Acquisition", "Analysis"] + (["Data Simulation"] if win.sim_page else []) + ["Lessons"]
     assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Protocols"]
     assert pane.sub_bar.currentIndex() == 0 and not pane.sub_head.isHidden()
 
@@ -891,7 +891,7 @@ def test_tall_tabs_fit_a_short_laptop_screen(app, tmp_path, tab, scale):
     win._ask_unsaved = lambda: "discard"
     try:
         if tab == "sim" and not win.sim_page:
-            pytest.skip("no Simulation tab with this backend")
+            pytest.skip("no Neural network simulator page with this backend")
         win.resize(1024, 560)
         win.show()
         win.tabs.pick(0, tab)

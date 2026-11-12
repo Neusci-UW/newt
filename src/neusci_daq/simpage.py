@@ -1,6 +1,6 @@
-"""The Simulation tab (only with --backend simulated): the network of cells the
-simulated backend records from, the synapses between them, and which cell each
-input records.
+"""The Neural network simulator page, under Data Simulation (only with --backend
+simulated): the network of cells the simulated backend records from, the synapses
+between them, and which cell each input records.
 
 Changes apply straight away, while recording too, and Setup › Save channel setup
 writes them to the config's [simulated] section. See simulation.py for the model.

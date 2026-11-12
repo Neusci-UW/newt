@@ -18,7 +18,7 @@ def test_page_ships_with_the_package():
 
 def test_tab_is_under_simulation(win):
     assert win.tabs.pages["membrane"] is win.membrane_page
-    assert win.tabs.group_of["membrane"] == "sim"
+    assert win.tabs.group_of["membrane"] == "lessons"
 
 
 def test_tab_shows_the_page_or_explains_what_to_install(app, win):
@@ -46,7 +46,7 @@ def test_rc_page_ships_and_is_under_simulation(app, win):
     html = membranepage.RC_PAGE.read_text(encoding="utf-8")
     assert "<title>RC Circuit and Membrane</title>" in html
     assert win.tabs.pages["rc"] is win.rc_page
-    assert win.tabs.group_of["rc"] == "sim"
+    assert win.tabs.group_of["rc"] == "lessons"
     win.show()
     win.tabs.pick(0, "rc")
     pump(app, 0.3)

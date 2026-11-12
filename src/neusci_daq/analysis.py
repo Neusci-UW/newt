@@ -420,13 +420,17 @@ def block_rate(events: "Events", n_blocks: int, end_s: float, bin_s: float):
     return edges, out
 
 
-def stimulus_times(y: np.ndarray, fs: float) -> np.ndarray:
-    """Onsets (s) of the pulses on a stimulus channel: where it rises past half its
-    largest value, at most one per millisecond. None if it's only noise."""
-    d = np.abs(np.asarray(y, float) - np.median(y))
-    if not d.size or d.max() < 10 * max(noise_sd(y), 1e-12):
+def stimulus_times(y: np.ndarray, fs: float, one_way: bool = False) -> np.ndarray:
+    """Onsets (s) of the pulses on a stimulus channel: where it moves past half its
+    largest swing from the baseline, at most one per millisecond. Empty if it's only
+    noise. A sine's peaks and troughs both count, unless `one_way`: then only the
+    swings the way its largest one goes (once a cycle)."""
+    y = np.asarray(y, float)
+    d = y - np.median(y) if y.size else y
+    a = np.abs(d)
+    if not a.size or a.max() < 10 * max(noise_sd(y), 1e-12):
         return np.empty(0)
-    on = d > 0.5 * d.max()
+    on = (np.sign(d[np.argmax(a)]) * d if one_way else a) > 0.5 * a.max()
     rises = np.flatnonzero(np.diff(np.r_[0, on.astype(np.int8)]) == 1)
     out, last = [], -np.inf
     for i in rises:

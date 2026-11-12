@@ -309,6 +309,10 @@ def test_comparison_traces_derivatives_and_triggered_averages(app, win):
     assert n_stim >= 6
     peak_bin = edges[np.argmax(rate)]                                # its left edge
     assert 0 <= peak_bin < 30                                        # fires just after each stimulus
+    psth = ap.chart("Stimulus-triggered rate")
+    psth.align.setCurrentIndex(psth.align.findData("pulse"))         # single pulses: every pulse is the same
+    assert f"({n_stim} stimuli" in psth.plot.getPlotItem().titleLabel.text
+    assert psth.state()["fields"]["align"] == "pulse"
     ap.chart("Spike-triggered average").sta_channel.setCurrentIndex(ap.chart("Spike-triggered average").sta_channel.findData("Stim"))
     t, mean = ap.chart("Spike-triggered average").plot.getPlotItem().listDataItems()[-1].getData()
     assert mean[t < 0].max() > 0.5                                   # the stimulus comes before the spike
@@ -630,6 +634,23 @@ def test_a_sine_in_bursts_is_named_as_one_and_grouped_by_frequency():
     # a train of pulses one way is still pulses, and its size isn't 0
     pulses = np.where((t % 0.05) < 0.001, 2.0, 0.0)
     assert A.stimulus_signature(pulses, fs)[:3] == ("pulse", 80, 2.0)
+
+
+def test_stimuli_line_up_on_each_train_or_burst_or_on_every_pulse():
+    fs = 20000
+    t = np.arange(3 * fs) / fs
+    on = (t % 1.0) < 0.4                                             # 400 ms on, every second
+    burst = np.where(on, np.sin(2 * np.pi * 20 * t), 0.0)
+    both = A.stimulus_times(burst, fs)
+    assert len(both) == pytest.approx(3 * 8 * 2, abs=3)              # peaks and troughs: twice a cycle
+    once = A.stimulus_times(burst, fs, one_way=True)
+    assert len(once) == pytest.approx(3 * 8, abs=2)                  # once a cycle
+    assert np.allclose(np.diff(once)[np.diff(once) < 0.1], 0.05, atol=1e-3)
+    starts = A.train_starts(both)
+    assert np.allclose(starts, [0, 1, 2], atol=0.01)                 # one per burst, where it starts
+    train = np.where((t % 1.0 < 0.2) & (t % 0.05 < 0.001), -2.0, 0.0)   # 4 pulses down, every second
+    assert len(A.stimulus_times(train, fs, one_way=True)) == 12      # a pulse's own way, down
+    assert np.allclose(A.train_starts(A.stimulus_times(train, fs)), [0, 1, 2], atol=1e-3)
 
 
 def test_the_lab_recording_sorts_into_its_25_sine_stimuli():

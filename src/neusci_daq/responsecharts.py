@@ -273,6 +273,14 @@ class PsthChart(_AverageChart):
                                 "the stimulus, or the start of every trial (for triggered sweeps)")
         self.trigger.addItem("Start of each trial", "")
         self.field("trigger", "Stimulus from", self.trigger)
+        self.align = QtWidgets.QComboBox()
+        self.align.addItem("Start of each train or burst", "train")
+        self.align.addItem("Every pulse", "pulse")
+        self.align.setToolTip("Start of each train or burst: one stimulus per train of pulses or burst of a "
+                              "wave, where the Stimulus chart marks it. Every pulse: each pulse of a train, or "
+                              "each cycle of a wave (at its peak). To see firing through each cycle of a sine, "
+                              "Spikes per phase and Spikes by cycle show it best")
+        self.field("align", "Align to", self.align)
         self.before = UnitSpinBox(0, 10000, "ms", step=5)
         self.before.setToolTip("How long before each stimulus to show")
         self.before.setValue(50)
@@ -324,14 +332,17 @@ class PsthChart(_AverageChart):
             return
         fs = self.data[chosen[0]]["sample_rate"]
         stim = self.trigger.currentData()
+        self.align.setEnabled(bool(stim))
+        every = self.align.currentData() == "pulse"
         triggers = {}
         for b in chosen:
             if not stim:
                 triggers[b] = np.array([0.0])
             else:
                 y = page.trace(b, stim)
-                if y is not None:
-                    triggers[b] = A.stimulus_times(y, fs)
+                if y is not None:               # each train's start as page.onsets finds it, or every pulse
+                    triggers[b] = A.stimulus_times(y, fs, one_way=True) if every else \
+                        A.train_starts(A.stimulus_times(y, fs))
         width = self.bin.value()
         spread = page.spread()
         tag = {"sd": ", ± SD across stimuli", "sem": ", ± SEM across stimuli"}.get(spread, "")

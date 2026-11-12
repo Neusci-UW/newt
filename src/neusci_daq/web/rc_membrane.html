@@ -43,7 +43,66 @@ body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-siz
 .wrap{max-width:1640px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
 header h1{font-weight:600;font-size:26px;letter-spacing:-0.01em;margin:0 0 6px;text-wrap:balance}
 header p{margin:0;color:var(--muted);max-width:80ch}
-h2.part{font-size:20px;font-weight:600;margin:12px 0 0;text-wrap:balance}
+.part{font-size:18px;font-weight:600;margin:4px 0 0;text-wrap:balance}
+/* page sections, intro, tabs, help and units: the same look as membrane_potential.html */
+.pagesec{font-size:22px;font-weight:600;letter-spacing:-0.01em;margin:8px 0 -6px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+header p{max-width:90ch}
+.intro{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:12px 16px;margin-top:12px;max-width:1500px}
+.introbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+.introbox ul{margin:0;padding-left:18px;font-size:13.5px}
+.introbox li::marker{color:var(--muted)}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.steps .chip{margin-right:6px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
+.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--muted);font-weight:500;padding:8px 14px;margin-bottom:-1px}
+.tabs button:hover{color:var(--ink)}
+.tabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+[role=tabpanel][hidden]{display:none}
+.tabpane{display:grid;grid-template-columns:minmax(0,72ch) minmax(240px,320px);gap:32px;align-items:start;padding-top:4px}
+@media (max-width:1000px){.tabpane{grid-template-columns:minmax(0,1fr)}}
+.tabpane .deriv h3:first-child{margin-top:4px}
+.deriv.wide{max-width:none;grid-column:1 / -1}
+.theory{display:flex;flex-direction:column;gap:16px}
+.try{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--bg);font-size:13.5px;position:sticky;top:16px}
+.try p{margin:0}
+.try .chip{display:block;margin-bottom:4px;text-align:left}
+.help h4{margin:0 0 4px;font-size:13.5px;font-weight:600}
+.help ul{margin:0 0 10px;padding-left:18px;font-size:13.5px;max-width:90ch}
+.help li{margin-bottom:8px}
+.help li::marker{color:var(--muted)}
+.fullderiv{margin:10px 0;padding:8px 12px;border:1px solid var(--line);border-radius:8px}
+.fullderiv summary{cursor:pointer;font-weight:500;color:var(--accent)}
+.fullderiv[open] summary{margin-bottom:6px}
+.units{display:flex;flex-direction:column;gap:8px}
+.unitcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:12px 32px}
+.unithead{margin:0 0 4px;font-size:13px;font-weight:600}
+.unitlist{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:0;font-size:13px}
+.unitlist dt{font-family:var(--font-mono);font-weight:500}
+.unitlist dd{margin:0;color:var(--muted)}
+/* RC calculator, styled like the GHK calculator in membrane_potential.html */
+.gsliders{display:flex;flex-direction:column}
+.gion{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-top:1px solid var(--line)}
+.gion:first-child{border-top:0;padding-top:0}
+.gh{display:flex;align-items:center;gap:6px;font-weight:600;font-size:14px}
+.gr{display:grid;grid-template-columns:52px minmax(0,1fr) 78px;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.gr input[type=range]{width:100%;accent-color:var(--accent)}
+.gr output{font-family:var(--font-mono);font-size:12.5px;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.calc{display:flex;flex-direction:column;gap:12px}
+.calc-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{border:0;border-radius:0;font-size:13px;padding:5px 12px}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.gr[hidden]{display:none}
+.gformula{font-family:var(--font-mono);font-size:12.5px;line-height:1.85;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);overflow-x:auto;white-space:nowrap}
+.gformula .res{font-size:14px;font-weight:600}
+.calc-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:28px;align-items:start}
+@media (max-width:1000px){.calc-body{grid-template-columns:1fr}}
+.calc-out{display:flex;flex-direction:column;gap:12px}
+.calc .out{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.calc .big{font-family:var(--font-mono);font-size:34px;font-weight:500;font-variant-numeric:tabular-nums}
+.calc .es{display:flex;gap:16px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.calc .es b{font-family:var(--font-mono);font-weight:500}
+.gion[hidden]{display:none}
 .top{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
 @media (max-width:1100px){.top{grid-template-columns:1fr}}
 .cgrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start}
@@ -112,10 +171,6 @@ button.toggle .tstate{font-family:var(--font-mono);font-size:13px;font-weight:40
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .charthead{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:space-between}
-.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
-.notes h2{font-size:16px;font-weight:600;margin:0 0 8px}
-.notes ul{margin:0;padding-left:18px}
-.notes li{margin-bottom:6px;max-width:68ch}
 table.map{width:100%;border-collapse:collapse;font-size:14px}
 table.map th,table.map td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
@@ -125,13 +180,38 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
 <div class="wrap">
 <header>
   <h1>Charging a membrane: the RC circuit and the ions</h1>
-  <p>A membrane is a capacitor (the thin lipid bilayer) in parallel with resistors (the ion channels), each in series with a battery (that ion's Nernst potential). When something changes, current first goes into charging the capacitor; only once the voltage has moved to its new value does all of the current flow around through the resistors. The top half shows this with a circuit; the bottom half does the same thing with ions, using the particle model from the Membrane potential page.</p>
+  <p>When ion channels open, why doesn't the membrane potential jump straight to its new value? Watch a membrane charge like a capacitor, first as an electric circuit and then ion by ion, and explain it with the theory below.</p>
+  <div class="intro">
+    <section class="introbox" aria-labelledby="goalsTitle">
+      <span class="sect-title" id="goalsTitle">You'll be able to</span>
+      <ul>
+        <li>explain why current first goes into charging the membrane, the capacitor, before it can flow through the other channels (I<sub>C</sub> = C dV/dt)</li>
+        <li>predict where the voltage ends up (V<sub>∞</sub>) and how fast it gets there (τ = C / Σg)</li>
+        <li>explain why at steady state Na⁺ flowing in matches K⁺ flowing out, so the charge on the membrane stops changing even though ions keep crossing</li>
+      </ul>
+    </section>
+    <section class="introbox" aria-labelledby="startTitle">
+      <span class="sect-title" id="startTitle">Start here</span>
+      <ol class="steps">
+        <li><button class="chip" data-rctry="circ-open">1 · Open the Na⁺ channels</button> In the circuit, I<sub>C</sub> jumps, then falls to zero as V settles at V<sub>∞</sub>.</li>
+        <li><button class="chip" data-rctry="circ-charge">2 · Charge moved</button> The gap between Na⁺ in and K⁺ out is the charge stored on the capacitor.</li>
+        <li><button class="chip" data-rctry="ions-open">3 · The same, ion by ion</button> Open real Na⁺ channels: Na⁺ piles up just inside the membrane and the voltage follows.</li>
+      </ol>
+    </section>
+  </div>
 </header>
 
 <!-- =================== Part 1: the circuit =================== -->
-<h2 class="part">1 · The circuit</h2>
+<h2 class="pagesec" id="simulation">Simulation</h2>
+<h3 class="part">1 · The circuit</h3>
 <div class="top stacked">
-  <section class="card stage">
+  <section class="card stage" id="circ-card">
+    <div class="tabs" role="tablist" aria-label="Circuit">
+      <button type="button" role="tab" id="tab-circ" aria-controls="pane-circ" aria-selected="true">Circuit</button>
+      <button type="button" role="tab" id="tab-circhelp" aria-controls="pane-circhelp" aria-selected="false" tabindex="-1">How to read</button>
+      <button type="button" role="tab" id="tab-circlook" aria-controls="pane-circlook" aria-selected="false" tabindex="-1">What to look for</button>
+    </div>
+    <div class="stage" role="tabpanel" id="pane-circ" aria-labelledby="tab-circ">
     <div class="btns" role="group" aria-label="Circuit">
       <button class="chip" data-mode="inj" aria-pressed="true">Current injection</button>
       <button class="chip" data-mode="g" aria-pressed="false">Conductance change (Na⁺ channels)</button>
@@ -163,7 +243,24 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
     </div>
     <p class="caption"><b>Membrane potential:</b> shaded, switch closed. The voltage moves exponentially toward V<sub>∞</sub> with time constant τ. Closing the switch adds a conductance, so τ gets shorter.</p>
     <p class="caption"><b>Where the current goes:</b> <span id="cIcap"></span></p>
-    <p class="caption">Each dot carries the same charge as one + or − mark on the capacitor plates, so you can watch dots arriving at a plate turn into marks. The top wire is the inside of the cell, the bottom wire the outside (ground); current is counted positive when it flows from inside to outside, the usual sign for membrane currents.</p>
+    </div>
+    <div class="help" role="tabpanel" id="pane-circhelp" aria-labelledby="tab-circhelp" hidden>
+      <ul>
+        <li><b>The drawing:</b> the top wire is the inside of the cell, the bottom wire the outside (ground). Each ion channel is a branch: a resistor (1/g) in series with a battery, that ion's Nernst potential E. The capacitor on the right is the lipid bilayer.</li>
+        <li><b>Current injection</b> replaces the channels with a current source and one resistor, like an electrode pushing current into the cell.</li>
+        <li><b>Dots:</b> moving positive charge (conventional current), coloured by the branch it went through. Each dot carries the same charge as one + or − mark on the capacitor plates, so you can watch dots arriving at a plate turn into marks. Current is positive when it flows from inside to outside, the usual sign for membrane currents.</li>
+        <li><b>Membrane potential chart:</b> the black line is V; the shading marks when the switch is closed. The dotted line is V<sub>∞</sub>, where V is heading.</li>
+        <li><b>Where the current goes:</b> Currents shows each branch's current and the capacitor current I<sub>C</sub>. Charge moved shows the charge each one has carried since the switch last changed.</li>
+      </ul>
+    </div>
+    <div class="help" role="tabpanel" id="pane-circlook" aria-labelledby="tab-circlook" hidden>
+      <ul>
+      <li>Close the switch (or open the Na⁺ channels). At first almost all the Na⁺ current goes into the capacitor: the plates fill, and in the particle model Na⁺ ions pile up as positive charge just inside the membrane.</li>
+      <li>As the voltage rises, the K⁺ branch carries more and more current outward and the Na⁺ branch less inward, because both are now further from (or closer to) their batteries.</li>
+      <li>Once the voltage stops changing, the capacitor current is zero. Current now goes all the way around: in through Na⁺, out through K⁺. The charge on the membrane is constant, yet ions keep crossing.</li>
+      <li>Open the switch again and the capacitor discharges through the K⁺ branch alone, more slowly, because there is less conductance.</li>
+    </ul>
+    </div>
   </section>
   <aside class="card panel wide">
     <div class="vbox">
@@ -198,37 +295,16 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
   </aside>
 </div>
 
-<!-- =================== Theory: current sets dV/dt =================== -->
-<section class="card theory" id="dvdt">
-  <div class="deriv">
-    <h2>Current sets how fast the voltage changes</h2>
-    <p class="caption mj-fail">The equation renderer (MathJax) could not load, so equations appear as TeX source. Without internet, add a local copy (see tools/fetch_mathjax.py in Newt).</p>
-    <p>The voltage across a capacitor is the charge on it divided by its capacitance. So the only way to change the voltage is to move charge onto or off the plates, and the current into the capacitor is how fast that charge moves:</p>
-    <div class="eq">\[ Q = C\,V \quad\Rightarrow\quad I_C = \frac{dQ}{dt} = C\,\frac{dV}{dt} \]</div>
-    <p>No charge builds up on the wires, so whatever the channels carry across must come off the capacitor (Kirchhoff's current law). The voltage changes at a rate set by the net channel current:</p>
-    <div class="eq">\[ I_C + I_\mathrm{Na} + I_\mathrm{K} = 0 \quad\Rightarrow\quad \frac{dV}{dt} = -\,\frac{I_\mathrm{Na} + I_\mathrm{K}}{C} \]</div>
-    <h3>A quick number</h3>
-    <p>With currents in µA/cm² and C in µF/cm², the rate comes out in mV/ms: 100 µA/cm² into 1 µF/cm² moves V at 100 mV/ms. At the default settings, opening the Na⁺ channels at rest gives \(I_\mathrm{Na} = 0.7 \times (-86 - 60) \approx -102\) µA/cm² while \(I_\mathrm{K} = 0\), so V starts climbing at about 100 mV/ms.</p>
-    <h3>Why it slows down</h3>
-    <p>Each channel current is \(g\,(V - E)\), so the currents shrink as V nears the voltage where they cancel, \(V_\infty\). The rate shrinks with them:</p>
-    <div class="eq">\[ \frac{dV}{dt} = -\,\frac{g_\mathrm{Na}(V - E_\mathrm{Na}) + g_\mathrm{K}(V - E_\mathrm{K})}{C} = \frac{V_\infty - V}{\tau}, \qquad \tau = \frac{C}{g_\mathrm{Na} + g_\mathrm{K}} \]</div>
-    <p>\(V_\infty\) is the voltage where the channel currents cancel, so nothing more charges the capacitor. Setting \(dV/dt = 0\):</p>
-    <div class="eq">\[ g_\mathrm{Na}(V_\infty - E_\mathrm{Na}) + g_\mathrm{K}(V_\infty - E_\mathrm{K}) = 0 \quad\Rightarrow\quad V_\infty = \frac{g_\mathrm{Na}E_\mathrm{Na} + g_\mathrm{K}E_\mathrm{K}}{g_\mathrm{Na} + g_\mathrm{K}} \]</div>
-    <p>The GHK equation answers the same question, where the currents add to zero, for real channels. Real channels, and the ones in the particle model, are not ohmic: their currents follow the GHK current equation, and the voltage at which those currents cancel is the GHK voltage. So for a membrane, \(V_\infty\) is the solution of the GHK equation:</p>
-    <div class="eq">\[ V_\infty = \frac{RT}{F}\,\ln\frac{P_\mathrm{K}[\mathrm{K}^+]_o + P_\mathrm{Na}[\mathrm{Na}^+]_o}{P_\mathrm{K}[\mathrm{K}^+]_i + P_\mathrm{Na}[\mathrm{Na}^+]_i} \]</div>
-    <p>The two formulas agree when each g is the channel's chord conductance at that voltage, \(g = I/(V - E)\) (see the Membrane potential page). The circuit uses fixed g instead, so its \(V_\infty\) is close to, but not exactly, the GHK value; in the particle model the voltage settles on the GHK line.</p>
-    <p>A rate proportional to the distance still to go gives an exponential approach:</p>
-    <div class="eq">\[ V(t) = V_\infty + \left(V_0 - V_\infty\right) e^{-t/\tau} \]</div>
-    <p>At the defaults \(\tau = 1/(0.7 + 0.5) \approx 0.83\) ms: V covers about 63% of the way in one τ and 95% in three.</p>
-    <h3>In the particle model</h3>
-    <p>The same rule is a count. Each net ion that crosses adds one charge to the membrane, which moves V by a fixed step: about 2 mV at the default Membrane C (the bilayer's capacitance in series with the charge layers in the solution). On the Ions moved chart, "on membrane" is that net count, and the voltage trace follows its shape.</p>
-  </div>
-</section>
-
 <!-- =================== Part 2: the ions =================== -->
-<h2 class="part">2 · The same thing, ion by ion</h2>
+<h3 class="part">2 · The same thing, ion by ion</h3>
 <div class="top stacked">
-  <section class="card stage">
+  <section class="card stage" id="ion-card">
+    <div class="tabs" role="tablist" aria-label="Ion simulation">
+      <button type="button" role="tab" id="tab-ion" aria-controls="pane-ion" aria-selected="true">Ion simulation</button>
+      <button type="button" role="tab" id="tab-ionhelp" aria-controls="pane-ionhelp" aria-selected="false" tabindex="-1">How to read</button>
+      <button type="button" role="tab" id="tab-ioncav" aria-controls="pane-ioncav" aria-selected="false" tabindex="-1">Caveats</button>
+    </div>
+    <div class="stage" role="tabpanel" id="pane-ion" aria-labelledby="tab-ion">
     <div class="cgrid">
       <div class="ccol">
         <div class="toolbar">
@@ -267,6 +343,25 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
     <p class="caption"><b>Membrane potential:</b> each point averages 100 steps. Shaded: Na⁺ channels open. Dashed lines are E<sub>K</sub> and E<sub>Na</sub>; dotted is the GHK prediction for the channels as they are now.</p>
     <p class="caption"><b>Where the ions go:</b> <span id="pIcap"></span></p>
     <p class="caption" id="patchInfo"></p>
+    </div>
+
+    <div class="help" role="tabpanel" id="pane-ionhelp" aria-labelledby="tab-ionhelp" hidden>
+      <ul>
+        <li><b>Dots:</b> each one is a single ion: K⁺ purple, Na⁺ orange, and grey A⁻, anions too large to cross. Intracellular (inside the cell) is on the left.</li>
+        <li><b>Channels:</b> K⁺ leak channels are always open. Na⁺ channels have a gate at the inner mouth, opened and closed by the switch.</li>
+        <li><b>Background tint:</b> net charge, red where there is extra positive charge and blue where there is extra negative charge. The thin layers on the two faces of the membrane are the charge on the capacitor.</li>
+        <li><b>Membrane potential chart:</b> each point averages 100 steps. Dashed lines are E<sub>K</sub> and E<sub>Na</sub>; the dotted line is the GHK prediction for the channels as they are now.</li>
+        <li><b>Where the ions go:</b> Currents counts ions crossing per 1000 steps, outward positive. Ions moved counts them since the switch last changed; "on membrane" is the net charge that has piled up.</li>
+      </ul>
+    </div>
+    <div class="help" role="tabpanel" id="pane-ioncav" aria-labelledby="tab-ioncav" hidden>
+      <ul>
+      <li>The circuit uses linear (ohmic) channels. Real channels, and the particle model, follow the GHK current equation, so the particle voltage settles at the GHK value, close to but not exactly the circuit's conductance-weighted average.</li>
+      <li>The particle model is the one on the Membrane potential page with Cl⁻ folded into the impermeant anions, no pump, and gated Na⁺ channels added. Both sides are held at fixed concentrations far from the membrane.</li>
+      <li>Ion counts are tiny compared with a real cell, so the particle traces are noisy; the voltage is averaged over many steps. Time is in simulation steps, not milliseconds.</li>
+      <li>Real Na⁺ channels open with voltage and then inactivate, which gives an action potential. Here they only open and close when you tell them to.</li>
+    </ul>
+    </div>
   </section>
   <aside class="card panel wide">
     <div class="vbox">
@@ -298,9 +393,121 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
   </aside>
 </div>
 
-<section class="card">
-  <p class="sect-title" style="margin-bottom:8px">How the circuit maps onto the membrane</p>
-  <table class="map">
+
+<section class="card units" id="units" aria-labelledby="unitsTitle">
+  <span class="sect-title" id="unitsTitle">Units</span>
+  <div class="unitcols">
+    <div>
+      <p class="unithead">The circuit: real units</p>
+      <dl class="unitlist">
+        <dt>mV</dt><dd>millivolts, for voltage. V is the inside measured relative to the outside.</dd>
+        <dt>ms</dt><dd>milliseconds, for time. The charts show the last 40 ms; the speed slider sets how many ms of model time pass per second.</dd>
+        <dt>µA/cm²</dt><dd>microamps per cm² of membrane, for current, positive when it flows outward.</dd>
+        <dt>mS/cm²</dt><dd>millisiemens per cm², for conductance, how easily current flows (1/resistance). One siemens passes one amp per volt, from Ohm's law.</dd>
+        <dt>µF/cm²</dt><dd>microfarads per cm², for capacitance, the charge stored per volt. Real membranes are about 1 µF/cm².</dd>
+        <dt>nC/cm²</dt><dd>nanocoulombs per cm², for charge: Q (nC/cm²) = C (µF/cm²) × V (mV).</dd>
+      </dl>
+      <p class="caption">These fit together: µA/cm² divided by µF/cm² is mV/ms, and µF/cm² divided by mS/cm² is ms, so τ = C/Σg comes out in milliseconds.</p>
+    </div>
+    <div>
+      <p class="unithead">The particle model: simulation units</p>
+      <dl class="unitlist">
+        <dt>ions</dt><dd>charge counted in ions: each K⁺ or Na⁺ carries one elementary charge, 1.6 × 10⁻¹⁹ C. "Charge on the membrane" and the Ions moved chart count this way.</dd>
+        <dt>steps</dt><dd>the simulation's unit of time: in each step every ion takes one random move. Steps are not tied to real milliseconds, so use the circuit for real times. Currents are in ions per 1000 steps.</dd>
+        <dt>e/mV</dt><dd>the particle model's membrane capacitance: extra ions needed on the membrane to change the voltage by 1 mV. The same idea as µF/cm², in simulation units.</dd>
+        <dt>channels</dt><dd>conductance in the particle model is a count of open channels in the simulated patch: more channels, more current for the same driving force.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<h2 class="pagesec" id="theory-section">Theory</h2>
+<section class="card theory" id="dvdt">
+  <p class="caption mj-fail">The equation renderer (MathJax) could not load, so equations appear as TeX source. Without internet, add a local copy (see tools/fetch_mathjax.py in Newt).</p>
+  <div class="tabs" role="tablist" aria-label="Theory">
+    <button type="button" role="tab" id="tab-th1" aria-controls="pane-th1" aria-selected="true">Current charges the capacitor</button>
+    <button type="button" role="tab" id="tab-th2" aria-controls="pane-th2" aria-selected="false" tabindex="-1">How fast: the time constant</button>
+    <button type="button" role="tab" id="tab-th3" aria-controls="pane-th3" aria-selected="false" tabindex="-1">Where it ends up</button>
+    <button type="button" role="tab" id="tab-th4" aria-controls="pane-th4" aria-selected="false" tabindex="-1">Circuit and membrane</button>
+  </div>
+
+  <div class="tabpane" role="tabpanel" id="pane-th1" aria-labelledby="tab-th1">
+    <div class="deriv">
+      <h3>Ohm's law for each channel</h3>
+      <p>Ohm's law says the current through a resistor is its conductance times the voltage across it, \(I = gV\) (with \(g = 1/R\)). An ion channel is a resistor in series with a battery, the ion's Nernst potential \(E\), so the voltage that drives current through it is the driving force \(V - E\):</p>
+      <div class="eq">\[ I_\mathrm{Na} = g_\mathrm{Na}\,(V - E_\mathrm{Na}), \qquad I_\mathrm{K} = g_\mathrm{K}\,(V - E_\mathrm{K}) \]</div>
+      <p>Each current is zero at its own Nernst potential and grows the farther V is from it; positive means outward.</p>
+
+      <h3>The capacitor</h3>
+      <p>The voltage across a capacitor is the charge on it divided by its capacitance. So the only way to change the voltage is to move charge onto or off the plates, and the current into the capacitor is how fast that charge moves:</p>
+      <div class="eq">\[ Q = C\,V \quad\Rightarrow\quad I_C = \frac{dQ}{dt} = C\,\frac{dV}{dt} \]</div>
+      <p>Charge cannot pile up on the wires, so whatever the channels carry across must come off the capacitor: the currents at a junction add up to zero (Kirchhoff's current law). The voltage therefore changes at a rate set by the net channel current:</p>
+      <div class="eq">\[ I_C + I_\mathrm{Na} + I_\mathrm{K} = 0 \quad\Rightarrow\quad \frac{dV}{dt} = -\,\frac{I_\mathrm{Na} + I_\mathrm{K}}{C} \]</div>
+
+      <h3>A quick number</h3>
+      <p>With currents in µA/cm² and C in µF/cm², the rate comes out in mV/ms: 100 µA/cm² into 1 µF/cm² moves V at 100 mV/ms. At the default settings, opening the Na⁺ channels at rest gives \(I_\mathrm{Na} = 0.7 \times (-86 - 60) \approx -102\) µA/cm² while \(I_\mathrm{K} = 0\), so V starts climbing at about 100 mV/ms.</p>
+    </div>
+    <aside class="try">
+      <span class="sect-title">Try it</span>
+      <p><button class="chip" data-rctry="circ-open">Open the Na⁺ channels</button> Right after the switch closes, nearly all the Na⁺ current goes into I<sub>C</sub>, charging the capacitor.</p>
+      <p><button class="chip" data-rctry="circ-charge">Charge moved</button> The charge carried since the switch closed: the gap between Na⁺ in and K⁺ out is what is stored on the capacitor.</p>
+    </aside>
+  </div>
+
+  <div class="tabpane" role="tabpanel" id="pane-th2" aria-labelledby="tab-th2" hidden>
+    <div class="deriv">
+      <h3>Why it slows down</h3>
+      <p>As V moves toward the voltage where the channel currents cancel, \(V_\infty\), those currents shrink, so the capacitor charges more and more slowly. The rate turns out to be proportional to the distance V still has to go:</p>
+      <div class="eq">\[ \frac{dV}{dt} = \frac{V_\infty - V}{\tau}, \qquad \tau = \frac{C}{g_\mathrm{Na} + g_\mathrm{K}} \]</div>
+      <p>A rate proportional to the distance still to go gives an exponential approach:</p>
+      <div class="eq">\[ V(t) = V_\infty + \left(V_0 - V_\infty\right) e^{-t/\tau} \]</div>
+      <p>At the defaults \(\tau = 1/(0.7 + 0.5) \approx 0.83\) ms: V covers about 63% of the way in one τ and 95% in three. More capacitance means more charge to move, so τ is longer; more conductance means more current to move it with, so τ is shorter. Neither changes where V ends up.</p>
+
+      <details class="fullderiv">
+        <summary>Show the derivation</summary>
+        <p>1. Put the Ohm's law currents into the rate equation:</p>
+        <div class="eq">\[ \frac{dV}{dt} = -\,\frac{g_\mathrm{Na}(V - E_\mathrm{Na}) + g_\mathrm{K}(V - E_\mathrm{K})}{C} \]</div>
+        <p>2. Collect the terms with V:</p>
+        <div class="eq">\[ \frac{dV}{dt} = \frac{g_\mathrm{Na} + g_\mathrm{K}}{C}\left(\frac{g_\mathrm{Na}E_\mathrm{Na} + g_\mathrm{K}E_\mathrm{K}}{g_\mathrm{Na} + g_\mathrm{K}} - V\right) = \frac{V_\infty - V}{\tau} \]</div>
+        <p>3. The exponential solves this: differentiating \(V_\infty + (V_0 - V_\infty)e^{-t/\tau}\) gives \(-(V_0 - V_\infty)e^{-t/\tau}/\tau = (V_\infty - V)/\tau\), and at \(t = 0\) it starts at \(V_0\).</p>
+      </details>
+    </div>
+    <aside class="try">
+      <span class="sect-title">Try it</span>
+      <p><button class="chip" data-rctry="set:cC:2">C = 2 µF/cm²</button> Twice the capacitance: τ doubles, and V takes twice as long to settle at the same V<sub>∞</sub>.</p>
+      <p><button class="chip" data-rctry="set:cC:0.5">C = 0.5 µF/cm²</button> Half the capacitance: V settles twice as fast.</p>
+      <p><button class="chip" data-rctry="set:cC:1">Back to 1 µF/cm²</button></p>
+    </aside>
+  </div>
+
+  <div class="tabpane" role="tabpanel" id="pane-th3" aria-labelledby="tab-th3" hidden>
+    <div class="deriv">
+      <h3>Steady state</h3>
+      <p>V stops changing when no current is charging the capacitor, so the channel currents cancel: Na⁺ current in is matched by K⁺ current out. That happens at</p>
+      <div class="eq">\[ V_\infty = \frac{g_\mathrm{Na}E_\mathrm{Na} + g_\mathrm{K}E_\mathrm{K}}{g_\mathrm{Na} + g_\mathrm{K}} \]</div>
+      <p>This is the chord conductance formula from the Membrane potential page: an average of the Nernst potentials, each weighted by its share of the conductance. Opening Na⁺ channels pulls \(V_\infty\) toward \(E_\mathrm{Na}\); more K⁺ conductance pulls it back toward \(E_\mathrm{K}\).</p>
+
+      <details class="fullderiv">
+        <summary>Show the derivation</summary>
+        <p>Set \(dV/dt = 0\), so the channel currents add to zero, and solve for V:</p>
+        <div class="eq">\[ g_\mathrm{Na}(V_\infty - E_\mathrm{Na}) + g_\mathrm{K}(V_\infty - E_\mathrm{K}) = 0 \quad\Rightarrow\quad V_\infty\,(g_\mathrm{Na} + g_\mathrm{K}) = g_\mathrm{Na}E_\mathrm{Na} + g_\mathrm{K}E_\mathrm{K} \]</div>
+      </details>
+
+      <h3>And GHK</h3>
+      <p>Real channels, and the ones in the particle model, are not perfect resistors: their currents follow the GHK current equation, so the voltage where they cancel is the GHK voltage:</p>
+      <div class="eq">\[ V_\infty = \frac{RT}{F}\,\ln\frac{P_\mathrm{K}[\mathrm{K}^+]_o + P_\mathrm{Na}[\mathrm{Na}^+]_o}{P_\mathrm{K}[\mathrm{K}^+]_i + P_\mathrm{Na}[\mathrm{Na}^+]_i} \]</div>
+      <p>The circuit uses fixed g, so its \(V_\infty\) is close to, but not exactly, the GHK value; in the particle model the voltage settles on the GHK line.</p>
+    </div>
+    <aside class="try">
+      <span class="sect-title">Try it</span>
+      <p><button class="chip" data-rctry="set:cGNa:3">g<sub>Na</sub> = 3</button> With the Na⁺ channels open, V<sub>∞</sub> moves much closer to E<sub>Na</sub>.</p>
+      <p><button class="chip" data-rctry="set:cGNa:0.7">Back to 0.7</button></p>
+    </aside>
+  </div>
+
+  <div class="tabpane" role="tabpanel" id="pane-th4" aria-labelledby="tab-th4" hidden>
+    <div class="deriv wide">
+      <table class="map">
     <thead><tr><th>Circuit</th><th>Membrane</th><th>In the particle model</th></tr></thead>
     <tbody>
       <tr><td>Capacitor C</td><td>Lipid bilayer, an insulator a few nm thick between two salt solutions</td><td>The thin layers of excess charge on the two faces of the membrane (red and blue in the density map)</td></tr>
@@ -311,26 +518,80 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
       <tr><td>Steady state: I<sub>Na</sub> + I<sub>K</sub> = 0</td><td>Na⁺ leaking in exactly as fast as K⁺ leaks out</td><td>The "Na⁺ in" and "K⁺ out" lines rising in parallel</td></tr>
     </tbody>
   </table>
+      <h3>In the particle model</h3>
+      <p>The same rule is a count. Each net ion that crosses adds one charge to the membrane, which moves V by a fixed step: about 2 mV at the default Membrane C (the bilayer's capacitance in series with the charge layers in the solution). On the Ions moved chart, "on membrane" is that net count, and the voltage trace follows its shape.</p>
+    </div>
+  </div>
 </section>
 
-<section class="notes card">
-  <div>
-    <h2>What to look for</h2>
-    <ul>
-      <li>Close the switch (or open the Na⁺ channels). At first almost all the Na⁺ current goes into the capacitor: the plates fill, and in the particle model Na⁺ ions pile up as positive charge just inside the membrane.</li>
-      <li>As the voltage rises, the K⁺ branch carries more and more current outward and the Na⁺ branch less inward, because both are now further from (or closer to) their batteries.</li>
-      <li>Once the voltage stops changing, the capacitor current is zero. Current now goes all the way around: in through Na⁺, out through K⁺. The charge on the membrane is constant, yet ions keep crossing.</li>
-      <li>Open the switch again and the capacitor discharges through the K⁺ branch alone, more slowly, because there is less conductance.</li>
-    </ul>
+<section class="card calc" id="rc-calc">
+  <div class="calc-head">
+    <span class="sect-title">RC calculator</span>
+    <div class="seg" role="group" aria-label="Circuit">
+      <button type="button" id="rMode-g" aria-pressed="true">Conductance change</button>
+      <button type="button" id="rMode-inj" aria-pressed="false">Current injection</button>
+    </div>
   </div>
-  <div>
-    <h2>What it simplifies</h2>
-    <ul>
-      <li>The circuit uses linear (ohmic) channels. Real channels, and the particle model, follow the GHK current equation, so the particle voltage settles at the GHK value, close to but not exactly the circuit's conductance-weighted average.</li>
-      <li>The particle model is the one on the Membrane potential page with Cl⁻ folded into the impermeant anions, no pump, and gated Na⁺ channels added. Both sides are held at fixed concentrations far from the membrane.</li>
-      <li>Ion counts are tiny compared with a real cell, so the particle traces are noisy; the voltage is averaged over many steps. Time is in simulation steps, not milliseconds.</li>
-      <li>Real Na⁺ channels open with voltage and then inactivate, which gives an action potential. Here they only open and close when you tell them to.</li>
-    </ul>
+  <p class="caption">Set the circuit's values and see how fast the voltage moves, where it ends up, and how large the currents are at the start. The curve bends as you drag.</p>
+  <div class="calc-body">
+    <div class="gsliders">
+      <div class="gion" data-rfor="g">
+        <div class="gh"><i class="dot na"></i> Na⁺ channels (open)</div>
+        <div class="gr"><label for="rGNa">g<sub>Na</sub></label><input type="range" id="rGNa" min="0" max="5" step="0.05" value="0.7"><output id="rGNao" for="rGNa"></output></div>
+        <div class="gr"><label for="rENa">E<sub>Na</sub></label><input type="range" id="rENa" min="0" max="90" step="1" value="60"><output id="rENao" for="rENa"></output></div>
+      </div>
+      <div class="gion" data-rfor="g">
+        <div class="gh"><i class="dot k"></i> K⁺ channels</div>
+        <div class="gr"><label for="rGK">g<sub>K</sub></label><input type="range" id="rGK" min="0.05" max="3" step="0.05" value="0.5"><output id="rGKo" for="rGK"></output></div>
+        <div class="gr"><label for="rEK">E<sub>K</sub></label><input type="range" id="rEK" min="-110" max="0" step="1" value="-86"><output id="rEKo" for="rEK"></output></div>
+      </div>
+      <div class="gion" data-rfor="inj" hidden>
+        <div class="gh"><i class="dot pos"></i> Current source and resistor</div>
+        <div class="gr"><label for="rI">I</label><input type="range" id="rI" min="-60" max="60" step="1" value="20"><output id="rIo" for="rI"></output></div>
+        <div class="gr"><label for="rGL">g</label><input type="range" id="rGL" min="0.1" max="3" step="0.05" value="0.5"><output id="rGLo" for="rGL"></output></div>
+      </div>
+      <div class="gion">
+        <div class="gh">Membrane</div>
+        <div class="gr"><label for="rC">C</label><input type="range" id="rC" min="0.2" max="3" step="0.1" value="1"><output id="rCo" for="rC"></output></div>
+        <div class="gr"><label for="rV0">V<sub>start</sub></label><input type="range" id="rV0" min="-110" max="80" step="1" value="-86"><output id="rV0o" for="rV0"></output></div>
+        <span class="caption" id="rV0cap">the voltage just before the channels open; at rest with only K⁺ channels open, this is E<sub>K</sub></span>
+      </div>
+    </div>
+    <div class="calc-out">
+      <div class="out"><span class="big" id="rTau">—</span><span class="caption">time constant τ</span></div>
+      <div class="es"><span>V<sub>∞</sub> <b id="rVinf">—</b></span><span>largest I<sub>C</sub> <b id="rIC0">—</b></span><span>starting dV/dt <b id="rRate">—</b></span></div>
+      <div class="gformula" id="rFormula" aria-live="polite"></div>
+      <div class="tabs" role="tablist" aria-label="Calculator charts">
+        <button type="button" role="tab" id="tab-rv" aria-controls="pane-rv" aria-selected="true">Voltage vs time</button>
+        <button type="button" role="tab" id="tab-ri" aria-controls="pane-ri" aria-selected="false" tabindex="-1">Currents vs time</button>
+        <button type="button" role="tab" id="tab-rhelp" aria-controls="pane-rhelp" aria-selected="false" tabindex="-1">How to read</button>
+      </div>
+      <div class="stage" role="tabpanel" id="pane-rv" aria-labelledby="tab-rv">
+        <canvas id="rVChart" aria-label="Voltage against time after the switch closes"></canvas>
+      </div>
+      <div class="stage" role="tabpanel" id="pane-ri" aria-labelledby="tab-ri" hidden>
+        <canvas id="rIChart" aria-label="Branch and capacitor currents against time after the switch closes"></canvas>
+      </div>
+      <div class="help" role="tabpanel" id="pane-rhelp" aria-labelledby="tab-rhelp" hidden>
+        <h4>Voltage vs time</h4>
+        <ul>
+          <li><b>Black curve:</b> the voltage after the switch closes at t = 0, V(t) = V<sub>∞</sub> + (V<sub>start</sub> − V<sub>∞</sub>)e<sup>−t/τ</sup>.</li>
+          <li><b>Dotted line:</b> V<sub>∞</sub>, where the voltage levels off. Dashed lines are the Nernst potentials.</li>
+          <li><b>Dot:</b> one time constant in, when V has covered 63% of the way. By 3τ it is 95% of the way there.</li>
+          <li>The axes stay fixed, so a larger C stretches the curve out and more conductance makes it sharper. Neither moves V<sub>∞</sub>; the g's and E's do.</li>
+        </ul>
+        <h4>Currents vs time</h4>
+        <ul>
+          <li><b>Coloured lines:</b> each branch's current, positive outward. They follow Ohm's law, I = g(V − E), so they change as V changes.</li>
+          <li><b>Red line:</b> the capacitor current I<sub>C</sub>. It is largest at t = 0 and dies away with the same τ. Once it reaches zero, the inward and outward currents are equal and opposite.</li>
+        </ul>
+      </div>
+      <p class="caption" id="rCap"></p>
+      <div class="btns">
+        <button id="rFromCirc">Copy from circuit</button>
+        <button id="rToCirc">Send to circuit</button>
+      </div>
+    </div>
   </div>
 </section>
 </div>
@@ -357,6 +618,23 @@ function bindRange(id, fmt, onv) {
   const el = $(id), out = $(id + 'o');
   const h = () => { const v = parseFloat(el.value); out.textContent = fmt(v); onv(v); };
   el.addEventListener('input', h); h();
+}
+// Canvas text with subscripts: "I_Na" draws I with a subscript Na (the letters and digits after
+// the underscore), in the current font, size and alignment.
+function fillSub(c, text, x, y) {
+  if (!text.includes('_')) { c.fillText(text, x, y); return; }
+  const parts = [], re = /_([A-Za-z0-9∞]+)/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) { parts.push([text.slice(last, m.index), false], [m[1], true]); last = re.lastIndex; }
+  parts.push([text.slice(last), false]);
+  const font = c.font, size = parseFloat(/([\d.]+)px/.exec(font)[1]);
+  const subFont = font.replace(/[\d.]+px/, (size * 0.72).toFixed(1) + 'px');
+  const w = parts.map(([t, sub]) => { c.font = sub ? subFont : font; return c.measureText(t).width; });
+  const total = w.reduce((a, b) => a + b, 0), align = c.textAlign;
+  let px = align === 'center' ? x - total / 2 : align === 'right' || align === 'end' ? x - total : x;
+  c.textAlign = 'left';
+  parts.forEach(([t, sub], i) => { c.font = sub ? subFont : font; c.fillText(t, px, y + (sub ? size * 0.28 : 0)); px += w[i]; });
+  c.font = font; c.textAlign = align;
 }
 function niceStep(span) { const p = Math.pow(10, Math.floor(Math.log10(span))), f = span / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
 
@@ -426,7 +704,7 @@ function drawChart(c, o) {
   labels.sort((a, b) => a.y - b.y);
   for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < key + 2) labels[i].y = labels[i - 1].y + key + 2;
   c.font = `600 ${key}px "IBM Plex Sans", sans-serif`; c.textAlign = 'left';
-  labels.forEach(l => { c.fillStyle = l.c; c.fillText(l.t, L + pw + 6, Math.max(T + 4, Math.min(H - 6, l.y))); });
+  labels.forEach(l => { c.fillStyle = l.c; fillSub(c, l.t, L + pw + 6, Math.max(T + 4, Math.min(H - 6, l.y))); });
   c.strokeStyle = C.line; c.lineWidth = 1; c.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
   c.textBaseline = 'alphabetic';
 }
@@ -536,7 +814,7 @@ function chipGroup(attr, onPick) {
 
   // ---------- drawing ----------
   function wire(x0, y0, x1, y1) { c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
-  function label(t_, x, y, col, align = 'left', font = '500 13px "IBM Plex Sans", sans-serif') { c.font = font; c.fillStyle = col || C.ink; c.textAlign = align; c.fillText(t_, x, y); }
+  function label(t_, x, y, col, align = 'left', font = '500 13px "IBM Plex Sans", sans-serif') { c.font = font; c.fillStyle = col || C.ink; c.textAlign = align; fillSub(c, t_, x, y); }
   function blank(x, y0, y1) { c.fillStyle = C.surface; c.fillRect(x - 3, y0, 6, y1 - y0); }
   function resistor(x, yc, col) {
     blank(x, yc - 30, yc + 30);
@@ -644,13 +922,21 @@ function chipGroup(attr, onPick) {
       : [{ v: Vinf, color: C.accent, dash: [2, 3], width: 2, label: 'V∞' }];
     drawChart(vc, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, w: CW, h: CH, key: 15, state: vState, minSpan: 20,
       series: [{ ys: hist.V, color: C.ink, width: 2.4 }], refs, ylabel: 'mV', xlabel: `last ${WIN} ms` });
-    const n1 = mode === 'g' ? 'Na⁺' : 'source', n2 = mode === 'g' ? 'K⁺' : 'R', c1 = mode === 'g' ? C.na : C.muted, c2 = mode === 'g' ? C.k : C.ink;
+    // Conductance change: the two channel currents and I_C. Current injection: I_R, I_C and their sum,
+    // which is the injected current (the source line itself is left out).
+    const sum = (a, b) => a.map((v, k) => v + b[k]);
+    const iSeries = mode === 'g'
+      ? [{ ys: hist.i1, color: C.na, label: 'I_Na' }, { ys: hist.i2, color: C.k, label: 'I_K' }, { ys: hist.iC, color: C.pos, width: 2.6, label: 'I_C' }]
+      : [{ ys: hist.i2, color: C.ink, label: 'I_R' }, { ys: hist.iC, color: C.pos, width: 2.6, label: 'I_C' },
+         { ys: sum(hist.i2, hist.iC), color: C.accent, dash: [6, 4], label: 'I_R + I_C' }];
+    const qSeries = mode === 'g'
+      ? [{ ys: hist.q1, color: C.na, label: 'Na⁺ in' }, { ys: hist.q2, color: C.k, label: 'K⁺ out' }, { ys: hist.qC, color: C.pos, width: 2.6, label: 'on C' }]
+      : [{ ys: hist.q2, color: C.ink, label: 'through R' }, { ys: hist.qC, color: C.pos, width: 2.6, label: 'on C' },
+         { ys: sum(hist.q2, hist.qC), color: C.accent, dash: [6, 4], label: 'R + C' }];
     if (cview === 'i') drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, w: CW, h: CH, key: 15, fixed: I_RANGE,
-      series: [{ ys: hist.i1, color: c1, label: 'I ' + n1 }, { ys: hist.i2, color: c2, label: 'I ' + n2 }, { ys: hist.iC, color: C.pos, width: 2.6, label: 'I_C' }],
-      ylabel: 'µA/cm², outward +', xlabel: `last ${WIN} ms` });
+      series: iSeries, ylabel: 'µA/cm², outward +', xlabel: `last ${WIN} ms` });
     else drawChart(ic, { xs: hist.t, x0: t - WIN, x1: t, on: hist.on, restart: true, w: CW, h: CH, key: 15, state: iState, minSpan: 10,
-      series: [{ ys: hist.q1, color: c1, label: n1 + ' in' }, { ys: hist.q2, color: c2, label: n2 + ' out' }, { ys: hist.qC, color: C.pos, width: 2.6, label: 'on C' }],
-      ylabel: 'nC/cm² since the switch', xlabel: `last ${WIN} ms` });
+      series: qSeries, ylabel: 'nC/cm² since the switch', xlabel: `last ${WIN} ms` });
   }
   function readouts() {
     const { Vinf, tau } = steady(), I = currents(V);
@@ -665,8 +951,10 @@ function chipGroup(attr, onPick) {
     $('cIRlab').innerHTML = mode === 'g' ? 'I<sub>Na</sub> / I<sub>K</sub>' : 'resistor current I<sub>R</sub>';
     $('cIcap').innerHTML = cview === 'i'
       ? (mode === 'g' ? 'Right after the switch closes, the Na⁺ current flows almost entirely into the capacitor (I<sub>C</sub> = −I<sub>Na</sub> − I<sub>K</sub>). As V approaches V<sub>∞</sub>, I<sub>C</sub> falls to zero and the Na⁺ current inward is matched by K⁺ current outward.'
-                      : 'Right after the source turns on, all of its current charges the capacitor and none goes through the resistor. As V rises, more flows through R, until all of it does.')
-      : 'Charge carried since the switch last changed. The gap between the inward and outward lines is the charge stored on the capacitor; once it stops growing, the two lines rise in parallel: current flows all the way around the circuit.';
+                      : 'Right after the source turns on, all of its current charges the capacitor (I<sub>C</sub>) and none goes through the resistor. As V rises, more flows through R (I<sub>R</sub>), until all of it does. Dashed: I<sub>R</sub> + I<sub>C</sub>, which is always the injected current.')
+      : (mode === 'g'
+        ? 'Charge carried since the switch last changed. The gap between the inward and outward lines is the charge stored on the capacitor; once it stops growing, the two lines rise in parallel: current flows all the way around the circuit.'
+        : 'Charge carried since the switch last changed, through R and onto C. Dashed: the two together, all the charge the source delivered. Once C stops filling, every new charge goes through R.');
     $('cLegNa').hidden = $('cLegK').hidden = mode !== 'g';
     document.querySelectorAll('[data-for]').forEach(r => r.hidden = r.dataset.for !== mode);
   }
@@ -1192,6 +1480,200 @@ function chipGroup(attr, onPick) {
   }
   readouts();
   requestAnimationFrame(loop);
+})();
+</script>
+<script>
+// ---------- tabs, Start here and Try it buttons ----------
+(() => {
+  const $ = id => document.getElementById(id);
+  function showTab(tab) {
+    tab.parentElement.querySelectorAll('[role=tab]').forEach(t => {
+      const on = t === tab;
+      t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1;
+      $(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  document.querySelectorAll('[role=tablist]').forEach(list => {
+    const tabs = [...list.querySelectorAll('[role=tab]')];
+    tabs.forEach((t, k) => {
+      t.addEventListener('click', () => showTab(t));
+      t.addEventListener('keydown', e => {
+        const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (d) { const n = tabs[(k + d + tabs.length) % tabs.length]; showTab(n); n.focus(); }
+      });
+    });
+  });
+  // The buttons work through the page's own controls, so they behave exactly like clicking them.
+  const into = id => $(id).scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const press = sel => { const b = document.querySelector(sel); if (b.getAttribute('aria-pressed') !== 'true') b.click(); };
+  const switchOn = id => { if ($(id).getAttribute('aria-checked') !== 'true') $(id).click(); };
+  const running = id => { if ($(id).textContent.trim() === 'Play') $(id).click(); };
+  document.querySelectorAll('[data-rctry]').forEach(b => b.addEventListener('click', () => {
+    const [what, id, v] = b.dataset.rctry.split(':');
+    if (what === 'circ-open') { showTab($('tab-circ')); press('[data-mode="g"]'); switchOn('cSwitch'); press('[data-cview="i"]'); running('cPlay'); into('circ-card'); }
+    else if (what === 'circ-charge') { showTab($('tab-circ')); press('[data-mode="g"]'); switchOn('cSwitch'); press('[data-cview="q"]'); running('cPlay'); into('circ-card'); }
+    else if (what === 'ions-open') { showTab($('tab-ion')); switchOn('gate'); running('play'); into('ion-card'); }
+    else if (what === 'set') {
+      if (id === 'cGNa') { press('[data-mode="g"]'); switchOn('cSwitch'); }
+      const el = $(id); el.value = v; el.dispatchEvent(new Event('input'));
+      showTab($('tab-circ')); running('cPlay'); into('circ-card');
+    }
+  }));
+})();
+</script>
+<script>
+// ---------- RC calculator: the circuit's equations, solved exactly and drawn on fixed axes ----------
+// Conductance change: C dV/dt = −[gNa(V − ENa) + gK(V − EK)]. Current injection: C dV/dt = I − gV.
+// Either way V relaxes exponentially to V∞ with τ = C / Σg. Units: µF/cm², mS/cm², mV, ms, µA/cm².
+(() => {
+  const $ = id => document.getElementById(id);
+  const ids = ['rGNa', 'rENa', 'rGK', 'rEK', 'rI', 'rGL', 'rC', 'rV0'];
+  const num = id => parseFloat($(id).value);
+  const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v);
+  const mv = v => (v < 0 ? '−' : '+') + Math.abs(v).toFixed(1) + ' mV';
+  const ua = v => (v < 0 ? '−' : v > 0 ? '+' : '') + Math.abs(v).toFixed(0) + ' µA/cm²';
+  const fmt = {
+    rGNa: v => v.toFixed(2) + ' mS/cm²', rGK: v => v.toFixed(2) + ' mS/cm²', rGL: v => v.toFixed(2) + ' mS/cm²',
+    rENa: v => sgn(v) + ' mV', rEK: v => sgn(v) + ' mV', rV0: v => sgn(v) + ' mV',
+    rI: v => sgn(v) + ' µA/cm²', rC: v => v.toFixed(1) + ' µF/cm²',
+  };
+  let mode = 'g';
+  let C = {};
+  const readColors = () => { const cs = getComputedStyle(document.documentElement);
+    ['surface', 'ink', 'muted', 'line', 'accent', 'na', 'k', 'pos'].forEach(n => C[n] = cs.getPropertyValue('--' + n).trim()); };
+
+  // the model: τ, V∞ and the currents at any voltage
+  function model() {
+    const Cm = num('rC'), V0 = num('rV0');
+    if (mode === 'g') {
+      const gNa = num('rGNa'), ENa = num('rENa'), gK = num('rGK'), EK = num('rEK'), G = gNa + gK;
+      const Vinf = (gNa * ENa + gK * EK) / G;
+      const branch = V => [{ I: gNa * (V - ENa), c: C.na, label: 'I_Na' }, { I: gK * (V - EK), c: C.k, label: 'I_K' }];
+      return { Cm, V0, G, Vinf, tau: Cm / G, branch, refs: [{ v: ENa, c: C.na, label: 'E_Na' }, { v: EK, c: C.k, label: 'E_K' }],
+        gNa, ENa, gK, EK };
+    }
+    const I = num('rI'), G = num('rGL');
+    const branch = V => [{ I: G * V, c: C.ink, label: 'I_R' }, { I: -I, c: C.muted, label: 'source' }];
+    return { Cm, V0, G, Vinf: I / G, tau: Cm / G, branch, refs: [], I };
+  }
+  const Vt = (m, t) => m.Vinf + (m.V0 - m.Vinf) * Math.exp(-t / m.tau);
+  const ICof = (m, V) => -m.branch(V).reduce((a, b) => a + b.I, 0);   // I_C = −Σ branch currents
+
+  // ---------- charts ----------
+  const W = 560, H = 300, L = 58, R = 64, T = 14, B = 34, pw = W - L - R, ph = H - T - B, TMAX = 10;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const setup = id => { const cv = $(id); cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); return c; };
+  const vc = setup('rVChart'), ic = setup('rIChart');
+  const tx = t => L + t / TMAX * pw;
+  function frame(c, lo, hi, step, unit) {
+    const y = v => T + (hi - v) / (hi - lo) * ph;
+    c.fillStyle = C.surface; c.fillRect(0, 0, W, H);
+    c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle'; c.lineWidth = 0.8;
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      c.strokeStyle = v === 0 ? C.muted : C.line; c.beginPath(); c.moveTo(L, y(v)); c.lineTo(W - R, y(v)); c.stroke();
+      c.fillStyle = C.muted; c.textAlign = 'right'; c.fillText(sgn(v), L - 6, y(v));
+    }
+    for (let t = 0; t <= TMAX; t += 2) {
+      c.strokeStyle = C.line; c.beginPath(); c.moveTo(tx(t), T); c.lineTo(tx(t), T + ph); c.stroke();
+      c.fillStyle = C.muted; c.textAlign = 'center'; c.fillText(t, tx(t), H - B + 12);
+    }
+    c.fillText('t (ms) after the switch closes', L + pw / 2, H - 8);
+    c.save(); c.translate(12, T + ph / 2); c.rotate(-Math.PI / 2); c.fillText(unit, 0, 0); c.restore();
+    return y;
+  }
+  function curve(c, y, f, col, width, dash) {
+    c.save(); c.beginPath(); c.rect(L, T, pw, ph); c.clip();
+    c.strokeStyle = col; c.lineWidth = width; c.setLineDash(dash || []); c.lineJoin = 'round'; c.beginPath();
+    for (let i = 0; i <= 200; i++) { const t = i / 200 * TMAX, Y = y(f(t)); i ? c.lineTo(tx(t), Y) : c.moveTo(tx(t), Y); }
+    c.stroke(); c.restore();
+  }
+  // labels at the right edge, nudged apart so they never overlap
+  function tags(c, list) {
+    c.font = '600 11px "IBM Plex Sans", sans-serif'; c.textAlign = 'left';
+    list.sort((a, b) => a.y - b.y);
+    for (let k = 1; k < list.length; k++) if (list[k].y - list[k - 1].y < 13) list[k].y = list[k - 1].y + 13;
+    list.forEach(l => { c.fillStyle = l.c; fillSub(c, l.t, W - R + 6, Math.max(T + 4, Math.min(T + ph - 2, l.y))); });
+  }
+  function drawV(m) {
+    const y = frame(vc, -110, 90, 50, 'V (mV)'), lab = [];
+    m.refs.forEach(r => { curve(vc, y, () => r.v, r.c, 1.2, [5, 4]); lab.push({ y: y(r.v), t: r.label, c: r.c }); });
+    curve(vc, y, () => m.Vinf, C.accent, 1.6, [2, 3]); lab.push({ y: y(m.Vinf), t: 'V_∞', c: C.accent });
+    curve(vc, y, t => Vt(m, t), C.ink, 2.4);
+    if (m.tau <= TMAX) {   // one τ in: 63% of the way
+      const Vtau = Vt(m, m.tau);
+      vc.setLineDash([2, 3]); vc.strokeStyle = C.muted; vc.lineWidth = 1; vc.beginPath(); vc.moveTo(tx(m.tau), y(Vtau)); vc.lineTo(tx(m.tau), T + ph); vc.stroke(); vc.setLineDash([]);
+      vc.fillStyle = C.ink; vc.beginPath(); vc.arc(tx(m.tau), y(Vtau), 4, 0, 6.283); vc.fill();
+      vc.font = '500 11px "IBM Plex Sans", sans-serif'; vc.textAlign = 'left'; vc.fillStyle = C.ink;
+      fillSub(vc, 'τ = ' + m.tau.toFixed(2) + ' ms', tx(m.tau) + 6, Math.min(T + ph - 8, y(Vtau) + (m.Vinf > m.V0 ? 12 : -12)));
+    }
+    tags(vc, lab);
+  }
+  function drawI(m) {
+    const peak = Math.max(10, ...m.branch(m.V0).map(b => Math.abs(b.I)), Math.abs(ICof(m, m.V0)));
+    const top = [25, 50, 100, 200, 500, 1000, 2000].find(v => v >= peak * 1.1) || 2000;
+    const y = frame(ic, -top, top, top / 2, 'I (µA/cm², outward +)'), lab = [];
+    m.branch(0).forEach((b, k) => {
+      curve(ic, y, t => m.branch(Vt(m, t))[k].I, b.c, 1.8);
+      lab.push({ y: y(m.branch(Vt(m, TMAX))[k].I), t: b.label, c: b.c });
+    });
+    curve(ic, y, t => ICof(m, Vt(m, t)), C.pos, 2.6); lab.push({ y: y(ICof(m, Vt(m, TMAX))), t: 'I_C', c: C.pos });
+    tags(ic, lab);
+  }
+
+  // ---------- readouts ----------
+  function update() {
+    ids.forEach(id => $(id + 'o').textContent = fmt[id](num(id)));
+    const m = model(), IC0 = ICof(m, m.V0);
+    $('rTau').textContent = m.tau.toFixed(2) + ' ms';
+    $('rVinf').textContent = mv(m.Vinf);
+    $('rIC0').textContent = ua(IC0);
+    $('rRate').textContent = (IC0 / m.Cm < 0 ? '−' : '+') + Math.abs(IC0 / m.Cm).toFixed(1) + ' mV/ms';
+    const br = m.branch(m.V0), f2 = v => v.toFixed(2);
+    const ind = '<br>';
+    $('rFormula').innerHTML = mode === 'g'
+      ? `τ = C / (g<sub>Na</sub> + g<sub>K</sub>) = ${m.Cm.toFixed(1)} / (${f2(m.gNa)} + ${f2(m.gK)}) = <span class="res">${m.tau.toFixed(2)} ms</span>` + ind +
+        `V<sub>∞</sub> = (g<sub>Na</sub>E<sub>Na</sub> + g<sub>K</sub>E<sub>K</sub>) / (g<sub>Na</sub> + g<sub>K</sub>) = (${f2(m.gNa)}·${sgn(m.ENa)} + ${f2(m.gK)}·(${sgn(m.EK)})) / ${f2(m.G)} = <span class="res">${mv(m.Vinf)}</span>` + ind +
+        `at V<sub>start</sub>: I<sub>Na</sub> = ${f2(m.gNa)}·(${sgn(m.V0)} − ${sgn(m.ENa)}) = ${ua(br[0].I)}, I<sub>K</sub> = ${f2(m.gK)}·(${sgn(m.V0)} − (${sgn(m.EK)})) = ${ua(br[1].I)}, I<sub>C</sub> = <span class="res">${ua(IC0)}</span>`
+      : `τ = C / g = ${m.Cm.toFixed(1)} / ${f2(m.G)} = <span class="res">${m.tau.toFixed(2)} ms</span>` + ind +
+        `V<sub>∞</sub> = I / g = ${sgn(m.I)} / ${f2(m.G)} = <span class="res">${mv(m.Vinf)}</span>` + ind +
+        `at V<sub>start</sub>: I<sub>R</sub> = g·V = ${f2(m.G)}·${sgn(m.V0)} = ${ua(br[0].I)}, I<sub>C</sub> = I − I<sub>R</sub> = <span class="res">${ua(IC0)}</span>`;
+    const pct = Math.round(100 * (1 - Math.exp(-TMAX / m.tau)));
+    $('rCap').innerHTML = `The capacitor current is largest at the start, ${ua(IC0)}, and dies away with τ = ${m.tau.toFixed(2)} ms; by the end of the chart (${TMAX} ms) V has covered ${pct}% of the way to V<sub>∞</sub>.`;
+    drawV(m); drawI(m);
+  }
+  function setMode(m) {
+    mode = m;
+    $('rMode-g').setAttribute('aria-pressed', String(m === 'g'));
+    $('rMode-inj').setAttribute('aria-pressed', String(m === 'inj'));
+    document.querySelectorAll('[data-rfor]').forEach(e => e.hidden = e.dataset.rfor !== m);
+    $('rV0cap').innerHTML = m === 'g'
+      ? 'the voltage just before the channels open; at rest with only K⁺ channels open, this is E<sub>K</sub>'
+      : 'the voltage just before the source turns on; with no source the resting voltage here is 0';
+    update();
+  }
+  $('rMode-g').addEventListener('click', () => { setMode('g'); $('rV0').value = $('rEK').value; update(); });
+  $('rMode-inj').addEventListener('click', () => { setMode('inj'); $('rV0').value = 0; update(); });
+  ids.forEach(id => $(id).addEventListener('input', update));
+
+  // to and from the circuit at the top of the page, through its own sliders
+  const pair = [['rGNa', 'cGNa'], ['rENa', 'cENa'], ['rGK', 'cGK'], ['rEK', 'cEK'], ['rI', 'cI'], ['rGL', 'cGL'], ['rC', 'cC']];
+  $('rFromCirc').addEventListener('click', () => {
+    const m = document.querySelector('[data-mode="g"]').getAttribute('aria-pressed') === 'true' ? 'g' : 'inj';
+    pair.forEach(([r, c]) => $(r).value = $(c).value);
+    setMode(m);
+    $('rV0').value = m === 'g' ? $('cEK').value : 0;
+    update();
+  });
+  $('rToCirc').addEventListener('click', () => {
+    const b = document.querySelector(`[data-mode="${mode}"]`); if (b.getAttribute('aria-pressed') !== 'true') b.click();
+    pair.forEach(([r, c]) => { const e = $(c); e.value = $(r).value; e.dispatchEvent(new Event('input')); });
+    document.querySelector('[data-mode]').closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  readColors(); setMode('g');
+  const recolor = () => setTimeout(() => { readColors(); update(); }, 0);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', recolor);
+  new MutationObserver(recolor).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
 </script>
 </body>

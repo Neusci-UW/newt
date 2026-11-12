@@ -59,6 +59,8 @@ attention; it isn't security: anyone can read a lesson file. */
   const item = key => A.controls?.[key] || A.values?.[key];
   const get = key => { const c = item(key); try { return c ? +c.get() : NaN; } catch (e) { return NaN; } };
   const labelOf = key => item(key)?.label || key;
+  // a value's name as HTML, with "V_m" as V<sub>m</sub>
+  const labelHtml = key => esc(labelOf(key)).replace(/_([A-Za-z0-9∞]+)/g, '<sub>$1</sub>');
   const unitOf = key => item(key)?.unit || '';
   const verdict = ok => `<b class="${ok ? 'ok' : 'no'}">${ok ? 'Right.' : 'Not quite.'}</b> `;
   // An element's text, leaving out anything a lesson added and any math: math reads as TeX until
@@ -242,7 +244,7 @@ html.ls-editing body{padding-right:420px}
           show(`You predicted <b>${signed(pred, unit)}</b>; the page gives <b>${signed(got, unit)}</b>. ` + verdict(ok) + explain);
           if (keep) markDone(q, { pred, got, ok });
         } else {
-          const result = keep ? (q.report || []).map(k => `${labelOf(k)} = ${plain(get(k), unitOf(k))}`).join(', ') : saved?.result;
+          const result = keep ? (q.report || []).map(k => `${labelHtml(k)} = ${plain(get(k), unitOf(k))}`).join(', ') : saved?.result;
           show('<b class="ok">Done.</b> ' + (result ? 'You got there with ' + result + '. ' : '') + explain);
           if (keep) markDone(q, { result, ok: true });
         }
@@ -250,7 +252,7 @@ html.ls-editing body{padding-right:420px}
       const watch = () => {
         if (!c.isConnected) { watchers.delete(watch); return; }
         const shown = [q.done?.key, q.measure?.key].filter((k, i, a) => k && a.indexOf(k) === i);
-        live.textContent = 'Now: ' + shown.map(k => `${labelOf(k)} = ${plain(get(k), unitOf(k))}`).join(' · ');
+        live.innerHTML = 'Now: ' + shown.map(k => `${labelHtml(k)} = ${esc(plain(get(k), unitOf(k)))}`).join(' · ');
         if (!met(q.done)) return;
         watchers.delete(watch); live.hidden = true; go.hidden = true;
         finish(isPredict ? get(q.measure?.key) - (q.measure?.relative ? start : 0) : 0, true);
@@ -355,7 +357,8 @@ html.ls-editing body{padding-right:420px}
   // ---------- the lesson bar ----------
   let bar = null;
   function drawBar() {
-    if (!L || editing) { bar?.remove(); bar = null; return; }
+    // a lesson with no questions shows no bar, except where it can be edited
+    if (!L || editing || (!L.questions.length && !editAllowed)) { bar?.remove(); bar = null; return; }
     if (!bar) { bar = mk('div', 'ls-bar'); document.body.appendChild(bar); }
     const n = order.length, d = order.filter(q => progress[q.id]?.done).length;
     const many = Object.keys(lessons).length > 1;

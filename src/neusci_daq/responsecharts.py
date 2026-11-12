@@ -192,6 +192,8 @@ class TracesChart(Chart):
                 pw = plot_widget()
                 p = pw.getPlotItem()
                 p.setTitle(label, size="9pt")             # the name above, the unit beside
+                p.layout.setRowFixedHeight(0, 16)         # a small title, so a short row has room for its numbers
+                p.titleLabel.setMaximumHeight(16)
                 label_axis(p, "left", "", unit)
                 self._draw_series(p, ys, fs)
                 if plots:
@@ -336,11 +338,11 @@ class PsthChart(_AverageChart):
 
         def psth(trig: dict, color: str, name: str | None, filled: bool) -> int:
             """One stimulus-triggered rate: the mean over stimuli, with its spread."""
-            centeres, rates = A.triggered_rates(times, trig, self.before.value(), self.after.value(), width)
+            centers, rates = A.triggered_rates(times, trig, self.before.value(), self.after.value(), width)
             if not len(rates):
                 return 0
             mean, sd, sem, _ = A.mean_spread(rates)
-            edges = np.append(centeres - width / 2, centeres[-1] + width / 2)
+            edges = np.append(centers - width / 2, centers[-1] + width / 2)
             c = QtGui.QColor(color)
             if spread:
                 s_ = np.nan_to_num(sd if spread == "sd" else sem)
@@ -367,7 +369,7 @@ class PsthChart(_AverageChart):
             n_trig += psth({k: triggers[k] for k in blocks}, color, f"{label} (n={n})" if label and len(sets) > 1
                            else None, len(sets) == 1)
         if len(sets) > 1:
-            pp.setTitle(f"Stimulus-triggered spike rate by {'stimulus group' if averaged else 'block'} "
+            pp.setTitle(f"Stimulus-triggered spike rate by {'stimulus group' if averaged else 'trial'} "
                         f"({n_trig} stimuli{tag})", color=self._fg())
         else:
             pp.setTitle(f"Stimulus-triggered spike rate ({n_trig} stimuli{tag})" if n_trig else

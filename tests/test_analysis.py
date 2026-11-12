@@ -609,6 +609,29 @@ def test_any_waveform_on_the_stimulus_channel_is_a_stimulus():
     assert A.unique_names({1: "Sine 5 Hz", 2: "Sine 5 Hz", 3: "X"}) == {1: "Sine 5 Hz", 2: "Sine 5 Hz (2)", 3: "X"}
 
 
+def test_a_sine_in_bursts_is_named_as_one_and_grouped_by_frequency():
+    from neusci_daq.analysispage import AnalysisPage
+    fs = 20000
+    t = np.arange(4 * fs) / fs
+    rng = np.random.default_rng(0)
+    on = (t % 1.0) < 0.4                                             # 400 ms on, every second
+
+    def block(hz, amp=1.0):
+        y = np.where(on, amp * np.sin(2 * np.pi * hz * t), 0.0) + 0.001 * rng.standard_normal(t.size)
+        return {"data": np.vstack([y]), "channel_names": ["Stim"], "units": ["V"], "sample_rate": float(fs),
+                "comments": []}
+    blocks = [block(20), block(20), block(50), block(50, 0.5), block(20, 0.0)]
+    groups = AnalysisPage._group(blocks, "Stim")
+    assert [b for _, b in groups] == [[0, 1], [2], [3], [4]]
+    assert [n for n, _ in groups][:3] == ["Sine 20 Hz bursts, ±1 V", "Sine 50 Hz bursts, ±1 V",
+                                          "Sine 50 Hz bursts, ±500 mV"]
+    sig = A.stimulus_signature(blocks[0]["data"][0], fs)
+    assert sig[0] == "burst" and sig[1] == pytest.approx(20, abs=0.5) and sig[2] == pytest.approx(1, abs=0.02)
+    # a train of pulses one way is still pulses, and its size isn't 0
+    pulses = np.where((t % 0.05) < 0.001, 2.0, 0.0)
+    assert A.stimulus_signature(pulses, fs)[:3] == ("pulse", 80, 2.0)
+
+
 def test_the_lab_recording_sorts_into_its_25_sine_stimuli():
     """AU26_Lab1_Data.mat: 250 blocks, a sine on Channel 1 at 5 frequencies × 5 amplitudes."""
     import glob
@@ -628,7 +651,7 @@ def test_mean_spread():
     assert np.allclose(mean, [3, 4, 5]) and list(n) == [3, 3, 1]
     assert sd[0] == pytest.approx(2.0) and sem[0] == pytest.approx(2 / np.sqrt(3))
     assert np.isnan(sd[2]) and np.isnan(sem[2])                     # one trial: no spread
-    centeres, rates = A.triggered_rates({0: np.array([0.105, 0.11, 0.62])}, {0: np.array([0.1, 0.6])}, 10, 30, 10)
+    centers, rates = A.triggered_rates({0: np.array([0.105, 0.11, 0.62])}, {0: np.array([0.1, 0.6])}, 10, 30, 10)
     assert rates.shape == (2, 4) and list(rates[:, 1]) == [100.0, 0.0]   # 5 ms after: 1 spike in 10 ms
 
 

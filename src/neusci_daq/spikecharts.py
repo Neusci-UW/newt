@@ -330,7 +330,7 @@ class RasterChart(SpikeChart):
         self.point_size = dot_size(self.main.settings, "raster_point_size", 2, 12, "The size of the dots")
         self.field("dots", "Dot size", self.point_size)
         p = self.plot.getPlotItem()
-        p.setLabel("left", "block")
+        p.setLabel("left", "trial")
         p.setLabel("bottom", "time in trial", units="s")
         p.invertY(True)                                  # block 1 at the top
         p.getAxis("left").setStyle(showValues=False)
@@ -571,7 +571,7 @@ class IntervalsChart(_HistChart):
         if ev is None or not len(ev.t):
             return
         ip = self.plot.getPlotItem()
-        ip.setLabel("left", "fraction of the unit's intervals" if self.norm.isChecked() else "intervals")
+        ip.setLabel("left", "fraction of the unit's intervals" if self.norm.isChecked() else "count")
         every = A.intervals_ms(ev)
         # up to the 98th percentile, so a few long gaps don't squash the rest
         top = float(np.percentile(every, 98)) if len(every) else 100.0

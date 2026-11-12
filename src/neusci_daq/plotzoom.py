@@ -12,7 +12,7 @@ import warnings
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 
 # Ctrl (or Cmd: Qt reports Cmd as Control on macOS, and Ctrl as Meta) + drag: box zoom.
@@ -362,10 +362,65 @@ def light_grid(p: pg.PlotItem) -> None:
         p.getAxis(ax).setStyle(maxTickLevel=1)
 
 
+def fit_title(p: pg.PlotItem) -> None:
+    """Shorten the plot's title with … to the width there is, the whole of it as a tooltip.
+    pyqtgraph makes a plot at least as wide as its title, so a long title widened the plot
+    past its chart's edge, cutting off the right of the plot."""
+    lab = p.titleLabel
+    set_text, place = lab.setText, lab.resizeEvent
+    lab._shown, lab._fitting = None, False
+
+    def no_min_width() -> None:
+        h = lab.itemRect().height()
+        lab.setMinimumWidth(0)
+        lab.setMinimumHeight(h)
+        lab._sizeHint = {QtCore.Qt.SizeHint.MinimumSize: (0, h), QtCore.Qt.SizeHint.PreferredSize: (0, h),
+                         QtCore.Qt.SizeHint.MaximumSize: (-1, -1), QtCore.Qt.SizeHint.MinimumDescent: (0, 0)}
+        lab.updateGeometry()
+
+    def new_text(text, **args) -> None:
+        lab._shown = None                          # the whole text is up: shorten it again
+        set_text(text, **args)
+
+    def resized(ev) -> None:
+        if not lab._fitting and lab.width() > 0:
+            full = lab.text
+            shown = QtGui.QFontMetricsF(lab.item.font()).elidedText(
+                full, QtCore.Qt.TextElideMode.ElideRight, lab.width() - 8)
+            if shown != lab._shown:
+                lab._fitting = True
+                set_text(shown)
+                lab.text, lab._fitting, lab._shown = full, False, shown
+                lab.setToolTip(full if shown != full else "")
+        place(ev)
+    lab.updateMin, lab.setText, lab.resizeEvent = no_min_width, new_text, resized
+    no_min_width()
+
+
+class RoomyAxis(pg.AxisItem):
+    """A y axis whose numbered ticks stay at least a line apart: on a short plot
+    pyqtgraph always numbers at least two intervals, and the numbers ran into each other."""
+
+    def tickSpacing(self, minVal, maxVal, size):
+        levels = super().tickSpacing(minVal, maxVal, size)
+        if not levels or size <= 0 or maxVal == minVal:
+            return levels
+        room = QtGui.QFontMetricsF(self.style["tickFont"] or QtGui.QFont()).ascent() + 2   # digits: no descenders
+        per_px = abs(maxVal - minVal) / size
+        major, offset = levels[0]
+        while major / per_px < room:                  # the next of 1, 2, 5, 10, 20, 50...
+            ten = 10.0 ** np.floor(np.log10(major) + 1e-9)
+            major = float(next(m * ten for m in (2, 5, 10) if m * ten > major * 1.0001))
+        return [(major, offset)] + [lv for lv in levels[1:] if lv[0] < major]
+
+
 def plot_widget(**kw) -> pg.PlotWidget:
-    """A pg.PlotWidget with the app's wheel rules and a light grid."""
+    """A pg.PlotWidget with the app's wheel rules, a light grid, a title that fits and y
+    numbers that don't overlap."""
+    kw.setdefault("axisItems", {"left": RoomyAxis("left")})
     pw = pg.PlotWidget(viewBox=WheelViewBox(), **kw)
     light_grid(pw.getPlotItem())
+    fit_title(pw.getPlotItem())
     return pw
 
 

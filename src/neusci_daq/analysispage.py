@@ -174,6 +174,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.drawer = QtWidgets.QWidget()            # one panel shows at a time; the hidden ones take no room
         drawer_row = QtWidgets.QHBoxLayout(self.drawer)
         drawer_row.setContentsMargins(0, 0, 0, 0)
+        self.blocks_panel.setMinimumWidth(260)        # as wide as the other panels: the names and buttons fit
         self.panels = {"trials": self.blocks_panel, "groups": drawer(self.blocks_panel.group_extras),
                        "channels": drawer(self.blocks_panel.extras), "spikes": drawer(self.raw)}
         for w in self.panels.values():
@@ -182,7 +183,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.rail.picked.connect(self.open_panel)
         self.side = SettingsPanel(self)
         self.side_scroll = scroll_column(self.side)
-        self.side_scroll.setMinimumWidth(260)
+        self.side_scroll.setMinimumWidth(300)         # the settings fit without cutting off their right
         self.side_scroll.setMaximumWidth(340)
         self.body = QtWidgets.QHBoxLayout()
         self.body.setSpacing(0)
@@ -528,7 +529,7 @@ class AnalysisPage(QtWidgets.QWidget):
             keys[i] = k
         if how != "notes":
             # a block where the channel is nearly flat, next to the others, had no stimulus
-            size = lambda k: abs(k[3]) if k[0] == "pulse" else k[2]
+            size = lambda k: abs(k[2])            # a pulse's size, a wave's amplitude
             biggest = max((size(k) for k in keys.values() if k is not None), default=0.0)
             keys = {i: (k if k is not None and size(k) >= 0.1 * biggest else None) for i, k in keys.items()}
             # measured signatures jitter: blocks with the same stimulus share the first one's
@@ -590,9 +591,11 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.sort_box.setCurrentIndex(max(0, self.blocks_panel.sort_box.findData(self._looks["sort"])))
         self.blocks_panel.select(*self._highlighted)
         n = len([g for g in self.groups if g[0] != "No stimulus found"])
+        none = sum(len(b) for name, b in self.groups if name == "No stimulus found")
         self.group_note.setText(
             "No stimulus channel or notes: pick the channel that recorded the stimulus" if not how else
             f"{n} different stimul{'us' if n == 1 else 'i'}" + (" (from the notes)" if how == "notes" else "")
+            + (f", and {none} trial{'' if none == 1 else 's'} with none" if none else "")
             + ": tick a group to see just its trials" if n else
             f"No stimulus pulses found on {how}: is it the right channel?" if how != "notes" else
             "No stimuli in the notes")

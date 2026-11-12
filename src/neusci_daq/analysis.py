@@ -440,7 +440,7 @@ def triggered_rates(event_times: dict[int, np.ndarray], triggers: dict[int, np.n
                     before_ms: float, after_ms: float, bin_ms: float):
     """Spikes/s in bins around each trigger, one row per trigger (trial): from before_ms
     before it to after_ms after. `event_times` and `triggers` are seconds within each
-    block. Returns (bin centeres ms, rates: triggers × bins)."""
+    block. Returns (bin centers ms, rates: triggers × bins)."""
     edges = np.arange(-before_ms, after_ms + bin_ms / 2, bin_ms)
     rows = []
     for b, trig in triggers.items():
@@ -454,9 +454,9 @@ def triggered_rates(event_times: dict[int, np.ndarray], triggers: dict[int, np.n
 def triggered_rate(event_times: dict[int, np.ndarray], triggers: dict[int, np.ndarray],
                    before_ms: float, after_ms: float, bin_ms: float):
     """Stimulus-triggered spike rate (a PSTH): the trials' rates (triggered_rates)
-    averaged. Returns (bin centeres ms, rate, n triggers)."""
-    centeres, rates = triggered_rates(event_times, triggers, before_ms, after_ms, bin_ms)
-    return centeres, rates.mean(0) if len(rates) else np.zeros(len(centeres)), len(rates)
+    averaged. Returns (bin centers ms, rate, n triggers)."""
+    centers, rates = triggered_rates(event_times, triggers, before_ms, after_ms, bin_ms)
+    return centers, rates.mean(0) if len(rates) else np.zeros(len(centers)), len(rates)
 
 
 def mean_spread(rows: np.ndarray):
@@ -576,8 +576,10 @@ def wave_signature(y: np.ndarray, fs: float) -> tuple | None:
 
 def stimulus_signature(y: np.ndarray, fs: float) -> tuple | None:
     """What a channel you've said records the stimulus shows in a block: brief pulses
-    on a flat baseline as ("pulse", pulses per train, size, width ms, interval ms),
-    anything else as wave_signature. None when there's no samples or it's flat."""
+    on a flat baseline as ("pulse", pulses per train, size, width ms, interval ms), a
+    wave switched on and off (pulses swinging both ways) as ("burst", ...) with the
+    fields of wave_signature for the wave while it's on, anything else as
+    wave_signature. None when there's no samples or it's flat."""
     y = np.nan_to_num(np.asarray(y, float))
     if not y.size:
         return None
@@ -585,15 +587,46 @@ def stimulus_signature(y: np.ndarray, fs: float) -> tuple | None:
     a = np.abs(d)
     pulsy = a.max() >= 10 * max(noise_sd(y), 1e-12) and np.mean(a > 0.5 * a.max()) < 0.3
     if pulsy:
+        burst = burst_signature(y, fs)
+        if burst is not None:
+            return burst
         p = pulse_signature(y, fs)
         if p is not None:
             return ("pulse",) + tuple(p)
     return wave_signature(y, fs)
 
 
+def burst_signature(y: np.ndarray, fs: float) -> tuple | None:
+    """A wave on in bursts, on a flat baseline: ("burst", frequency Hz, amplitude,
+    offset, shape) of the wave while it's on (see wave_signature), or None if the
+    channel's pulses don't swing both ways (at least a quarter of them each way)."""
+    d = y - np.median(y)
+    a = np.abs(d)
+    on = a > 0.5 * a.max()
+    edges = np.flatnonzero(np.diff(np.r_[0, on.astype(np.int8), 0]))
+    starts, ends = edges[::2], edges[1::2]
+    if len(starts) < 4:
+        return None
+    up = np.mean([d[s:e][np.argmax(a[s:e])] > 0 for s, e in zip(starts, ends)])
+    if not 0.25 <= up <= 0.75:
+        return None
+    # each burst, from half a swing before its first pulse to half a swing after its last
+    pad = int(np.median(np.diff(starts))) // 2
+    cut = np.flatnonzero(np.diff(starts) / fs * 1000 >= TRAIN_GAP_MS)
+    firsts, lasts = starts[np.r_[0, cut + 1]], ends[np.r_[cut, len(ends) - 1]]
+    wave = np.concatenate([y[max(0, s - pad):e + pad] for s, e in zip(firsts, lasts)])
+    w = wave_signature(wave, fs)
+    if w is None:
+        return None
+    # the bursts' joins blur the spectrum: the frequency is from the swings, two per cycle
+    swings = np.diff(starts) / fs * 1000
+    swings = swings[swings < TRAIN_GAP_MS]
+    return ("burst", float(500 / swings.mean()) if len(swings) else w[1]) + w[2:]
+
+
 def same_stimulus(a: tuple, b: tuple, fs: float) -> bool:
     """Whether two signatures are the same stimulus. Pulses: the same pulses per train,
-    size within 5%, width and interval within 10% or 2 samples. Waves: frequency
+    size within 5%, width and interval within 10% or 2 samples. Waves (or bursts): frequency
     within 3% (or 0.6 Hz), amplitude within 5%, offset within 5% of the amplitude,
     and the same shape. Signatures without a kind are pulse_signature's."""
     if isinstance(a[0], str) or isinstance(b[0], str):
@@ -601,7 +634,7 @@ def same_stimulus(a: tuple, b: tuple, fs: float) -> bool:
             return False
         if a[0] == "pulse":
             return same_stimulus(a[1:], b[1:], fs)
-        _, fa, aa, oa, sa = a
+        _, fa, aa, oa, sa = a                       # a wave, or a wave in bursts
         _, fb, ab, ob, sb = b
         near = lambda x, y, rel, floor: abs(x - y) <= max(rel * max(abs(x), abs(y)), floor)
         return (near(fa, fb, 0.03, 0.6) and near(aa, ab, 0.05, 0.0)
@@ -635,22 +668,22 @@ def describe_signature(sig: tuple, unit: str = "V") -> str:
     from .units import best_prefix
     if sig[0] == "pulse":
         sig = sig[1:]
-    elif sig[0] == "wave":
-        _, freq, amp, offset, shape = sig
+    elif sig[0] in ("wave", "burst"):
+        what, freq, amp, offset, shape = sig
         kind = ("Sine" if abs(shape - 0.707) < 0.06 else "Square wave" if shape > 0.9
                 else "Triangle wave" if abs(shape - 0.577) < 0.05 else "Wave")
         v, u = best_prefix(_sig(amp), unit)
-        out = f"{kind} {_sig(freq):g} Hz, ±{v:.2g} {u}"
+        out = f"{kind} {_sig(freq):g} Hz{' bursts' if what == 'burst' else ''}, ±{_sig(v):g} {u}"
         if abs(offset) > 0.1 * amp:
             o, ou = best_prefix(_sig(offset), unit)
-            out += f", offset {o:.2g} {ou}"
+            out += f", offset {_sig(o):g} {ou}"
         return out
     # to 0.1 ms: finer than that is a sample's jitter, not a different stimulus
     n, size, width, gap = sig[0], _sig(sig[1]), round(sig[2], 1), round(sig[3], 1)
     v, u = best_prefix(size, unit)
     if n == 1:
-        return f"Pulse of {v:.2g} {u}, {width:g} ms"
-    return f"Train of {n} pulses of {v:.2g} {u}, {width:g} ms, every {gap:g} ms"
+        return f"Pulse of {_sig(v):g} {u}, {width:g} ms"
+    return f"Train of {n} pulses of {_sig(v):g} {u}, {width:g} ms, every {gap:g} ms"
 
 
 def unique_names(labels: dict[object, str]) -> dict[object, str]:

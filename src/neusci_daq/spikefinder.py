@@ -30,7 +30,7 @@ class SpikeFinder(View):
         self.unit_opacity: dict[int, float] = {}  # 0-based unit -> how solid it's drawn, if not fully
         self._unticked: set[int] = set()          # units left out of the charts
         left = QtWidgets.QVBoxLayout(self)
-        left.setContentsMargins(0, 0, 0, 0)
+        left.setContentsMargins(6, 6, 6, 6)          # as the other panels
         left.setSpacing(6)
         self.channel = QtWidgets.QComboBox()
         self.channel.setToolTip("The channel to find action potentials on")
@@ -48,12 +48,16 @@ class SpikeFinder(View):
         buttons.addWidget(self.btn_clear)
         v.addLayout(buttons)
         self.table = QtWidgets.QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["Unit", "Count", "Rate", "Amplitude", "Width", "Color"])
-        self.table.horizontalHeaderItem(4).setToolTip("Mean waveform: trough to peak")
+        # short headings, the units in them: the panel is narrow, and the numbers have to show
+        self.table.setHorizontalHeaderLabels(["Unit", "n", "Hz", "Size", "ms", ""])
+        for c, tip in enumerate(("The unit, with its color", "How many action potentials it fired",
+                                 "Its mean firing rate (spikes/s)", "Its mean amplitude",
+                                 "Mean waveform width, trough to peak", "Pick its color")):
+            self.table.horizontalHeaderItem(c).setToolTip(tip)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self.table.setToolTip("Tick the units to include: every chart shows just those, unless it has its own")
         self.table.setMinimumHeight(90)
@@ -470,7 +474,7 @@ class SpikeFinder(View):
             u = s["unit"] - 1
             r = self.table.rowCount()
             self.table.insertRow(r)
-            unit_item = QtWidgets.QTableWidgetItem(f"Unit {s['unit']}")
+            unit_item = QtWidgets.QTableWidgetItem(f"{s['unit']}")
             unit_item.setIcon(style.dot_icon(self.color_of(u)))
             unit_item.setFlags(QtCore.Qt.ItemFlag.ItemIsUserCheckable | QtCore.Qt.ItemFlag.ItemIsEnabled)
             unit_item.setCheckState(QtCore.Qt.CheckState.Unchecked if u in self._unticked
@@ -482,8 +486,8 @@ class SpikeFinder(View):
             pick.setFixedWidth(26)
             pick.setText("▾")
             self.table.setCellWidget(r, 5, pick)
-            for c, text in enumerate((f"{s['count']}", f"{s['rate']:.2f} /s", self.fmt(s['amplitude']),
-                                      f"{s['width_ms']:.2f} ms"), 1):
+            for c, text in enumerate((f"{s['count']}", f"{s['rate']:.1f}", self.fmt(s['amplitude']),
+                                      f"{s['width_ms']:.2f}"), 1):
                 self.table.setItem(r, c, QtWidgets.QTableWidgetItem(text))
         self.table.blockSignals(False)
         n = len(ev.t)

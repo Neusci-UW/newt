@@ -149,7 +149,15 @@ def show_scale_bar(pw: pg.PlotWidget, on: bool, color, y_unit: str | None = None
 def style_plot(pw: pg.PlotWidget, th) -> None:
     pw.setBackground(th.background)
     p = pw.getPlotItem()
-    p.setTitle(p.titleLabel.text, color=th.foreground)
+    if p.titleLabel.isVisible():                   # recolor it, keeping its row's height
+        p.titleLabel.setText(p.titleLabel.text, color=th.foreground)
+    else:
+        p.setTitle(p.titleLabel.text, color=th.foreground)
+    if p.legend is not None:                       # readable over the data it sits on
+        back = pg.mkColor(th.background)
+        back.setAlpha(200)
+        p.legend.setBrush(back)
+        p.legend.setLabelTextColor(th.foreground)
     for ax in ("left", "bottom"):
         p.getAxis(ax).setPen(th.foreground)
         p.getAxis(ax).setTextPen(th.foreground)

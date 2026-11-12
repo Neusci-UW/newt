@@ -238,9 +238,9 @@ class TrialsBrowser(QtWidgets.QWidget):
             if name not in hidden_pages:
                 head.setIcon(0, style.dot_icon(colors[g % len(colors)]))
             self._tick(head, name in hidden_pages, True)
-            head.setToolTip(0, "Click to see this group's average; double-click to rename it; right-click "
-                               "to change its color" if self.for_analysis else
-                            "Double-click to rename this group; its trials take the new name")
+            head.setToolTip(0, f"{name}: " + ("click to see this group's average; double-click to rename it; "
+                                              "right-click to change its color" if self.for_analysis else
+                                              "double-click to rename this group; its trials take the new name"))
             tree.addTopLevelItem(head)
             for k, i in enumerate(blocks, 1):
                 stem, dur, *note = labels.get(i, (f"trial {i + 1}", "?"))
@@ -255,7 +255,7 @@ class TrialsBrowser(QtWidgets.QWidget):
                 head.addChild(item)
             head.setExpanded(name in self._open)
             n_blocks += len(blocks)
-        self.title.setText(f"<b>Trials</b> ({n_blocks})" + (f" in {len(pages)} Groups" if len(pages) > 1 else ""))
+        self.title.setText(f"<b>Trials</b> ({n_blocks})" + (f" in {len(pages)} groups" if len(pages) > 1 else ""))
         self.btn_reset.setEnabled(can_reset)
         tree.blockSignals(False)
         tree.setEnabled(not busy)

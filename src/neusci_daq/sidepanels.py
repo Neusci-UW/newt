@@ -9,7 +9,7 @@ Pick several and the panel changes them together.
 """
 from __future__ import annotations
 
-from pyqtgraph.Qt import QtCore, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
 from .channels import ColorButton
@@ -20,6 +20,37 @@ PANELS = (("trials", "Trials", "Every trial, in its group: pick the ones the cha
           ("groups", "Groups", "Which groups every chart shows, and their colors"),
           ("channels", "Channels", "The stimulus and analyzed channels, amplifier gains and the stimulus fit"),
           ("spikes", "Spikes", "Find action potentials, and tick and color the units"))
+
+
+class NameBox(QtWidgets.QCheckBox):
+    """A check box for a group: a long name is shortened with … to fit the panel, rather
+    than widening it, and shows whole as a tooltip."""
+
+    def __init__(self, name: str, tip: str = ""):
+        super().__init__(name)
+        self._name, self._tip = name, tip
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(60)
+        self._fit()
+
+    def _fit(self) -> None:
+        opt = QtWidgets.QStyleOptionButton()
+        self.initStyleOption(opt)
+        label = self.style().subElementRect(QtWidgets.QStyle.SubElement.SE_CheckBoxContents, opt, self)
+        room = label.width() - (self.iconSize().width() + 4 if not self.icon().isNull() else 0) - 2
+        shown = QtGui.QFontMetrics(self.font()).elidedText(self._name, QtCore.Qt.TextElideMode.ElideRight,
+                                                           max(room, 0))
+        if shown != self.text():
+            self.setText(shown)
+        self.setToolTip(self._tip if shown == self._name else f"{self._name}\n{self._tip}".strip())
+
+    def setIcon(self, icon) -> None:
+        super().setIcon(icon)
+        self._fit()
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self._fit()
 
 
 class Rail(QtWidgets.QWidget):
@@ -87,8 +118,7 @@ class GroupColors(QtWidgets.QWidget):
             row = QtWidgets.QWidget()
             h = QtWidgets.QHBoxLayout(row)
             h.setContentsMargins(0, 0, 0, 0)
-            box = QtWidgets.QCheckBox(name)
-            box.setToolTip(f"Show {name} in every chart that follows the page ({len(blocks)} trial(s))")
+            box = NameBox(name, f"Show {name} in every chart that follows the page ({len(blocks)} trial(s))")
             box.setChecked(name not in hidden)
             box.toggled.connect(lambda on, n=name: page.set_hidden(("page", n), not on))
             pick = ColorButton(page.group_color(g), lambda c, n=name: page.set_page_color(n, c),
@@ -150,7 +180,7 @@ class ChartGroups(QtWidgets.QGroupBox):
                 w.deleteLater()
         own = all(c.pin is not None for c in self.charts)
         for g, (name, blocks) in enumerate(self.page.shown):
-            box = QtWidgets.QCheckBox(name)
+            box = NameBox(name)
             box.setIcon(style.dot_icon(self.page.group_color(g)))
             ticked = [own and name in c.pin.get("pages", []) for c in self.charts] if own else \
                 [name not in self.page._looks["hidden_groups"]] * len(self.charts)
@@ -197,6 +227,7 @@ class ChartLook(QtWidgets.QGroupBox):
         for axis in ("x", "y"):
             for end, word in ((0, "min"), (1, "max")):
                 box = UnitSpinBox(-1e9, 1e9, "", decimals=6)
+                box.setMinimumWidth(70)               # its range would size it for ±1,000,000,000.000000
                 box.setToolTip(f"Where the {axis.upper()} axis {'starts' if end == 0 else 'ends'}. Typing a value "
                                f"turns Auto off")
                 auto = QtWidgets.QCheckBox("Auto")

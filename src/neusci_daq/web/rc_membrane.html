@@ -52,6 +52,10 @@ h2.part{font-size:20px;font-weight:600;margin:12px 0 0;text-wrap:balance}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
 .stage{display:flex;flex-direction:column;gap:12px}
 canvas{display:block;width:100%;height:auto;border-radius:6px}
+#sim{cursor:grab;touch-action:none}
+#sim.dragging{cursor:grabbing}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.toolbar .spacer{flex:1}
 .runbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
 .runbar input[type=range]{flex:1 1 200px;min-width:140px;max-width:380px}
 .runbar output{font-family:var(--font-mono);font-size:13px;min-width:96px;font-variant-numeric:tabular-nums}
@@ -129,14 +133,15 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
 <div class="top stacked">
   <section class="card stage">
     <div class="btns" role="group" aria-label="Circuit">
-      <button class="chip" data-mode="inj" aria-pressed="false">Current injection</button>
-      <button class="chip" data-mode="g" aria-pressed="true">Conductance change (Na⁺ channels)</button>
+      <button class="chip" data-mode="inj" aria-pressed="true">Current injection</button>
+      <button class="chip" data-mode="g" aria-pressed="false">Conductance change (Na⁺ channels)</button>
     </div>
     <div class="cgrid">
       <div class="ccol">
         <canvas id="circ" aria-label="Circuit diagram with moving charges"></canvas>
         <div class="runbar">
           <button id="cSwitch" class="toggle" role="switch" aria-checked="false" aria-labelledby="cSwitchLab"><span id="cSwitchLab">Na⁺ channels</span><span class="track"><span class="thumb"></span></span><span class="tstate" id="cSwitchState">closed</span></button>
+          <button id="cPlay" class="primary">Pause</button>
           <button id="cReset">Reset</button>
           <label for="cSpeed" class="runlab">Speed</label>
           <input type="range" id="cSpeed" min="0" max="100" value="40">
@@ -226,6 +231,15 @@ table.map th{font-weight:500;color:var(--muted);font-size:12.5px}
   <section class="card stage">
     <div class="cgrid">
       <div class="ccol">
+        <div class="toolbar">
+          <span class="sect-title">View</span>
+          <button class="chip" id="zFit">Fit view (1×)</button>
+          <button class="chip" id="zMem">Zoom to membrane</button>
+          <button class="chip" id="zIn" aria-label="Zoom in">+</button>
+          <button class="chip" id="zOut" aria-label="Zoom out">−</button>
+          <span class="spacer"></span>
+          <span id="zoomLabel"></span>
+          <span>· scroll or double-click to zoom, drag to pan</span></div>
         <canvas id="sim" aria-label="Particle simulation of K⁺ and Na⁺ ions crossing a membrane"></canvas>
         <div class="runbar">
           <button id="gate" class="toggle" role="switch" aria-checked="false" aria-label="Na⁺ channels">Na⁺ channels<span class="track"><span class="thumb"></span></span><span class="tstate" id="gateState">closed</span></button>
@@ -434,7 +448,7 @@ function chipGroup(attr, onPick) {
   const TOP = 70, BOT = 410, MID = 240, XS = [140, 400, 640];
   const SP = 20, Q0 = 4;                // dot spacing (px); charge per dot and per plate mark (nC/cm²)
   const KPX = SP / Q0;                   // px a dot moves per nC/cm² of charge through its wire
-  let mode = 'g', sw = false, t = 0, V = -86, speed = 1;
+  let mode = 'inj', sw = false, t = 0, V = 0, speed = 1;   // starts on current injection
   const p = { C: 1, gL: 0.5, I: 20, gK: 0.5, EK: -86, gNa: 0.7, ENa: 60 };
   let cum = [0, 0, 0];                    // since the last switch: ion branch 1 in, branch 2 out, stored
   const hist = { t: [], V: [], i1: [], i2: [], iC: [], q1: [], q2: [], qC: [], on: [] };
@@ -677,11 +691,18 @@ function chipGroup(attr, onPick) {
   bindRange('cGNa', v => v.toFixed(2) + ' mS/cm²', v => p.gNa = v);
   bindRange('cENa', v => fmtSigned(v, 0), v => p.ENa = v);
 
+  // Pause / Play, as in the particle model: paused, time stands still but the page still redraws
+  let running = true;
+  const playBtn = $('cPlay');
+  const setRunning = r => { running = r; playBtn.textContent = r ? 'Pause' : 'Play'; };
+  playBtn.addEventListener('click', () => setRunning(!running));
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setRunning(false);
+
   reset(); captions();
   let last = performance.now(), frame = 0;
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    advance(dt * speed); stepDots();
+    if (running) { advance(dt * speed); stepDots(); }
     draw(); drawCharts();
     if (frame++ % 6 === 0) readouts();
     requestAnimationFrame(loop);
@@ -701,8 +722,7 @@ function chipGroup(attr, onPick) {
   const W = 1200, MX = W / 2, MW = 8, PH = 18, SLOT = 36, H_REF = 100;
   const NSLOT = 48, H = NSLOT * SLOT;         // simulated membrane length (periodic in y); room for 24 of each channel
   const H0 = 24 * SLOT;                       // patch length the Membrane C slider is scaled to, so C stays per patch
-  const VZ = 1.25, CW = 900, CH = 860;         // view: zoom, canvas size; shows the top 688 px of the patch
-  const VX0 = MX - CW / (2 * VZ);
+  const VZ0 = 1.25, CW = 900, CH = 860;        // canvas size; VZ0: the starting view's scale (canvas px per sim px)
   const XIN = MX - MW, XOUT = MX + MW;
   const KT = 25.7;                             // RT/F, mV
   const Z = [1, 1, -1];                        // K, Na, A
@@ -823,7 +843,7 @@ function chipGroup(attr, onPick) {
     crossings.length = 0; dens.fill(0);
     sanitize(); binAndField(); countIn();
     vAvg = V;
-    $('patchInfo').textContent = `Simulated patch: ${H.toLocaleString()} px of membrane (the view shows the top ${Math.round(CH / VZ)} px), ${N.toLocaleString()} ions. Each channel lets only its own ion through; the Na⁺ channels have a gate on their inner mouth.`;
+    $('patchInfo').textContent = `Simulated patch: ${H.toLocaleString()} px of membrane (zoom and drag the view to look around it), ${N.toLocaleString()} ions. Each channel lets only its own ion through; the Na⁺ channels have a gate on their inner mouth.`;
   }
   function setMembraneCharge(target) {
     let q = 0; for (let i = 0; i < N; i++) if (px[i] < MX) q += Z[sp[i]];
@@ -959,6 +979,38 @@ function chipGroup(attr, onPick) {
 
   // ---------- drawing ----------
   const cv = $('sim'), ctx = setupCanvas(cv, CW, CH);
+
+  // ---------- view: zoom and pan (only the drawing; the whole patch is always simulated) ----------
+  const S_FIT = CW / W;                         // scale at 1×: the full width of the box fits
+  const view = { z: VZ0 / S_FIT, cx: MX, cy: CH / (2 * VZ0) };   // start as before: the top of the membrane
+  const scale = () => S_FIT * view.z;
+  function clampView() {
+    view.z = Math.max(1, Math.min(8, view.z));
+    const hw = CW / (2 * scale()), hh = CH / (2 * scale());
+    view.cx = Math.max(hw, Math.min(W - hw, view.cx));
+    view.cy = Math.max(hh, Math.min(H - hh, view.cy));
+    $('zoomLabel').textContent = view.z.toFixed(1) + '×';
+  }
+  const toWorld = (lx, ly) => ({ x: view.cx + (lx - CW / 2) / scale(), y: view.cy + (ly - CH / 2) / scale() });
+  function localPos(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * CW, y: (e.clientY - r.top) / r.height * CH }; }
+  function zoomAt(lx, ly, f) {   // zoom about a point on the canvas, which stays put
+    const w = toWorld(lx, ly);
+    view.z *= f; clampView();
+    view.cx = w.x - (lx - CW / 2) / scale(); view.cy = w.y - (ly - CH / 2) / scale(); clampView();
+  }
+  cv.addEventListener('wheel', e => { e.preventDefault(); const p = localPos(e); zoomAt(p.x, p.y, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, { passive: false });
+  cv.addEventListener('dblclick', e => { const p = localPos(e); zoomAt(p.x, p.y, e.shiftKey ? 0.5 : 2); });
+  let drag = null;
+  cv.addEventListener('pointerdown', e => { drag = { p: localPos(e), cx: view.cx, cy: view.cy }; cv.setPointerCapture(e.pointerId); cv.classList.add('dragging'); });
+  cv.addEventListener('pointermove', e => { if (!drag) return; const p = localPos(e);
+    view.cx = drag.cx - (p.x - drag.p.x) / scale(); view.cy = drag.cy - (p.y - drag.p.y) / scale(); clampView(); });
+  const endDrag = () => { drag = null; cv.classList.remove('dragging'); };
+  cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+  $('zFit').addEventListener('click', () => { view.z = 1; view.cx = W / 2; clampView(); });
+  $('zMem').addEventListener('click', () => { view.z = 4; view.cx = MX; clampView(); });
+  $('zIn').addEventListener('click', () => zoomAt(CW / 2, CH / 2, 1.5));
+  $('zOut').addEventListener('click', () => zoomAt(CW / 2, CH / 2, 1 / 1.5));
+  clampView();
   const chartW = 480, chartH = 360;      // charts sit beside the simulation, as in part 1; taller to match its height
   const I_RANGE = [-30, 30];             // fixed current axis (ions per 1000 steps): fits 24 of each channel
   const vc = setupCanvas($('pVchart'), chartW, chartH), ic = setupCanvas($('pIchart'), chartW, chartH);
@@ -972,7 +1024,7 @@ function chipGroup(attr, onPick) {
   const qgrid = new Float32Array(GX * GY), tmpg = new Float32Array(GX * GY), rowAcc = new Float32Array(GX), dens = new Float32Array(GX * GY);
   const dCanvas = document.createElement('canvas'), dctx = dCanvas.getContext('2d');
   dCanvas.width = GX; dCanvas.height = GY; const dImg = dctx.createImageData(GX, GY);
-  const sig = 16 / VZ / CG, kR = Math.ceil(3 * sig), kern = new Float32Array(2 * kR + 1);
+  const sig = 16 / VZ0 / CG, kR = Math.ceil(3 * sig), kern = new Float32Array(2 * kR + 1);
   { let sum = 0; for (let k = -kR; k <= kR; k++) { kern[k + kR] = Math.exp(-(k * k) / (2 * sig * sig)); sum += kern[k + kR]; } for (let k = 0; k < kern.length; k++) kern[k] /= sum; }
   let dScale = 0.02, densTau = 600;
   function updateDensity(alpha) {
@@ -1014,25 +1066,25 @@ function chipGroup(attr, onPick) {
   function drawSim() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, CW, CH);
-    ctx.setTransform(dpr * VZ, 0, 0, dpr * VZ, -dpr * VZ * VX0, 0);
-    const ly1 = CH / VZ;
+    const sc = scale(), x0 = view.cx - CW / (2 * sc), x1 = view.cx + CW / (2 * sc), y0 = view.cy - CH / (2 * sc), y1 = view.cy + CH / (2 * sc);
+    ctx.setTransform(dpr * sc, 0, 0, dpr * sc, -dpr * sc * x0, -dpr * sc * y0);
     ctx.fillStyle = C.cyto; ctx.fillRect(0, 0, MX, H);
     ctx.fillStyle = C.bath; ctx.fillRect(MX, 0, W - MX, H);
     if (tintOn) { ctx.imageSmoothingEnabled = true; ctx.drawImage(dCanvas, 0, 0, W, H); }
     // lipid bilayer
-    ctx.fillStyle = lipid; ctx.fillRect(XIN, 0, XOUT - XIN, ly1);
+    ctx.fillStyle = lipid; ctx.fillRect(XIN, y0, XOUT - XIN, y1 - y0);
     ctx.strokeStyle = C.memdark; ctx.lineWidth = 0.7; ctx.lineCap = 'round'; ctx.beginPath();
-    for (let y = 3; y < ly1 + 6; y += 6) {
+    for (let y = Math.floor(y0 / 6) * 6 + 3; y < y1 + 6; y += 6) {
       ctx.moveTo(XIN + 3, y - 1); ctx.lineTo(MX - 1, y - 1.3); ctx.moveTo(XIN + 3, y + 1); ctx.lineTo(MX - 1, y + 1.3);
       ctx.moveTo(XOUT - 3, y - 1); ctx.lineTo(MX + 1, y - 1.3); ctx.moveTo(XOUT - 3, y + 1); ctx.lineTo(MX + 1, y + 1.3);
     }
     ctx.stroke();
     ctx.fillStyle = C.mem; ctx.beginPath();
-    for (let y = 3; y < ly1 + 6; y += 6) { ctx.moveTo(XIN + 4.5, y); ctx.arc(XIN + 2.2, y, 2.3, 0, 6.283); ctx.moveTo(XOUT + 0.1, y); ctx.arc(XOUT - 2.2, y, 2.3, 0, 6.283); }
+    for (let y = Math.floor(y0 / 6) * 6 + 3; y < y1 + 6; y += 6) { ctx.moveTo(XIN + 4.5, y); ctx.arc(XIN + 2.2, y, 2.3, 0, 6.283); ctx.moveTo(XOUT + 0.1, y); ctx.arc(XOUT - 2.2, y, 2.3, 0, 6.283); }
     ctx.fill();
     // channels; Na⁺ channels have a gate across the inner mouth
     pores.forEach(p => {
-      if (p.yc - BH > ly1) return;
+      if (p.yc + BH < y0 || p.yc - BH > y1) return;
       const col = C[['k', 'na'][p.s]];
       const bx = XIN - BW, bw = XOUT - XIN + 2 * BW, by = p.yc - BH / 2;
       ctx.fillStyle = tint[p.s]; ctx.strokeStyle = col; ctx.lineWidth = 1.4;
@@ -1058,13 +1110,13 @@ function chipGroup(attr, onPick) {
       for (let i = 0; i < N; i++) {
         if (sp[i] !== s) continue;
         const x = px[i], y = py[i];
-        if (x < VX0 - rad || y > ly1 + rad) continue;
+        if (x < x0 - rad || x > x1 + rad || y < y0 - rad || y > y1 + rad) continue;
         ctx.moveTo(x + rad, y); ctx.arc(x, y, rad, 0, 6.283);
       }
       ctx.fill(); ctx.stroke();
     }
     for (const c of crossings) {
-      if (c.y < ly1 + 10) { ctx.globalAlpha = 1 - c.age / 40; ctx.strokeStyle = C[['k', 'na'][c.s]]; ctx.lineWidth = 1.3;
+      if (c.y > y0 - 10 && c.y < y1 + 10) { ctx.globalAlpha = 1 - c.age / 40; ctx.strokeStyle = C[['k', 'na'][c.s]]; ctx.lineWidth = 1.3;
         ctx.beginPath(); ctx.arc(c.x, c.y, 4 + c.age * 0.35, 0, 6.283); ctx.stroke(); }
     }
     ctx.globalAlpha = 1;
@@ -1078,7 +1130,8 @@ function chipGroup(attr, onPick) {
       ctx.fillStyle = C.surface; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, bx + w / 2, y0 + h / 2 + 1);
       ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
     };
-    region('INSIDE', 12, 'left'); region('OUTSIDE', CW - 12, 'right');
+    if (x0 < MX) region('INSIDE', 12, 'left');
+    if (x1 > MX) region('OUTSIDE', CW - 12, 'right');
   }
   function drawCharts() {
     const x1 = Math.max(TRACE_LEN * SAMPLE / 1000, steps / 1000), x0 = x1 - TRACE_LEN * SAMPLE / 1000;

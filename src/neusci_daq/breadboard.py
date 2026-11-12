@@ -240,6 +240,22 @@ class BoardState:
         return None if net is None or net == GND else self.node[net]
 
 
+FLOATING_TAU = 100.0                      # s; slower than this, a capacitor has no real path to discharge
+
+
+def time_constants(board: Board) -> list[float]:
+    """The circuit's time constants in s, slowest first: one per way its capacitors can
+    charge (for one R and one C, just R·C). Capacitors held only by the tiny leak to
+    ground (no resistor path) are left out. Raises ValueError if it can't be solved."""
+    dt = 1e-6
+    state = BoardState(board, dt)
+    lam = np.linalg.eigvals(state.p).real if len(state.p) else np.zeros(0)
+    lam = lam[(lam > 1e-9) & (lam < 1 - 1e-12)]
+    # backward Euler: each mode is multiplied by 1 / (1 + dt/τ) per step
+    taus = dt * lam / (1 - lam)
+    return sorted((float(t) for t in taus if t < FLOATING_TAU), reverse=True)
+
+
 def preview(board: Board, fs: float = 10_000.0, pulse_s: float = 0.1, total_s: float = 0.25) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
     """What the probes would show for a 1 V pulse from the stimulator (from 20 ms, `pulse_s`
     long), starting from rest: (times s, stimulus, [trace per probe])."""

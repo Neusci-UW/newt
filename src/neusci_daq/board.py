@@ -436,9 +436,15 @@ class Board(QtWidgets.QWidget):
         self.mode = mode
         for f in self.frames:
             f.restyle()
-        self.hint.setStyleSheet(f"color: {self.tokens['muted']};")
+        self._style_hint()
         self.update()
         self.minimap.update()
+
+    def _style_hint(self) -> None:
+        """The hint's ink follows the board's lightness, not the mode's, so it reads on a color of your own."""
+        ground = QtGui.QColor(self.color or self.tokens["ground"])
+        tokens = style.tokens(style.DARK if ground.lightnessF() < 0.5 else style.LIGHT)
+        self.hint.setStyleSheet(f"color: {tokens['muted']};")
 
     # -- moving and resizing ------------------------------------------------------------------
     def title_pressed(self, frame: ChartFrame, ev) -> None:
@@ -687,6 +693,7 @@ class Board(QtWidgets.QWidget):
     def set_color(self, color: str | None) -> None:
         """The board's own color, or None for the mode's ground."""
         self.color = color
+        self._style_hint()
         self.update()
 
     def _dot_color(self) -> QtGui.QColor:

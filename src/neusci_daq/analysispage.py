@@ -618,9 +618,15 @@ class AnalysisPage(QtWidgets.QWidget):
         self.picked, self.picked_pages = self._ticked()
         labels = {i: (stem, f"{b['duration_s']:.1f} s" if b is not None else "?", *self._stimuli_note(b))
                   for i, (stem, b) in enumerate(zip(stems, self.blocks))}
+        thumbs = {}
+        stim = self.stim_channel.currentData()
+        for i, b in enumerate(self.blocks):
+            if b is not None:
+                name = next((n for n in b["channel_names"] if n != stim), None)
+                thumbs[i] = self.recorded(i, name) if name else None
         self.blocks_panel.populate(None, shown, [self.group_color(g) for g in range(max(1, len(shown)))], labels,
                                    lambda i: groupsfile.auto_page(auto, i, d), bool(changed), False,
-                                   self._looks["hidden_groups"], self.hidden_blocks())
+                                   self._looks["hidden_groups"], self.hidden_blocks(), thumbs)
         self.blocks_panel.sort_box.setCurrentIndex(max(0, self.blocks_panel.sort_box.findData(self._looks["sort"])))
         self.blocks_panel.select(*self._highlighted)
         self.update_preview()

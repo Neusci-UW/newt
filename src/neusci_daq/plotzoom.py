@@ -32,6 +32,8 @@ class WheelViewBox(pg.ViewBox):
         super().__init__(*a, **kw)
         self._zoom_history: list = []
         self.on_drag_select = None              # f(x0, x1, finished): plain left-drag selects time
+        self.on_draw = None                     # f([(x, y)…], finished): plain left-drag draws a shape
+        self._drawn: list = []
         self.bounds = [None, None]              # (lo, hi) per axis, to use instead of the data's edges
 
     def _refresh_limits(self) -> None:
@@ -95,6 +97,16 @@ class WheelViewBox(pg.ViewBox):
                 and self._data_limits(axis) is None)
 
     def mouseDragEvent(self, ev, axis=None):
+        if (axis is None and self.on_draw is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
+                and not ev.modifiers() & (ZOOM_MODS | QtCore.Qt.KeyboardModifier.ShiftModifier)):
+            ev.accept()                         # draw around points (Measure, on the 2-D charts)
+            if ev.isStart():
+                at = self.mapToView(ev.buttonDownPos(ev.button()))
+                self._drawn = [(at.x(), at.y())]
+            at = self.mapToView(ev.pos())
+            self._drawn.append((at.x(), at.y()))
+            self.on_draw(list(self._drawn), ev.isFinish())
+            return
         if (axis is None and self.on_drag_select is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
                 and not ev.modifiers() & (ZOOM_MODS | QtCore.Qt.KeyboardModifier.ShiftModifier)):
             ev.accept()                         # select a stretch of time (DataPad)
@@ -112,6 +124,9 @@ class WheelViewBox(pg.ViewBox):
                     self.zoom_box(r.left(), r.right(), r.top(), r.bottom())
             else:
                 self.updateScaleBox(ev.buttonDownPos(), ev.pos())
+            return
+        if axis is None:
+            ev.ignore()                         # no dragging the plot about: the wheel and the axes do that
             return
         super().mouseDragEvent(ev, axis)
 
@@ -414,11 +429,30 @@ class RoomyAxis(pg.AxisItem):
         return [(major, offset)] + [lv for lv in levels[1:] if lv[0] < major]
 
 
+class ClickToScrollPlot(pg.PlotWidget):
+    """The wheel scrolls whatever the plot sits in (the whiteboard) until its chart is
+    picked, by a click anywhere on the chart; then it zooms and pans the plot."""
+
+    def _chart_picked(self) -> bool:
+        w = self.parentWidget()
+        while w is not None:
+            if hasattr(w, "board") and hasattr(w, "picked"):      # the chart's frame on the board
+                return bool(w.picked)
+            w = w.parentWidget()
+        return True                                               # not on a board: always
+
+    def wheelEvent(self, ev):
+        if self._chart_picked():
+            super().wheelEvent(ev)
+        else:
+            ev.ignore()
+
+
 def plot_widget(**kw) -> pg.PlotWidget:
     """A pg.PlotWidget with the app's wheel rules, a light grid, a title that fits and y
-    numbers that don't overlap."""
+    numbers that don't overlap. On the board the wheel needs the chart picked first."""
     kw.setdefault("axisItems", {"left": RoomyAxis("left")})
-    pw = pg.PlotWidget(viewBox=WheelViewBox(), **kw)
+    pw = ClickToScrollPlot(viewBox=WheelViewBox(), **kw)
     light_grid(pw.getPlotItem())
     fit_title(pw.getPlotItem())
     return pw
@@ -436,6 +470,16 @@ class _FollowerViewBox(pg.ViewBox):
             ev.ignore()
 
     def mouseDragEvent(self, ev, axis=None):
+        if (axis is None and self.on_draw is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
+                and not ev.modifiers() & (ZOOM_MODS | QtCore.Qt.KeyboardModifier.ShiftModifier)):
+            ev.accept()                         # draw around points (Measure, on the 2-D charts)
+            if ev.isStart():
+                at = self.mapToView(ev.buttonDownPos(ev.button()))
+                self._drawn = [(at.x(), at.y())]
+            at = self.mapToView(ev.pos())
+            self._drawn.append((at.x(), at.y()))
+            self.on_draw(list(self._drawn), ev.isFinish())
+            return
         if axis == 1:
             super().mouseDragEvent(ev, axis=1)
         else:

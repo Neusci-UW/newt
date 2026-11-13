@@ -9,6 +9,8 @@ Qt is still using the clicked item, which crashes.
 """
 from __future__ import annotations
 
+import numpy as np
+import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import style
@@ -17,10 +19,59 @@ LIVE, BACK = "live", "back"
 ROLE = QtCore.Qt.ItemDataRole.UserRole
 
 
+class TrialPreview(QtWidgets.QWidget):
+    """The highlighted trial, every channel in a short strip of its own on a shared time axis."""
+    HEIGHT = 170                                  # the strips share this, so more channels mean shorter strips
+
+    def __init__(self):
+        super().__init__()
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        self.caption = QtWidgets.QLabel()
+        lay.addWidget(self.caption)
+        self.view = pg.GraphicsLayoutWidget()
+        self.view.setFixedHeight(self.HEIGHT)
+        self.view.ci.layout.setSpacing(2)
+        self.view.ci.layout.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.view)
+
+    def show_trial(self, title: str, channels: list[tuple[str, np.ndarray, float]], color: str | None = None) -> None:
+        """channels: (name, samples, sample rate); color: the trial's group color, if it has one."""
+        self.caption.setText(f"<b>{title}</b>" if channels else "")
+        self.view.clear()
+        first = None
+        for r, (name, y, fs) in enumerate(channels):
+            p = self.view.addPlot(row=r, col=0)
+            p.setMenuEnabled(False)
+            p.setMouseEnabled(False, False)
+            p.hideButtons()
+            p.hideAxis("bottom")
+            p.getAxis("left").setWidth(30)
+            p.getAxis("left").setStyle(tickFont=None, showValues=False)
+            p.setLabel("left", name)
+            p.setDownsampling(auto=True, mode="peak")
+            p.setClipToView(True)
+            p.plot(np.arange(len(y)) / fs, y, pen=pg.mkPen(color, width=1) if color else pg.mkPen(width=1))
+            if first is None:
+                first = p
+            else:
+                p.setXLink(first)
+        self.setVisible(bool(channels))
+
+
 class GroupTree(QtWidgets.QTreeWidget):
     """A tree whose top-level rows can be dragged to another place. Only those: dragging across
     the rows inside them still selects them."""
     moved = QtCore.Signal(str, int)              # a page's name, the row it goes to
+    stepped = QtCore.Signal(int)                 # Up and Down (-1, 1), when step_keys: always on to another trial
+    step_keys = False
+
+    def keyPressEvent(self, ev):
+        if self.step_keys and ev.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down) and not ev.modifiers():
+            self.stepped.emit(-1 if ev.key() == QtCore.Qt.Key.Key_Up else 1)
+            return
+        super().keyPressEvent(ev)
 
     def dragMoveEvent(self, ev):
         ev.acceptProposedAction()
@@ -55,6 +106,7 @@ class TrialsBrowser(QtWidgets.QWidget):
     group_moved = QtCore.Signal(str, int)        # a page's name, the row it goes to
     sort_picked = QtCore.Signal(str)             # "frequency", "amplitude" or "" for your order
     tick_highlighted = QtCore.Signal(list, list, bool)   # blocks, pages; True: untick everything else
+    step_requested = QtCore.Signal(int)          # Up or Down in the list: the trial before or after
 
     def __init__(self, for_analysis: bool = False):
         super().__init__()
@@ -99,8 +151,7 @@ class TrialsBrowser(QtWidgets.QWidget):
             group_top.addStretch(1)
         self.btn_groups = QtWidgets.QPushButton("Groups…")
         self.btn_groups.setToolTip("The colors of groups and trials, Spread, and Reset groups")
-        if for_analysis:
-            lay.addWidget(self.btn_groups)
+        self.btn_groups.hide()                    # no longer in the pane; the Groups window is still built
         lay.addSpacing(6)
         self.title = QtWidgets.QLabel("<b>Trials</b>")
         lay.addWidget(self.title)
@@ -126,12 +177,21 @@ class TrialsBrowser(QtWidgets.QWidget):
             b.setEnabled(False)
             b.clicked.connect(lambda _=False, only=only: self.tick_highlighted.emit(
                 self.selected_blocks(), self.selected_pages(), only))
-        hl = QtWidgets.QHBoxLayout()
-        hl.addWidget(self.btn_tick_hl)
-        hl.addWidget(self.btn_only_hl)
+        self.btn_select = QtWidgets.QPushButton("Select all")
+        self.btn_select.setToolTip("Tick every group and trial")
+        self.btn_deselect = QtWidgets.QPushButton("Deselect all")
+        self.btn_deselect.setToolTip("Untick every group and trial")
+        hl = QtWidgets.QGridLayout()                  # all the ticking buttons together
+        hl.setSpacing(4)
+        hl.addWidget(self.btn_tick_hl, 0, 0)
+        hl.addWidget(self.btn_only_hl, 0, 1)
+        hl.addWidget(self.btn_select, 1, 0)
+        hl.addWidget(self.btn_deselect, 1, 1)
         if for_analysis:
             lay.addLayout(hl)
         else:
+            self.btn_select.hide()
+            self.btn_deselect.hide()
             self.btn_tick_hl.hide()
             self.btn_only_hl.hide()
         self.tree = GroupTree()
@@ -141,6 +201,8 @@ class TrialsBrowser(QtWidgets.QWidget):
         # Cmd/Shift-click several blocks (or pick a page) to overlay them
         self.tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         if for_analysis:
+            self.tree.step_keys = True
+            self.tree.stepped.connect(self.step_requested)
             self.tree.setDragEnabled(True)
             self.tree.setAcceptDrops(True)
             self.tree.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragDrop)
@@ -155,18 +217,10 @@ class TrialsBrowser(QtWidgets.QWidget):
             lambda: self.later(lambda picked=self.selected_blocks(): self.selection.emit(picked)))
         self.tree.itemSelectionChanged.connect(self._highlight_changed)
         lay.addWidget(self.tree, 1)
-        self.btn_select = QtWidgets.QPushButton("Select all")
-        self.btn_select.setToolTip("Tick every group and trial")
-        self.btn_deselect = QtWidgets.QPushButton("Deselect all")
-        self.btn_deselect.setToolTip("Untick every group and trial")
-        ticks = QtWidgets.QHBoxLayout()
-        ticks.addWidget(self.btn_select)
-        ticks.addWidget(self.btn_deselect)
+        self.preview = TrialPreview()
+        self.preview.hide()
         if for_analysis:
-            lay.addLayout(ticks)
-        else:
-            self.btn_select.hide()
-            self.btn_deselect.hide()
+            lay.addWidget(self.preview)
         self._open: set[str] = set()              # the pages you've expanded
         self.tree.itemExpanded.connect(lambda item: self._opened(item, True))
         self.tree.itemCollapsed.connect(lambda item: self._opened(item, False))
@@ -316,6 +370,19 @@ class TrialsBrowser(QtWidgets.QWidget):
             if isinstance(data, tuple) and data[0] == "block":
                 item.setSelected(data[1] in overlay or (not overlay and data == want))
         tree.blockSignals(False)
+
+    def reveal(self, block: int, leaving: int | None = None) -> None:
+        """Highlight this trial, opening its group; close the group of the trial being left."""
+        item = next((it for it in self.items() if it.data(0, ROLE) == ("block", block)), None)
+        if item is None:
+            return
+        old = next((it for it in self.items() if it.data(0, ROLE) == ("block", leaving)), None) \
+            if leaving is not None else None
+        if old is not None and old.parent() is not None and old.parent() is not item.parent():
+            old.parent().setExpanded(False)
+        if item.parent() is not None:
+            item.parent().setExpanded(True)
+        self.mark(("block", block), [])
 
     def select(self, blocks: list[int], pages: list[str] = ()) -> None:
         """Select just these blocks and pages, without reporting it."""

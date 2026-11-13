@@ -253,8 +253,9 @@ TOPICS = {
     "comparison": {
         "title": "How Response works",
         "picture": _comparison_picture,
-        "text": "The traces show the chosen trials' channels on one time axis, as voltage or its rate of change, "
-                "the same way as the Trials chart: a picked group's average, or picked trials' trials. "
+        "text": "<b>Response</b> shows the chosen trials' channels on one time axis, as voltage or its rate of "
+                "change: a picked group's average, or picked trials' trials. On the channel Spikes sorts it can "
+                "show the threshold and a dot on each spike. "
                 "On the triggered charts, the chosen trials line up on a <b>trigger</b> and are averaged: what's random "
                 "cancels and what follows the trigger stays. The <b>stimulus-triggered rate</b> asks how spiking "
                 "changes after a stimulus, and the <b>spike-triggered average</b> asks what a channel does around "
@@ -276,7 +277,7 @@ TOPICS = {
         "text": "With a repeating stimulus, NEWT cuts the chosen trials into single <b>cycles</b> and overlays them "
                 "by stimulus <b>phase</b> instead of time. If the trial saved what was sent, it lines that up with the "
                 "recording; otherwise it matches the stimulus's shape against itself, then uses its rises through its "
-                "middle level. Or give the <b>repeat length</b>, or mark one on the Traces or Stimulus chart. Picked "
+                "middle level. Or give the <b>repeat length</b>, or mark one on the Response or Stimulus chart. Picked "
                 "groups show their average and picked "
                 "trials their own, with every cycle behind it colored from first to last.",
         "warning": "A fixed delay lands at a different phase at each frequency: 5 ms is 18° at 10 Hz but 90° at 50 Hz. "

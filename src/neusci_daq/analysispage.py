@@ -71,13 +71,15 @@ class AnalysisPage(QtWidgets.QWidget):
         self.current = QtWidgets.QSpinBox(minimum=1, maximum=1)
         self.current.setToolTip("The highlighted trial")
         self.n_label = QtWidgets.QLabel()
-        for w in (self.btn_prev, self.slider, self.btn_next, self.current, self.n_label):
+        for w in (self.btn_prev, self.btn_next, self.current, self.n_label):
             bar.addWidget(w)
+        self.slider.hide()                        # kept, unseen: the spin box and the arrows move through the trials
         lay.addLayout(top)
 
         # The Blocks panel: pick the blocks to analyze, and how.
         self.blocks_panel = TrialsBrowser(for_analysis=True)
         self.blocks_panel.selection.connect(self._blocks_picked)
+        self.blocks_panel.step_requested.connect(self.step_list)
         self.blocks_panel.activated.connect(self._block_clicked)
         self.blocks_panel.tick_highlighted.connect(self.tick_highlighted)
         self.blocks_panel.btn_select.clicked.connect(self.show_all)
@@ -208,12 +210,42 @@ class AnalysisPage(QtWidgets.QWidget):
     def step(self, d: int) -> None:
         self.current.setValue(self.current.value() + d)          # the spin box keeps it in range
 
+    def step_list(self, d: int) -> None:
+        """Up and Down: on to the trial before or after in the Trials list, opening its group and
+        closing the one being left."""
+        order = [i for _, blocks in self.shown for i in blocks]
+        if not order:
+            return
+        here = self.index()
+        pos = order.index(here) if here in order else (0 if d > 0 else len(order) - 1) - d
+        new = order[max(0, min(len(order) - 1, pos + d))]
+        self.current.setValue(new + 1)
+        self._highlighted = ([new], [])
+        self.blocks_panel.reveal(new, here if here != new else None)
+
     def _current_changed(self, v: int) -> None:
         self.slider.blockSignals(True)
         self.slider.setValue(v)
         self.slider.blockSignals(False)
         self.raw.current_changed()
         self.canvas.current_changed()
+        self.update_preview()
+
+    def update_preview(self) -> None:
+        """The Trials list's preview: every recorded channel of the highlighted trial."""
+        i = self.index()
+        b = self.blocks[i] if 0 <= i < len(self.blocks) else None
+        if b is None:
+            self.blocks_panel.preview.show_trial("", [])
+            return
+        names = list(b["channel_names"])
+        title, color = self._paths[i].stem, None
+        for g, (name, blocks) in enumerate(self.shown):
+            if i in blocks:                       # the trial's name in its group, and the group's color
+                title, color = f"{name} {blocks.index(i) + 1}", self._looks["colors"].get(name)
+                break
+        self.blocks_panel.preview.show_trial(
+            title, [(n, self.recorded(i, n), b["sample_rate"]) for n in names], color)
 
     # -- the blocks --------------------------------------------------------------------------
     @property
@@ -591,6 +623,7 @@ class AnalysisPage(QtWidgets.QWidget):
                                    self._looks["hidden_groups"], self.hidden_blocks())
         self.blocks_panel.sort_box.setCurrentIndex(max(0, self.blocks_panel.sort_box.findData(self._looks["sort"])))
         self.blocks_panel.select(*self._highlighted)
+        self.update_preview()
         n = len([g for g in self.groups if g[0] != "No stimulus found"])
         none = sum(len(b) for name, b in self.groups if name == "No stimulus found")
         self.group_note.setText(

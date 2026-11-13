@@ -10,6 +10,7 @@ from pyqtgraph.Qt import QtGui, QtWidgets
 from . import analysis as A
 from .chartbase import Chart
 from .plotzoom import plot_widget
+from .spikecharts import draw_band
 from .unitbox import UnitSpinBox
 from .viewkit import label_axis
 
@@ -60,6 +61,7 @@ class ShapeChart(Chart):
             return
         fs = 1000 / float(np.median(np.diff(ev.wave_t_ms)))
         total = 0
+        spread = self.page.spread()
         for u in sorted(self.units()):
             w = ev.waves[ev.unit == u]
             if not len(w):
@@ -70,6 +72,10 @@ class ShapeChart(Chart):
                 self._draw_each(w[::max(1, -(-len(w) // MAX_SHOWN))], ev.wave_t_ms, fs, color)
             mean = w.mean(0)
             x, y = self.xy(ev.wave_t_ms, mean, A.derivative(mean, fs, 1, self.smooth.value()))
+            if spread:                                    # of what's up the y axis, across the unit's spikes
+                d = np.array([A.derivative(r, fs, 1, self.smooth.value()) for r in w])
+                _, sd, sem, _ = A.mean_spread(self.xy(np.broadcast_to(ev.wave_t_ms, w.shape), w, d)[1])
+                draw_band(p, x, y, sd if spread == "sd" else sem, color)
             p.plot(x, y, pen=pg.mkPen(color, width=2.5))
         name = self.finder.channel.currentText()
         self.labels(p, name, self.page.unit_of(name))
@@ -92,6 +98,8 @@ class ShapeChart(Chart):
 
 class PhasePlotChart(ShapeChart):
     kind = "V against dV/dt"
+    measure = ("range", "phaseplot")
+    y = "dV/dt"
     tip = "How fast does the voltage change at each voltage (the phase plot)?"
     title = "V against dV/dt"
 
@@ -111,6 +119,8 @@ class PhasePlotChart(ShapeChart):
 
 class VoltsChart(ShapeChart):
     kind = "V"
+    measure = ("event", "spike")
+    y = "V"
     tip = "What does the voltage do through a spike?"
     link = "spike"
     title = "V"
@@ -125,6 +135,8 @@ class VoltsChart(ShapeChart):
 
 class SlopeChart(ShapeChart):
     kind = "dV/dt"
+    measure = ("event", "spike")
+    y = "V/s"
     tip = "How fast does the voltage rise and fall through a spike?"
     link = "spike"
     title = "dV/dt"

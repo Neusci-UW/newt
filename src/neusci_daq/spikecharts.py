@@ -1,11 +1,12 @@
-"""The charts of the action potentials found: the stimulus and the blocks with their
-spikes, a raster, the spike rate, and each unit's PCA map, waveforms, sizes and intervals.
+"""The charts of the action potentials found: the stimulus, a raster, the spike rate, and
+each unit's PCA map, waveforms, sizes and intervals. The recording with its spikes and the
+threshold is on Response (responsecharts.py).
 """
 from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from pyqtgraph.Qt import QtGui, QtWidgets
 
 from . import analysis as A
 from .chartbase import Chart, dot_size
@@ -15,7 +16,6 @@ from .viewkit import label_axis
 from . import colors
 
 MAX_WAVES = 150                    # per unit in the waveform plot
-MAX_MARKED = 2000                  # spikes drawn over the blocks when a unit is highlighted
 
 
 def draw_band(p: pg.PlotItem, x: np.ndarray, mean: np.ndarray, spread: np.ndarray, color: str) -> list:
@@ -34,6 +34,11 @@ def draw_band(p: pg.PlotItem, x: np.ndarray, mean: np.ndarray, spread: np.ndarra
     band.setZValue(4)
     p.addItem(band)
     return edges + [band]
+
+
+def draw_step_band(p: pg.PlotItem, edges: np.ndarray, mean: np.ndarray, spread: np.ndarray, color: str) -> list:
+    """draw_band for a stepped curve: one value per bin, between `edges`."""
+    return draw_band(p, np.repeat(edges, 2)[1:-1], np.repeat(mean, 2), np.repeat(spread, 2), color)
 
 
 class SpikeChart(Chart):
@@ -60,12 +65,13 @@ class SpikeChart(Chart):
 
     def _clear(self) -> None:
         p = self.plot.getPlotItem()
-        for item in list(p.listDataItems()):
+        for item in list(p.listDataItems()) + [x for x in p.items if isinstance(x, pg.FillBetweenItem)]:
             p.removeItem(item)
 
 
 class StimulusChart(SpikeChart):
     kind = "Stimulus"
+    y = "signal"
     tip = "What was the stimulus in each trial?"
     link = "time"
 
@@ -129,199 +135,9 @@ class StimulusChart(SpikeChart):
         label_axis(sp, "left", how, self.page.unit_of(how))
 
 
-class BlocksChart(SpikeChart):
-    kind = "Trials"
-    tip = "Where are the spikes in each trial, and where's the threshold?"
-    link = "time"
-
-    def __init__(self, page, cid: str = ""):
-        super().__init__(page, cid, "Trials overlaid")
-        settings = self.main.settings
-        self.channel = QtWidgets.QComboBox()
-        self.channel.setToolTip("The channel drawn: the one spikes are found on, or another")
-        self.channel.addItem("The analyzed channel", "")
-        self.field("channel", "Channel", self.channel)
-        self.mark_size = dot_size(settings, "mark_point_size", 9, 20, "The size of the dots marking each spike")
-        self.field("dots", "Dot size", self.mark_size, self.units_changed)
-        self.show_thr = QtWidgets.QCheckBox("Show the threshold")
-        self.show_thr.setChecked(settings.value("show_threshold", True, type=bool))
-        self.show_thr.setToolTip("Show the threshold line. Hiding it doesn't change the search")
-        self.show_thr.toggled.connect(lambda on: settings.setValue("show_threshold", on))
-        self.field("threshold", "", self.show_thr, self.threshold_changed)
-        p = self.plot.getPlotItem()
-        p.setLabel("bottom", "time in trial", units="s")
-        self.trial_items: list[OverlayCurve] = []    # the trials shown, one item per color
-        self.marks = pg.ScatterPlotItem(size=self.mark_size.value(), pen=None)
-        self.marks.setZValue(20)
-        p.addItem(self.marks)
-        # the picked units' spikes, drawn over the trace in their color
-        self.event_hl = pg.PlotCurveItem(connect="finite")
-        self.event_hl.setZValue(15)
-        p.addItem(self.event_hl)
-        self._heights: tuple | None = None           # (events, channel, each event's height on its trace)
-        self.thr_line = pg.InfiniteLine(angle=0, movable=True)
-        self.thr_line.setPen(pg.mkPen("#e0524f", width=1.5, style=QtCore.Qt.PenStyle.DashLine))
-        self.thr_line.setZValue(30)
-        self.thr_line.setToolTip("Threshold: drag to set a fixed level")
-        p.addItem(self.thr_line)
-        self.thr_label = pg.InfLineLabel(self.thr_line, text="threshold", position=0.97, color="#e0524f",
-                                         anchors=[(1, 1), (1, 1)])
-        small = QtGui.QFont()
-        small.setPixelSize(10)
-        self.thr_label.setFont(small)
-        self.thr_line.sigPositionChangeFinished.connect(self._thr_dragged)
-        self.group_avgs: list[TraceCurve] = []
-        self.bands: list = []                        # ± SD / SEM shading (Spread, in the Blocks panel)
-        self.overlay_legend = p.addLegend(offset=(-10, 30))
-        self.apply_theme(self._mode)
-
-    def channels_changed(self) -> None:
-        self.fill(self.channel, self.page.names(), ("The analyzed channel", ""))
-
-    def channel_name(self) -> str:
-        return self.channel.currentData() or self.finder.channel.currentText()
-
-    def _trace(self, i: int) -> np.ndarray | None:
-        return self.page.trace(i, self.channel_name())
-
-    def scale_bars(self) -> list[tuple]:
-        return [(self.plot, self.page.unit_of(self.channel_name()), "s")]
-
-    def _draw_trials(self, Y: np.ndarray, chosen: list[int], trials: list[int], fs: float) -> None:
-        """The trials, one item for each color, so hundreds of them stay quick."""
-        rows = {i: r for r, i in enumerate(chosen)}
-        by_color: dict[str, tuple[QtGui.QColor, list[int]]] = {}
-        for i, c in self.page.trial_colors(trials).items():
-            by_color.setdefault(c.name(QtGui.QColor.NameFormat.HexArgb), (c, []))[1].append(rows[i])
-        p = self.plot.getPlotItem()
-        for color, picked in by_color.values():
-            # Spikes are the point here: always draw min and max, whatever View says,
-            # so they keep their height (and line up with the event marks).
-            item = OverlayCurve()
-            item.mode = "peak"
-            item.setPen(pg.mkPen(color, width=1))
-            p.addItem(item)
-            item.set_traces(Y[picked], fs)
-            self.trial_items.append(item)
-
-    def draw(self) -> None:
-        p = self.plot.getPlotItem()
-        for item in self.group_avgs + self.bands + self.trial_items:
-            p.removeItem(item)
-        self.group_avgs, self.bands, self.trial_items = [], [], []
-        self.overlay_legend.clear()
-        chosen = [i for i in self.blocks() if self._trace(i) is not None]
-        name = self.channel_name()
-        if chosen:
-            fs = self.data[chosen[0]]["sample_rate"]
-            n = max(len(self._trace(i)) for i in chosen)
-            Y = np.full((len(chosen), n), np.nan)
-            for r, i in enumerate(chosen):
-                y = self._trace(i)
-                Y[r, :len(y)] = y
-            averaged, trials = self.plan(chosen)
-            self._draw_trials(Y, chosen, trials, fs)
-            spread = self.page.spread()
-            for g, label, mean, sd, sem, rows in self.page.averages(chosen, Y, averaged):
-                x = np.arange(len(mean)) / fs
-                color = self.page.group_color(g)
-                item = TraceCurve(name=f"{label} (n={rows})")
-                item.setPen(pg.mkPen(color, width=2.5))
-                item.setZValue(6)
-                p.addItem(item)
-                self.group_avgs.append(item)
-                item.setData(x, mean)
-                if spread:
-                    self.bands += draw_band(p, x, mean, sd if spread == "sd" else sem, color)
-            label_axis(p, "left", name, self.page.unit_of(name))
-        self.time_range(self._span(chosen))
-        p.setTitle(f"{len(chosen)} trial(s)", color=self._fg())
-        self.units_changed()
-        self.threshold_changed()
-
-    def events_changed(self) -> None:
-        self._fill_units()
-        self.units_changed()
-        self.threshold_changed()
-
-    def _event_heights(self, ev: A.Events) -> np.ndarray:
-        """Where each event is on its block's trace (worked out once per search)."""
-        name = self.channel_name()
-        if self._heights is None or self._heights[0] is not ev or self._heights[1] != name:
-            y = np.zeros(len(ev.t))
-            for b in np.unique(ev.block):
-                trace, m = self._trace(int(b)), ev.block == b
-                if trace is not None:
-                    k = np.round(ev.t[m] * self.data[int(b)]["sample_rate"]).astype(int)
-                    y[m] = trace[np.clip(k, 0, len(trace) - 1)]
-            self._heights = (ev, name, y)
-        return self._heights[2]
-
-    def units_changed(self) -> None:
-        """Mark the spikes on the blocks: the units shown, and if those are only some of them,
-        their spikes are drawn over the blocks in their color."""
-        ev = self.events()
-        on = self.units()
-        hl = on if ev is not None and len(on) < self.page.events.n_units else set()
-        self.event_hl.setData(np.empty(0), np.empty(0))
-        for item in self.trial_items:                     # the picked spikes stand out from them
-            item.setOpacity(0.35 if hl else 1.0)
-        if ev is None or not len(ev.t):
-            self.marks.setData([], [])
-            return
-        show = np.isin(ev.unit, list(on))
-        self.marks.setData(ev.t[show], self._event_heights(ev)[show], brush=self.finder.brushes(ev.unit[show]),
-                           size=self.mark_size.value(), pen=pg.mkPen(self._fg(), width=1) if hl else pg.mkPen(None))
-        if hl:
-            self._draw_spikes(ev, np.flatnonzero(show), hl)
-
-    def _draw_spikes(self, ev: A.Events, which: np.ndarray, hl: set[int]) -> None:
-        """Events `which`, drawn over their blocks' traces."""
-        which = which[::max(1, -(-len(which) // MAX_MARKED))]
-        xs, ys = [], []
-        for b in np.unique(ev.block[which]):
-            y, fs = self._trace(int(b)), self.data[int(b)]["sample_rate"]
-            if y is None:
-                continue
-            k = np.round(ev.t[which[ev.block[which] == b]] * fs).astype(int)
-            span = np.arange(-int(round(self.finder.pre.value() / 1000 * fs)),
-                             int(round(self.finder.post.value() / 1000 * fs)) + 1)
-            at = k[:, None] + span
-            cut = np.where((at >= 0) & (at < len(y)), y[np.clip(at, 0, len(y) - 1)], np.nan)
-            gap = np.full((len(k), 1), np.nan)
-            xs.append(np.hstack([at / fs, gap]).ravel())
-            ys.append(np.hstack([cut, gap]).ravel())
-        if xs:
-            color = self.finder.qcolor(next(iter(hl))) if len(hl) == 1 else self._fg()
-            self.event_hl.setData(np.concatenate(xs), np.concatenate(ys), pen=pg.mkPen(color, width=2.5))
-
-    def threshold_changed(self) -> None:
-        finder = self.finder
-        level = finder.level()
-        if level is None or self.channel_name() != finder.channel.currentText():
-            self.thr_line.hide()
-            return
-        sign = 1 if finder.polarity.currentData() == "positive" else -1
-        self.thr_line.blockSignals(True)
-        self.thr_line.setValue(finder.baseline() + sign * level)
-        self.thr_line.blockSignals(False)
-        self.thr_label.setFormat(f"threshold {finder.fmt(level)}")
-        self.thr_label.anchors = [(1, 1 if sign > 0 else 0)] * 2     # on the side away from the traces
-        self.thr_label.updatePosition()
-        self.thr_line.setVisible(self.show_thr.isChecked())
-
-    def _thr_dragged(self) -> None:
-        self.finder.threshold_dragged(self.thr_line.value())
-        self.thr_label.setFormat(f"threshold {self.finder.fmt(abs(self.thr_line.value() - self.finder.baseline()))}")
-
-    def apply_theme(self, mode: str) -> None:
-        super().apply_theme(mode)
-        if self.dock is not None:
-            self.refresh()
-
-
 class RasterChart(SpikeChart):
     kind = "Raster"
+    y = "trial"
     tip = "When did each spike happen, trial by trial?"
     link = "time"
 
@@ -395,6 +211,7 @@ class RasterChart(SpikeChart):
 
 class RateChart(SpikeChart):
     kind = "Rate"
+    y = "spikes/s"
     tip = "How fast does it fire through the trial?"
     link = "time"
 
@@ -427,27 +244,32 @@ class RateChart(SpikeChart):
         ev = self.events()
         if ev is None or not len(ev.t):
             return
-        edges, rates = A.block_rate(ev, len(chosen), end, self.rate_bin.value())
+        lengths = {i: self.data[i]["data"].shape[1] / self.data[i]["sample_rate"] for i in chosen}
+        edges, rates = A.block_rate(ev, lengths, self.rate_bin.value())
         if not len(edges):
             return
         norm = self.norm_rate.isChecked()
-        scale = (lambda r: r / r.max() if r.max() > 0 else r) if norm else (lambda r: r)
         p.setLabel("left", "fraction of the highest" if norm else "spikes/s")
+        spread = self.page.spread()
         on = self.units()
         every = len(on) == self.page.events.n_units
-        if self.page.events.n_units > 1:
-            for u in sorted(on):
-                if u in rates:
-                    self._rate_items[u] = p.plot(edges, scale(rates[u]), stepMode="center",
-                                                 pen=pg.mkPen(self.finder.qcolor(u), width=1.5))
+        curves = [(u, self.finder.qcolor(u), 1.5) for u in sorted(on) if u in rates] \
+            if self.page.events.n_units > 1 else []
         if every:                                        # all units together is just one more curve
-            self._rate_items[None] = p.plot(edges, scale(rates[None]), stepMode="center",
-                                            pen=pg.mkPen(self._fg(), width=2))
+            curves.append((None, QtGui.QColor(self._fg()), 2))
+        for u, color, width in curves:
+            mean, sd, sem, _ = A.mean_spread(rates[u])   # across the trials, in each bin
+            k = 1 / np.nanmax(mean) if norm and np.nanmax(mean) > 0 else 1
+            if spread:
+                draw_step_band(p, edges, mean * k, (sd if spread == "sd" else sem) * k, color)
+            self._rate_items[u] = p.plot(edges, mean * k, stepMode="center", pen=pg.mkPen(color, width=width))
         p.enableAutoRange(axis="y")                      # a new bin width changes the scale
 
 
 class PcaChart(SpikeChart):
     kind = "PCA map"
+    measure = ("shape", "pca")
+    y = "PC2"
     tip = "Do the spikes fall into separate units?"
 
     def __init__(self, page, cid: str = ""):
@@ -475,6 +297,8 @@ class PcaChart(SpikeChart):
 
 class WaveformsChart(SpikeChart):
     kind = "Waveforms"
+    measure = ("event", "spike")
+    y = "signal"
     tip = "What does each unit's spike look like?"
 
     def __init__(self, page, cid: str = ""):
@@ -500,6 +324,7 @@ class WaveformsChart(SpikeChart):
             label_axis(wp, "left", self.finder.channel.currentText(), self.finder.unit())
         peak = int(np.argmin(np.abs(ev.wave_t_ms))) if len(ev.wave_t_ms) else 0
         rng = np.random.default_rng(0)
+        spread = self.page.spread()
         for u in sorted(self.units()):
             w = ev.waves[ev.unit == u]
             if not len(w):
@@ -512,7 +337,10 @@ class WaveformsChart(SpikeChart):
             xs = np.tile(np.append(ev.wave_t_ms, ev.wave_t_ms[-1]), len(shown))
             ys = np.column_stack([w[shown], np.full(len(shown), np.nan)]).ravel()
             wp.plot(xs, ys, pen=pg.mkPen(self.faded(color, 40), width=1), connect="finite")
-            wp.plot(ev.wave_t_ms, w.mean(0), pen=pg.mkPen(color, width=3))
+            mean, sd, sem, _ = A.mean_spread(w)              # across the unit's spikes
+            if spread:
+                draw_band(wp, ev.wave_t_ms, mean, sd if spread == "sd" else sem, color)
+            wp.plot(ev.wave_t_ms, mean, pen=pg.mkPen(color, width=3))
 
 
 class _HistChart(SpikeChart):
@@ -536,6 +364,8 @@ class _HistChart(SpikeChart):
 
 class SizesChart(_HistChart):
     kind = "AP sizes"
+    measure = ("values", "sizes")
+    y = "events"
     tip = "How big are each unit's spikes?"
     norm_tip = "Each unit's histogram as a fraction of its own events, so units with different counts compare by shape"
 
@@ -558,6 +388,8 @@ class SizesChart(_HistChart):
 
 class IntervalsChart(_HistChart):
     kind = "Intervals"
+    measure = ("values", "intervals")
+    y = "count"
     tip = "How long between one spike and the next?"
     norm_tip = "Each unit's intervals as a fraction of its own intervals"
 

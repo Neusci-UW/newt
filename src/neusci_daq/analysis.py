@@ -407,16 +407,26 @@ def rate_trace(times_s: np.ndarray, duration_s: float, fs: float, sigma_ms: floa
     return np.convolve(train, k / k.sum(), mode="same")
 
 
-def block_rate(events: "Events", n_blocks: int, end_s: float, bin_s: float):
-    """Spikes/s during a block, from 0 to end_s in bins of bin_s (the last may be shorter),
-    averaged over n_blocks blocks. Returns (bin edges, {unit or None for all: rate})."""
-    if not len(events.t) or n_blocks < 1 or end_s <= 0:
+def block_rate(events: "Events", lengths: dict[int, float], bin_s: float):
+    """Spikes/s during each block, in bins of bin_s from 0 to where the longest block ends (the
+    last bin may be shorter). `lengths`: each block's length (s). A block counts only in the
+    bins it lasts through, so one that stops early doesn't pull the later bins down.
+    Returns (bin edges, {unit or None for all: (blocks × bins) rates, NaN past a block's end})."""
+    end_s = max(lengths.values(), default=0.0)
+    if not len(events.t) or end_s <= 0:
         return np.empty(0), {}
     edges = np.append(np.arange(0, end_s, bin_s), end_s)
-    per_bin = np.diff(edges) * n_blocks
-    out = {None: np.histogram(events.t, edges)[0] / per_bin}
+    width = np.diff(edges)
+    blocks = list(lengths)
+    lasts = np.array([[lengths[b] >= e - 1e-9 for e in edges[1:]] for b in blocks])
+
+    def rates(keep: np.ndarray) -> np.ndarray:
+        counts = [np.histogram(events.t[keep & (events.block == b)], edges)[0] for b in blocks]
+        return np.where(lasts, np.array(counts) / width, np.nan)
+
+    out = {None: rates(np.ones(len(events.t), bool))}
     for u in range(events.n_units):
-        out[u] = np.histogram(events.t[events.unit == u], edges)[0] / per_bin
+        out[u] = rates(events.unit == u)
     return edges, out
 
 
@@ -480,7 +490,7 @@ def triggered_average(traces: dict[int, np.ndarray], fs: float, times: dict[int,
                       before_ms: float, after_ms: float):
     """Average of `traces` around each time in `times` (seconds within each block),
     e.g. the stimulus around each spike (spike-triggered average). Times too near a
-    block's ends are skipped. Returns (t ms, mean, SD, n)."""
+    block's ends are skipped. Returns (t ms, mean, SD, n), the SD as mean_spread's."""
     pre, post = int(round(before_ms / 1000 * fs)), int(round(after_ms / 1000 * fs))
     segs = []
     for b, ts in times.items():
@@ -493,8 +503,8 @@ def triggered_average(traces: dict[int, np.ndarray], fs: float, times: dict[int,
     t = (np.arange(pre + post + 1) - pre) / fs * 1000
     if not segs:
         return t, np.full(len(t), np.nan), np.full(len(t), np.nan), 0
-    s = np.asarray(segs, float)
-    return t, s.mean(0), s.std(0), len(s)
+    mean, sd, _, _ = mean_spread(np.asarray(segs, float))
+    return t, mean, sd, len(segs)
 
 
 # -- grouping blocks by their stimulus ------------------------------------------

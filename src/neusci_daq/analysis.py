@@ -684,14 +684,10 @@ def describe_signature(sig: tuple, unit: str = "V") -> str:
         sig = sig[1:]
     elif sig[0] in ("wave", "burst"):
         what, freq, amp, offset, shape = sig
-        kind = ("Sine" if abs(shape - 0.707) < 0.06 else "Square wave" if shape > 0.9
-                else "Triangle wave" if abs(shape - 0.577) < 0.05 else "Wave")
+        kind = ("" if abs(shape - 0.707) < 0.06 else "Square " if shape > 0.9
+                else "Triangle " if abs(shape - 0.577) < 0.05 else "Wave ")
         v, u = best_prefix(_sig(amp), unit)
-        out = f"{kind} {_sig(freq):g} Hz{' bursts' if what == 'burst' else ''}, ±{_sig(v):g} {u}"
-        if abs(offset) > 0.1 * amp:
-            o, ou = best_prefix(_sig(offset), unit)
-            out += f", offset {_sig(o):g} {ou}"
-        return out
+        return f"{kind}{_sig(freq):g}Hz {_sig(v):g}{u}{' bursts' if what == 'burst' else ''}"
     # to 0.1 ms: finer than that is a sample's jitter, not a different stimulus
     n, size, width, gap = sig[0], _sig(sig[1]), round(sig[2], 1), round(sig[3], 1)
     v, u = best_prefix(size, unit)

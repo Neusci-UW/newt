@@ -290,6 +290,16 @@ class AnalysisPage(QtWidgets.QWidget):
         store = self.main.store
         return lambda i, y, fs: store.memo(paths[i], ("stimulus", how), lambda: A.stimulus_signature(y, fs))
 
+    def _fitted_signature_of(self, paths: list[Path], how: str):
+        """Like _signature_of, but reading the stimulus fit when one is chosen (and the gain)."""
+        fit = self._looks["stim_fit"]
+        if not fit or fit == "Off" or how == "notes":
+            return self._signature_of(paths, how)
+        hand, store = self.repeats.setting(), self.main.store
+        return lambda i, y, fs: store.memo(
+            paths[i], ("stimulus", how, "fit", fit, self.gain_of(how), hand),
+            lambda: A.stimulus_signature(self.trace(i, how), fs))
+
     def refresh(self) -> None:
         self._dirty = False
         old, self._paths = self._paths, list(self.main.analysis_blocks())
@@ -606,15 +616,15 @@ class AnalysisPage(QtWidgets.QWidget):
     def _compute_groups(self) -> None:
         """Group the blocks by their stimulus (see Stimulus channel) and list the groups."""
         how = self.how()
-        auto = self._group(self.blocks, how, self._signature_of(self._paths, how))
-        # the pages of the Blocks panel: your names, and blocks you moved
         d = groupsfile.load(self._folder())
+        self._show_looks(d)                           # the stimulus fit is one of them
+        auto = self._group(self.blocks, how, self._fitted_signature_of(self._paths, how))
+        # the pages of the Blocks panel: your names, and blocks you moved
         changed = d["moved"] or d["renamed"]
         stems = [p.stem for p in self._paths]
         shown = self.arranged(groupsfile.apply(auto, stems, d), self._paths, how, d) if stems else []
         self.groups = shown if auto or changed else []
         self.shown = shown
-        self._show_looks(d)
         self.picked, self.picked_pages = self._ticked()
         labels = {i: (stem, f"{b['duration_s']:.1f} s" if b is not None else "?", *self._stimuli_note(b))
                   for i, (stem, b) in enumerate(zip(stems, self.blocks))}

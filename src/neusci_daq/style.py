@@ -190,8 +190,27 @@ def light_palette() -> QtGui.QPalette:   # kept for older callers
     return palette(LIGHT)
 
 
+FONT_DIR = Path(__file__).resolve().parent / "fonts"
+FONT = "Hanken Grotesk"            # open (SIL OFL), bundled in fonts/; the system font if it can't load
+
+
+def _load_font(app: QtWidgets.QApplication) -> None:
+    """NEWT's typeface, once: loaded from fonts/ and made the default at the system's size."""
+    if _applied.get("font"):
+        return
+    _applied["font"] = True
+    families = set()
+    for f in sorted(FONT_DIR.glob("*.ttf")):
+        families.update(QtGui.QFontDatabase.applicationFontFamilies(QtGui.QFontDatabase.addApplicationFont(str(f))))
+    if FONT in families:
+        font = QtGui.QFont(app.font())
+        font.setFamily(FONT)
+        app.setFont(font)
+
+
 def apply(app: QtWidgets.QApplication, mode: str = LIGHT) -> None:
     """Use the flat style (called at start-up, and again when the mode changes)."""
+    _load_font(app)
     app.setStyle("Fusion")
     app.setPalette(palette(mode))
     app.setStyleSheet(stylesheet(mode))

@@ -29,14 +29,15 @@ CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, Sizes
           ResponseChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
           LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart, DataPadTableChart, ScatterChart)
 KINDS = {c.kind: c for c in CHARTS}
-# the Add chart menu's headings: what runs along each chart's x axis (its y axis is beside its name)
-GROUPS = {"Time in the trial (s)": ("Response", "Stimulus", "Stimulus fit", "Raster", "Rate"),
-          "Time from an event (ms)": ("Stimulus-triggered rate", "Spike-triggered average", "Waveforms", "V",
-                                      "dV/dt"),
-          "Phase of the cycle (°)": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase"),
-          "One signal against another": ("Response against stimulus", "V against dV/dt"),
-          "A spike property (count)": ("AP sizes", "Intervals", "PCA map"),
-          "One value per trial": ("DataPad table", "Scatter")}
+# the Add chart menu: what you're asking of the data, then (in a dict) a narrower question
+GROUPS = {"Raw recording": ("Response", "Stimulus", "Stimulus fit"),
+          "Spikes": ("Raster", "Rate",
+                     {"Spike shape": ("Waveforms", "V", "dV/dt", "V against dV/dt", "AP sizes", "PCA map"),
+                      "Timing": ("Intervals",)}),
+          "Around a stimulus": ("Stimulus-triggered rate", "Spike-triggered average"),
+          "Cycles and phase": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase",
+                               "Response against stimulus"),
+          "Across trials": ("DataPad table", "Scatter")}
 BOARD = "Board"                    # the board you work on; Save… keeps it as a layout of your own
 SIZE = {"DataPad table": (560, 260), "Response": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
 
@@ -185,17 +186,11 @@ class ChartCanvas(QtWidgets.QWidget):
         self.lock.setToolTip("Lock the board: stop the charts being moved, resized, closed or added to, say for a class")
         self.lock.setChecked(self.settings.value("analysis/lock", False, type=bool))
         self.lock.toggled.connect(self._lock_toggled)
-        self.bars = QtWidgets.QCheckBox("Scale bars")
-        self.bars.setToolTip("Swap the axes of the plots against time for small scale bars, as in a published "
-                             "figure. Drag a bar to move it; its numbers follow the zoom")
-        self.bars.setChecked(self.settings.value("analysis/scale_bars", False, type=bool))
-        self.bars.toggled.connect(lambda on: self.settings.setValue("analysis/scale_bars", on))
-        self.bars.toggled.connect(lambda *_: [c.show_bars() for c in self.every()])
         self.toolbar = QtWidgets.QWidget()
         row = QtWidgets.QHBoxLayout(self.toolbar)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
-        for w in (self.layouts, self.btn_save, self.btn_reset, self.lock, self.bars):
+        for w in (self.layouts, self.btn_save, self.btn_reset, self.lock):
             row.addWidget(w)
         self._list_layouts()
         self.layouts.currentTextChanged.connect(self.show_layout)
@@ -421,7 +416,7 @@ class ChartCanvas(QtWidgets.QWidget):
         self.save()
         return {"layout": self.space.name if self.space is not None else BOARD,
                 "layouts": {name: self.state_of(space) for name, space in self.spaces.items()},
-                "own": self.own_layouts(), "lock": self.lock.isChecked(), "bars": self.bars.isChecked()}
+                "own": self.own_layouts(), "lock": self.lock.isChecked()}
 
     def restore_app_state(self, s: dict) -> None:
         """The layouts of a .newt file, in place of what's on screen. Your own layouts stay
@@ -435,7 +430,6 @@ class ChartCanvas(QtWidgets.QWidget):
             self._drop(name)
         self._list_layouts()
         self.lock.setChecked(s["lock"])
-        self.bars.setChecked(s["bars"])
         self.show_layout(s["layout"] if self.layouts.findText(s["layout"]) >= 0 else BOARD)
 
     def _lock_toggled(self, on: bool) -> None:
@@ -458,17 +452,32 @@ class ChartCanvas(QtWidgets.QWidget):
 
     def _fill_add_menu(self, menu: QtWidgets.QMenu, at) -> None:
         menu.clear()
-        for group, kinds in GROUPS.items():
-            menu.addSection(group)
-            for kind in kinds:
-                c = KINDS[kind]
+        menu.setToolTipsVisible(True)
+
+        def fill(into: QtWidgets.QMenu, entries) -> None:
+            for e in entries:
+                if isinstance(e, dict):
+                    for title, sub in e.items():
+                        fill(self._submenu(into, title, sub), sub)
+                    continue
+                c = KINDS[e]
                 n = sum(x.kind == c.kind for x in self.here())
                 # Qt puts what follows the tab on the right, where a shortcut would go
-                action = menu.addAction(c.kind + (f"  ({n} open)" if n else "") + f"\t{c.y}")
+                action = into.addAction(c.kind + (f"  ({n} open)" if n else "") + f"\t{c.y}")
                 action.setToolTip(c.tip)
                 action.setStatusTip(c.tip)
                 action.triggered.connect(lambda _=False, k=c.kind: self.add(k, at=at))
-        menu.setToolTipsVisible(True)
+
+        for group, entries in GROUPS.items():
+            fill(self._submenu(menu, group, entries), entries)
+
+    def _submenu(self, menu: QtWidgets.QMenu, title: str, entries) -> QtWidgets.QMenu:
+        """A submenu, its title saying how many of its charts are open."""
+        names = [k for e in entries for k in ([x for v in e.values() for x in v] if isinstance(e, dict) else [e])]
+        n = sum(x.kind in names for x in self.here())
+        sub = menu.addMenu(title + (f"  ({n} open)" if n else ""))
+        sub.setToolTipsVisible(True)
+        return sub
 
     def _context_menu(self, at: QtCore.QPointF, where: QtCore.QPoint) -> None:
         """Right-click on empty board: the charts, to put one there."""

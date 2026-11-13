@@ -401,7 +401,7 @@ class BreadboardPage(QtWidgets.QWidget):
             "Build a circuit on a breadboard and record from it. Drag a part onto the board, or pick it and click "
             "two holes (one for a probe); drag a placed part, or one of its ends, to move it. In each column, holes a–e are joined, and so are f–j; the − rails are ground. "
             "Give a probe an input and Acquisition records that point of the circuit. An input voltage from "
-            "the stimulator plays whatever the Stimulator or Protocols tab sends.")
+            "the stimulator plays whatever the Stimulus tab sends.")
         intro.setWordWrap(True)
         left.addWidget(intro)
         tools = QtWidgets.QHBoxLayout()
@@ -453,7 +453,7 @@ class BreadboardPage(QtWidgets.QWidget):
         self.source = QtWidgets.QComboBox()
         self.source.addItem("Stimulator output", "stim")
         self.source.addItem("Fixed voltage", "dc")
-        self.source.setToolTip("Stimulator output: whatever the Stimulator or Protocols tab sends, in V")
+        self.source.setToolTip("Stimulator output: whatever the Stimulus tab sends, in V")
         self.volts = UnitSpinBox(-10, 10, "V", step=0.1)
         self.ohms = UnitSpinBox(1, 1e9, "Ω", families=[("Ω", 1.0), ("kΩ", 1e3), ("MΩ", 1e6)], step=1)
         self.farads = UnitSpinBox(1e-12, 1, "F", families=[("F", 1.0), ("mF", 1e-3), ("µF", 1e-6), ("uF", 1e-6),

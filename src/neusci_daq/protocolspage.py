@@ -90,7 +90,7 @@ class VarRow(QtWidgets.QWidget):
         g.setContentsMargins(0, 0, 0, 0)
         g.setHorizontalSpacing(6)
         g.setVerticalSpacing(6)
-        tag = QtWidgets.QLabel(f"Vary {name}")
+        self.tag = tag = QtWidgets.QLabel(f"Vary {name}")
         tag.setMinimumWidth(56)
         self.setting = QtWidgets.QComboBox()
         self.setting.setToolTip(f"Which setting of the stimulus {name} steps through")
@@ -141,6 +141,11 @@ class VarRow(QtWidgets.QWidget):
             w.valueChanged.connect(self._edited)
         self.list_edit.editingFinished.connect(self._edited)
         self._list_text = ""
+
+    def set_inline(self, on: bool) -> None:
+        """Inline in the stimulus form, beside the setting it varies: just its values."""
+        for w in (self.tag, self.setting) + ((self.btn_remove,) if self.btn_remove is not None else ()):
+            w.setVisible(not on)
 
     # -- in and out ------------------------------------------------------------
     def set_shape(self, shape, avoid: str = "") -> None:
@@ -222,9 +227,12 @@ class VarRow(QtWidgets.QWidget):
 
 
 class ProtocolsPage(QtWidgets.QWidget):
+    placed = QtCore.Signal()       # what's varied, or whether it can be changed, may have changed
+
     def __init__(self, main):
         super().__init__()
         self.main = main
+        self.varying = main.settings.value("stim_varying", False, type=bool)   # a setting is stepped
         self._mode = style.LIGHT
         self._loading = False
         self._has_b = False
@@ -254,9 +262,10 @@ class ProtocolsPage(QtWidgets.QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         self.split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.split.setChildrenCollapsible(False)
-        self.split.addWidget(self._build_left())
-        self.split.addWidget(self._build_middle())
-        self.split.addWidget(self._build_right())
+        self.left_panel, self.middle_panel, self.right_panel = \
+            self._build_left(), self._build_middle(), self._build_right()
+        for w in (self.left_panel, self.middle_panel, self.right_panel):
+            self.split.addWidget(w)
         self.split.setStretchFactor(0, 0)
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 0)
@@ -367,7 +376,7 @@ class ProtocolsPage(QtWidgets.QWidget):
         self.align = QtWidgets.QLabel()
         self.align.setWordWrap(True)
         self.btn_monitor = QtWidgets.QPushButton("Choose…")
-        self.btn_monitor.setToolTip("Pick the input the stimulus is wired to (Stimulator › Record on)")
+        self.btn_monitor.setToolTip("Pick the input the stimulus is wired to (Output › Record on)")
         align_row.addWidget(self.align, 1)
         align_row.addWidget(self.btn_monitor)
         form2.addRow("Line up on", align_row)
@@ -613,6 +622,15 @@ class ProtocolsPage(QtWidgets.QWidget):
         self.m_to.setValue(p.measure_to_ms)
         self._loading = False
         self._settings_changed()
+        self.placed.emit()
+
+    def set_varying(self, on: bool) -> None:
+        """Whether a setting is stepped: off, Fire sends the stimulus as it is."""
+        self.varying = on
+        self.main.settings.setValue("stim_varying", on)
+        if not on and self._has_b:
+            self._set_b(False)
+        self._update_buttons()
 
     def protocol_from_widgets(self) -> T.Protocol:
         return T.Protocol(name=self.name.text().strip() or "Protocol", a=self.row_a.var(),
@@ -663,9 +681,16 @@ class ProtocolsPage(QtWidgets.QWidget):
         self.shape.setCurrentIndex(max(0, self.shape.findData(self.main.stimulus.shape)))
         self.shape.blockSignals(False)
         shape = self._shapes()
+        keys = [k for k, _, _ in T.settings_of(shape)]
+        if self._has_b and self.row_b.var().key not in keys:      # the setting it varied is gone
+            self._show_b(False)
+        if self.varying and self.row_a.var().key not in keys:
+            self.varying = False
+            self.main.settings.setValue("stim_varying", False)
         self.row_a.set_shape(shape)
         self.row_b.set_shape(shape, avoid=self.row_a.var().key)
         self._settings_changed()
+        self.placed.emit()
 
     # ======================================================================
     # reacting to settings
@@ -731,7 +756,7 @@ class ProtocolsPage(QtWidgets.QWidget):
 
     def _update_buttons(self):
         idle = not self.running
-        can = idle and bool(self.chk and self.chk.ok) and bool(self.main.cfg.stim_monitor)
+        can = idle and self.varying and bool(self.chk and self.chk.ok) and bool(self.main.cfg.stim_monitor)
         self.btn_run.setEnabled(can)
         self.btn_pause.setEnabled(self.running)
         self.btn_stop.setEnabled(self.running)
@@ -741,6 +766,7 @@ class ProtocolsPage(QtWidgets.QWidget):
         self.row_a.set_locked(not idle)
         self.row_b.set_locked(not idle)
         self.btn_export.setEnabled(bool(self.results))
+        self.placed.emit()
 
     def sync(self) -> None:
         """Channels or the stimulus input changed in the main window."""

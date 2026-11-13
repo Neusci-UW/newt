@@ -9,7 +9,7 @@ Spikes (threshold or bimodal, sorted into units, see analysis.py, run again when
 settings change until you Clear, with the units found, whose ticks decide what the charts
 show). Right of the board are the settings of the chart you picked; the phase charts share
 the repeats'. The Measure tool measures stretches of the charts into a DataPad table
-(measurecharts.py). Above the board, a bar picks the highlighted trial (slider, ◀ ▶).
+(measurecharts.py). Above the board, a bar picks the highlighted trial (spin box).
 
 The trials are the ones being reviewed, or those recorded so far in live mode.
 """
@@ -71,8 +71,10 @@ class AnalysisPage(QtWidgets.QWidget):
         self.current = QtWidgets.QSpinBox(minimum=1, maximum=1)
         self.current.setToolTip("The highlighted trial")
         self.n_label = QtWidgets.QLabel()
-        for w in (self.btn_prev, self.btn_next, self.current, self.n_label):
+        for w in (self.current, self.n_label):
             bar.addWidget(w)
+        self.btn_prev.hide()                      # kept, unseen: ← and → still step through the trials
+        self.btn_next.hide()
         self.slider.hide()                        # kept, unseen: the spin box and the arrows move through the trials
         lay.addLayout(top)
 
@@ -157,7 +159,9 @@ class AnalysisPage(QtWidgets.QWidget):
                                  "the measure windows, and how NEWT looks now, so it all comes back when it's opened")
         self.btn_save.clicked.connect(self.main.save)
         self.canvas.toolbar.layout().insertWidget(0, self.btn_save)
+        self.canvas.layouts.hide()                # the layout picker: kept, unseen
         top.addWidget(self.canvas.toolbar)
+        self.block_bar.hide()                     # the Trials list picks the trial now: kept, unseen
         top.addWidget(self.block_bar)
         top.addWidget(self.source, 1)
         self.canvas.tool_changed.connect(lambda *_: self.measure.decorate_all())
@@ -242,7 +246,7 @@ class AnalysisPage(QtWidgets.QWidget):
         title, color = self._paths[i].stem, None
         for g, (name, blocks) in enumerate(self.shown):
             if i in blocks:                       # the trial's name in its group, and the group's color
-                title, color = f"{name} {blocks.index(i) + 1}", self._looks["colors"].get(name)
+                title, color = f"{name} {blocks.index(i) + 1}", self.group_color(g)
                 break
         self.blocks_panel.preview.show_trial(
             title, [(n, self.recorded(i, n), b["sample_rate"]) for n in names], color)
@@ -628,15 +632,9 @@ class AnalysisPage(QtWidgets.QWidget):
         self.picked, self.picked_pages = self._ticked()
         labels = {i: (stem, f"{b['duration_s']:.1f} s" if b is not None else "?", *self._stimuli_note(b))
                   for i, (stem, b) in enumerate(zip(stems, self.blocks))}
-        thumbs = {}
-        stim = self.stim_channel.currentData()
-        for i, b in enumerate(self.blocks):
-            if b is not None:
-                name = next((n for n in b["channel_names"] if n != stim), None)
-                thumbs[i] = self.recorded(i, name) if name else None
         self.blocks_panel.populate(None, shown, [self.group_color(g) for g in range(max(1, len(shown)))], labels,
                                    lambda i: groupsfile.auto_page(auto, i, d), bool(changed), False,
-                                   self._looks["hidden_groups"], self.hidden_blocks(), thumbs)
+                                   self._looks["hidden_groups"], self.hidden_blocks())
         self.blocks_panel.sort_box.setCurrentIndex(max(0, self.blocks_panel.sort_box.findData(self._looks["sort"])))
         self.blocks_panel.select(*self._highlighted)
         self.update_preview()

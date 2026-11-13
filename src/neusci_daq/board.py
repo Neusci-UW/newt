@@ -102,6 +102,9 @@ class Grip(QtWidgets.QWidget):
         self.frame.board.drag_done()
 
 
+EDGE = 6                                       # the rim of a chart's frame, px
+
+
 class ChartFrame(QtWidgets.QFrame):
     """A chart on the board: its title bar, the chart, and a corner to resize it. `place` is
     where it is on the board (board pixels, before zoom)."""
@@ -113,11 +116,12 @@ class ChartFrame(QtWidgets.QFrame):
         self.setObjectName("chartFrame")
         self.setMinimumSize(1, 1)
         lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(1, 1, 1, 1)
+        lay.setContentsMargins(EDGE, EDGE, EDGE, EDGE)         # the rim: drag it to move the chart
         lay.setSpacing(0)
         lay.addWidget(chart, 1)
         chart.setMinimumSize(1, 1)
-        self.bar = TitleBar(self)                 # over the chart's top, shown while the mouse is on it
+        self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        self.bar = TitleBar(self)                 # kept for its Copy and Close buttons; never shown
         self.bar.setParent(self)
         self.bar.hide()
         self.grip = Grip(self)
@@ -132,6 +136,7 @@ class ChartFrame(QtWidgets.QFrame):
         self.bar.btn_close.setVisible(not on)
         self.bar.btn_copy.setVisible(not on)
         self.grip.setVisible(not on)
+        self.setCursor(QtCore.Qt.CursorShape.ArrowCursor if on else QtCore.Qt.CursorShape.OpenHandCursor)
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
@@ -139,16 +144,23 @@ class ChartFrame(QtWidgets.QFrame):
         self.grip.move(self.width() - self.grip.width() - 1, self.height() - self.grip.height() - 1)
         self.grip.raise_()
 
-    # the title bar shows only while the mouse is on the chart, so the board can be a figure
-    def enterEvent(self, ev):
-        super().enterEvent(ev)
-        self.bar.show()
-        self.bar.raise_()
+    # the rim round the chart moves it; right-click it for Copy and Close
+    def mousePressEvent(self, ev):
+        self.board.title_pressed(self, ev)
 
-    def leaveEvent(self, ev):
-        super().leaveEvent(ev)
-        if self.board.dragging() is not self:
-            self.bar.hide()
+    def mouseMoveEvent(self, ev):
+        self.board.drag_to(ev)
+
+    def mouseReleaseEvent(self, ev):
+        self.board.drag_done()
+
+    def contextMenuEvent(self, ev):
+        if self.board.locked:
+            return
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Copy this chart", self.bar.btn_copy.click)
+        menu.addAction("Close this chart", self.bar.btn_close.click)
+        menu.exec(ev.globalPos())
 
     def restyle(self) -> None:
         t = self.board.tokens

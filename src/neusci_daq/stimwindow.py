@@ -56,7 +56,10 @@ class StimPage(QtWidgets.QWidget):
         outer.setSpacing(16)
 
         # ---- left: which output, then its shape and settings ----------------
-        left = QtWidgets.QVBoxLayout()
+        # In panels, so the Stimulus page (stimuluspage.py) can lay them out with the protocol's.
+        self.fields_panel = QtWidgets.QWidget()
+        left = QtWidgets.QVBoxLayout(self.fields_panel)
+        left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(10)
         self.editing = 0                   # 0: the first output's stimulus, 1: the second's
         outs = QtWidgets.QHBoxLayout()
@@ -161,9 +164,9 @@ class StimPage(QtWidgets.QWidget):
         self.pages.addWidget(fw)
         left.addWidget(self.pages, 1)
 
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-        left.addWidget(line)
+        self.output_panel = QtWidgets.QWidget()
+        ov = QtWidgets.QVBoxLayout(self.output_panel)
+        ov.setContentsMargins(0, 0, 0, 0)
         bottom = QtWidgets.QFormLayout()
         self.output = QtWidgets.QComboBox()
         self.output.addItems(list(stimmod.AO_CHANNELS))
@@ -179,16 +182,17 @@ class StimPage(QtWidgets.QWidget):
         self.on_start.setToolTip("What the stimulator does when you press Start on the toolbar")
         bottom.addRow("Output", self.output)
         bottom.addRow("Record on", self.monitor)
-        bottom.addRow("Repeat every", self.repeat)
         bottom.addRow("When Start is pressed", self.on_start)
-        left.addLayout(bottom)
+        ov.addLayout(bottom)
         self.sim_note = QtWidgets.QLabel()            # simulated backend: where the stimulus goes
         self.sim_note.setWordWrap(True)
         self.sim_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.sim_note.linkActivated.connect(lambda *_: self.main.tabs.show_tab("sim"))
         self.sim_note.setVisible(False)
-        left.addWidget(self.sim_note)
-        btns = QtWidgets.QHBoxLayout()
+        ov.addWidget(self.sim_note)
+        self.buttons_panel = QtWidgets.QWidget()
+        btns = QtWidgets.QHBoxLayout(self.buttons_panel)
+        btns.setContentsMargins(0, 0, 0, 0)
         self.btn_fire = QtWidgets.QPushButton("Fire")
         self.btn_fire.setObjectName("start")
         self.btn_fire.setToolTip("Send the stimulus once (Ctrl+F)")
@@ -198,16 +202,28 @@ class StimPage(QtWidgets.QWidget):
         self.btn_stop.setToolTip("Stop the stimulus and set the output to 0 V (Esc)")
         self.btn_save = QtWidgets.QPushButton("Save…")
         self.btn_load = QtWidgets.QPushButton("Load…")
-        for b in (self.btn_fire, self.btn_repeat, self.btn_stop):
+        for b in (self.btn_fire, self.btn_repeat):
             btns.addWidget(b)
+        btns.addWidget(QtWidgets.QLabel("every"))
+        btns.addWidget(self.repeat)
+        btns.addWidget(self.btn_stop)
         btns.addStretch(1)
         for b in (self.btn_save, self.btn_load):
             btns.addWidget(b)
-        left.addLayout(btns)
-        outer.addLayout(left, 0)
+        column = QtWidgets.QVBoxLayout()
+        column.setSpacing(10)
+        column.addWidget(self.fields_panel, 1)
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        column.addWidget(line)
+        column.addWidget(self.output_panel)
+        column.addWidget(self.buttons_panel)
+        outer.addLayout(column, 0)
 
         # ---- right: preview ----------------------------------------------
-        right = QtWidgets.QVBoxLayout()
+        self.preview_panel = QtWidgets.QWidget()
+        right = QtWidgets.QVBoxLayout(self.preview_panel)
+        right.setContentsMargins(0, 0, 0, 0)
         self.preview = plot_widget()
         p = self.preview.getPlotItem()
         p.setLabel("left", "Output", units="V")
@@ -222,7 +238,7 @@ class StimPage(QtWidgets.QWidget):
         self.message.setWordWrap(True)
         right.addWidget(self.info)
         right.addWidget(self.message)
-        outer.addLayout(right, 1)
+        outer.addWidget(self.preview_panel, 1)
 
         # ---- signals -------------------------------------------------------
         self._apply_units()

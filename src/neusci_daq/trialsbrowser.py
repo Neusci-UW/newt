@@ -11,33 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import style
 
 LIVE, BACK = "live", "back"
 ROLE = QtCore.Qt.ItemDataRole.UserRole
-
-
-def thumb_icon(y: np.ndarray, color: str | None = None, w: int = 64, h: int = 16) -> QtGui.QIcon:
-    """A tiny trace of a trial: the min and max of each pixel column, so spikes show."""
-    pix = QtGui.QPixmap(w * 2, h * 2)
-    pix.setDevicePixelRatio(2.0)
-    pix.fill(QtCore.Qt.GlobalColor.transparent)
-    y = np.asarray(y, dtype=float)
-    y = y[np.isfinite(y)]
-    if len(y) >= w:
-        cols = y[: len(y) // w * w].reshape(w, -1)
-        lo, hi = cols.min(1), cols.max(1)
-        a, b = lo.min(), hi.max()
-        span = (b - a) or 1.0
-        p = QtGui.QPainter(pix)
-        p.setPen(QtGui.QPen(QtGui.QColor(color or "#888780"), 1))
-        for x in range(w):
-            p.drawLine(QtCore.QPointF(x + .5, h - 1 - (hi[x] - a) / span * (h - 2)),
-                       QtCore.QPointF(x + .5, h - 1 - (lo[x] - a) / span * (h - 2)))
-        p.end()
-    return QtGui.QIcon(pix)
 
 
 class TrialPreview(QtWidgets.QWidget):
@@ -63,14 +42,13 @@ class TrialPreview(QtWidgets.QWidget):
         self.view.clear()
         first = None
         for r, (name, y, fs) in enumerate(channels):
-            p = self.view.addPlot(row=r, col=0)
+            self.view.addLabel(f"Ch{r + 1}", row=r, col=0, color="#bbb")
+            p = self.view.addPlot(row=r, col=1)
             p.setMenuEnabled(False)
             p.setMouseEnabled(False, False)
             p.hideButtons()
             p.hideAxis("bottom")
-            p.getAxis("left").setWidth(30)
-            p.getAxis("left").setStyle(tickFont=None, showValues=False)
-            p.setLabel("left", name)
+            p.hideAxis("left")
             p.setDownsampling(auto=True, mode="peak")
             p.setClipToView(True)
             p.plot(np.arange(len(y)) / fs, y, pen=pg.mkPen(color, width=1) if color else pg.mkPen(width=1))
@@ -287,11 +265,10 @@ class TrialsBrowser(QtWidgets.QWidget):
 
     def populate(self, top: str | None, pages: list[tuple[str, list[int]]], colors: list[str],
                  labels: dict[int, tuple], home, can_reset: bool, busy: bool,
-                 hidden_pages=(), hidden_blocks=(), thumbs=None) -> None:
+                 hidden_pages=(), hidden_blocks=()) -> None:
         """top: LIVE, BACK or None; pages: [(name, block indices)]; labels: block ->
         (file stem, duration text, and maybe a note); home(i): block i's stimulus page;
-        hidden_pages, hidden_blocks: what's unticked, by page name and block index;
-        thumbs: block -> a trace to draw small beside its row."""
+        hidden_pages, hidden_blocks: what's unticked, by page name and block index."""
         self._pages, self._home = pages, home
         tree = self.tree
         tree.blockSignals(True)
@@ -320,10 +297,8 @@ class TrialsBrowser(QtWidgets.QWidget):
             tree.addTopLevelItem(head)
             for k, i in enumerate(blocks, 1):
                 stem, dur, *note = labels.get(i, (f"trial {i + 1}", "?"))
-                item = QtWidgets.QTreeWidgetItem([f"{name} {k}   ({stem})" + "".join(f"   {n}" for n in note)])
+                item = QtWidgets.QTreeWidgetItem([f"{name} {k}" + "".join(f"   {n}" for n in note)])
                 item.setData(0, ROLE, ("block", i))
-                if thumbs and thumbs.get(i) is not None:
-                    item.setIcon(0, thumb_icon(thumbs[i], colors[g % len(colors)]))
                 self._tick(item, i in hidden_blocks, False)
                 item.setToolTip(0, f"{stem}, {dur}: click or drag across trials to analyze just those; "
                                    "Cmd/Shift-click to add more; right-click to move it to another group"

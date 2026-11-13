@@ -54,13 +54,15 @@ from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
 from .simpage import SimOffPage, SimPage
 from .breadpage import BreadboardPage
-from .membranepage import RC_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
+from .membranepage import AP_PAGE, RC_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
+from .stimuluspage import StimulusPage
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
 from . import colors
 from .channelsetup import ChannelSetupMixin
 from .commentcontrol import CommentsMixin
+from .codeview import ShowTheCode
 from .liveview import LiveMixin
 from .mainparts import LIVE, REVIEW, WINDOW_MAX, WindowBox, _CommentEdit  # noqa: F401 (LIVE, REVIEW: for importers)
 from .mediacontrol import MediaMixin
@@ -368,6 +370,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         lay.addWidget(self.scroll)
         self.stim_page = StimPage(self)
         self.trials_page = ProtocolsPage(self)
+        self.stimulus_page = StimulusPage(self, self.stim_page, self.trials_page)   # the two, as one page
         self.analysis_page = AnalysisPage(self)
         self.blocks_panel.color_requested.connect(self.analysis_page.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
@@ -380,23 +383,25 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.membrane_page = MembranePage(self)
         # The membrane as an RC circuit, then the same charging done by ions.
         self.rc_page = MembranePage(self, page=RC_PAGE, what="RC circuit")
+        # A spike travelling along an axon, using both lessons above.
+        self.ap_page = MembranePage(self, page=AP_PAGE, what="action potential")
         placeholder = lambda title, text: self._placeholder(title, text)
-        # Record, Stimulator and Trials are sub-pages of Acquisition. Either half of
+        # Record and Stimulus (the stimulator and its protocols) are sub-pages of Acquisition. Either half of
         # a split can show any page, two of Acquisition's included.
         self.tabs = TabArea([
             ("acq", "Record", central),
-            ("stim", "Stimulator", self.stim_page),
-            ("trials", "Protocols", self.trials_page),
+            ("stim", "Stimulus", self.stimulus_page),
             ("analysis", "Analysis", self.analysis_page),
         ] + ([("sim", "Neural network simulator", self.sim_page)] if self.sim_page else [])
           + ([("board", "Breadboard simulator", self.board_page)] if self.board_page else [])
           + ([("simoff", "Simulators", self.simoff_page)] if self.simoff_page else [])
           + [("membrane", "Membrane potential", self.membrane_page),
-             ("rc", "RC circuit", self.rc_page)], groups=[
-            ("acquisition", "Acquisition", ["acq", "stim", "trials"]),
+             ("rc", "RC circuit", self.rc_page),
+             ("ap", "Action potential", self.ap_page)], groups=[
+            ("acquisition", "Acquisition", ["acq", "stim"]),
             ("analysis", "Analysis", ["analysis"]),
             ("datasim", "Data Simulation", ["sim", "board", "simoff"]),   # data sources Acquisition can record
-            ("lessons", "Lessons", ["membrane", "rc"]),
+            ("lessons", "Lessons", ["membrane", "rc", "ap"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -563,6 +568,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.membrane_page.apply_theme(mode)
         if getattr(self, "rc_page", None):
             self.rc_page.apply_theme(mode)
+        if getattr(self, "ap_page", None):
+            self.ap_page.apply_theme(mode)
         if hasattr(self, "analysis_page"):
             self.analysis_page.apply_theme(mode)
         self._update_theme_button()
@@ -636,7 +643,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         on = self.repeating or busy or protocol
         if protocol:
             self.stim_chip_text.setText(self.trials_page.chip_text())
-            self.stim_chip.setToolTip("A protocol is running (Acquisition › Protocols). Stop ends it.")
+            self.stim_chip.setToolTip("A protocol is running (Acquisition › Stimulus). Stop ends it.")
         elif on:
             self.stim_chip_text.setText("Stimulating")      # the interval is in the tooltip
             self.stim_chip.setToolTip(f"Repeating every {self.stim_repeat_s:g} s" if self.repeating
@@ -720,6 +727,7 @@ class _FileOpener(QtCore.QObject):
 def run(cfg: Config, config_path: str | Path | None = None, open_path: str | None = None):
     app = pg.mkQApp("NEWT")
     opener = _FileOpener(app)
+    ShowTheCode(app)                                   # Show the Code… in every right-click menu
     # pyqtgraph sets its own icon and Windows taskbar ID in mkQApp; replace both
     # before the window opens, or the taskbar keeps showing pyqtgraph's icon.
     if sys.platform == "win32":

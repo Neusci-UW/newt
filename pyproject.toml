@@ -27,4 +27,4 @@ neusci-daq = "neusci_daq.__main__:main"      # the old command, still works
 where = ["src"]
 
 [tool.setuptools.package-data]
-neusci_daq = ["icons/*.png", "icons/*.ico", "icons/*.svg", "lessons/*.html", "lessons/*.js", "lessons/questions/*.js", "lessons/vendor/mathjax/*.js"]
+neusci_daq = ["fonts/*.ttf", "fonts/OFL.txt", "icons/*.png", "icons/*.ico", "icons/*.svg", "lessons/*.html", "lessons/*.js", "lessons/questions/*.js", "lessons/vendor/mathjax/*.js"]

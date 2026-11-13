@@ -89,7 +89,7 @@ class SimPage(QtWidgets.QWidget):
 
         box = QtWidgets.QGroupBox("⚡ Stimulator → network: which cells the stimulus drives")
         v = QtWidgets.QVBoxLayout(box)
-        hint = QtWidgets.QLabel("Whatever the Stimulator or Protocols tab sends is injected as a current into the "
+        hint = QtWidgets.QLabel("Whatever the Stimulus tab sends is injected as a current into the "
                                 "ticked cells. Strength: the depolarization from a 1 V, 1 ms pulse.")
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -256,7 +256,7 @@ class SimPage(QtWidgets.QWidget):
                     item = _readonly("")
                 self.recs.setItem(r, col, item)
             if monitor:
-                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Stimulator › Record on): "
+                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Stimulus › Output › Record on): "
                                                       "it records the stimulus")
                 self.recs.item(r, 2).setText("records the stimulus")
 

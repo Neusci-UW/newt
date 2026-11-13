@@ -28,6 +28,8 @@ LESSON_PAGES = Path(__file__).with_name("lessons")
 PAGE = LESSON_PAGES / "membrane_potential.html"
 # The RC circuit page: a capacitor charging, then the same thing done by ions
 RC_PAGE = LESSON_PAGES / "rc_membrane.html"
+# The action potential page: a spike travelling along an axon
+AP_PAGE = LESSON_PAGES / "action_potential.html"
 
 # QtWebEngine has to be imported before the QApplication exists. gui.py imports this
 # module at the top, before run() makes the app, so importing it here is early enough.

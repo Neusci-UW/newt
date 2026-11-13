@@ -16,12 +16,14 @@ from pyqtgraph.Qt import QtGui, QtWidgets
 
 from . import analysis as A
 from . import style, theme
+from .charttext import TextEditor, apply_texts
 from .helpview import add_help
 from .plotzoom import add_buttons
 from .viewkit import View, show_scale_bar, shrink_combos, style_plot, with_slider
 
 
-LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None]}   # None: that edge is auto
+LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None],   # None: that edge is auto
+        "texts": {}}                                      # text you edited or deleted on it: key -> text ("" deleted)
 
 
 class Chart(View):
@@ -44,7 +46,7 @@ class Chart(View):
         self.pin: dict | None = None          # {"stems": blocks, "picked": those of them, "pages": names}
         self.own_units: set[int] | None = None
         self.linked = True
-        self.look = {k: list(v) if isinstance(v, list) else v for k, v in LOOK.items()}
+        self.look = {k: list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v for k, v in LOOK.items()}
         self.stale = True
         self.auto_hide = False                # from a built-in layout: gives up its room when empty
         self.collapsed = False                # nothing to show: its dock gives up its room
@@ -53,8 +55,14 @@ class Chart(View):
         self.body = QtWidgets.QVBoxLayout(self)
         self.body.setContentsMargins(0, 0, 0, 0)
         self.body.setSpacing(2)
+        self._texts = TextEditor(self)
         self.options = self._make_options()
         self._fill_units()
+        if type(self).scale_bars is not Chart.scale_bars:        # a chart that can swap its axes for scale bars
+            self.bars = QtWidgets.QCheckBox("Scale bars")
+            self.bars.setToolTip("Swap the axes of this chart's plots against time for small scale bars, as in a "
+                                 "published figure. Drag a bar to move it; its numbers follow the zoom")
+            self.field("bars", "", self.bars, self.show_bars)
 
     # -- its settings ---------------------------------------------------------------------
     def _make_options(self) -> QtWidgets.QWidget:
@@ -70,6 +78,11 @@ class Chart(View):
         self.name_box.setToolTip("What this chart is called in its title bar")
         self.name_box.editingFinished.connect(self._renamed)
         f.addRow("Name", self.name_box)
+        self.texts_btn = QtWidgets.QPushButton("Restore edited text")
+        self.texts_btn.setToolTip("Put back any title, label or note you changed or deleted by double-clicking it")
+        self.texts_btn.clicked.connect(self._restore_texts)
+        self.texts_btn.hide()
+        f.addRow(self.texts_btn)
         # the spike units it shows: the Spikes panel's, or chosen here (laid out like its Groups)
         self.units_group = QtWidgets.QGroupBox("Spike units")
         ul = QtWidgets.QVBoxLayout(self.units_group)
@@ -164,7 +177,8 @@ class Chart(View):
         self.linked = state.get("linked", True)
         self.auto_hide = state.get("auto_hide", False)
         look = state.get("look", {})
-        self.look = {k: list(look.get(k, v)) if isinstance(v, list) else look.get(k, v) for k, v in LOOK.items()}
+        self.look = {k: list(look.get(k, v)) if isinstance(v, list) else dict(look.get(k, v)) if isinstance(v, dict)
+                     else look.get(k, v) for k, v in LOOK.items()}
         units = state.get("units")
         self.own_units = None if units is None else set(units)
         for b in (self.units_same, self.units_own):
@@ -180,6 +194,7 @@ class Chart(View):
         self._wanted = dict(state.get("fields", {}))
         self._apply_wanted()
         self._show_pin()
+        self.texts_changed()
 
     def _apply_wanted(self) -> None:
         for key, value in list(self._wanted.items()):
@@ -392,6 +407,7 @@ class Chart(View):
         self.show_bars()
         for pw in self.plots():
             add_buttons(pw)
+            self._texts.watch(pw)
         measure = getattr(self.page, "measure", None)
         if measure is not None:
             measure.decorate(self)
@@ -430,6 +446,16 @@ class Chart(View):
                 item.setPen(pen)
         if plots:
             self._apply_ranges(plots[0].getPlotItem().vb)
+        apply_texts(self)
+
+    def texts_changed(self) -> None:
+        self.texts_btn.setVisible(bool(self.look.get("texts")))
+
+    def _restore_texts(self) -> None:
+        self.look["texts"] = {}
+        self.texts_changed()
+        self.saved()
+        self.refresh()
 
     def _apply_ranges(self, vb) -> None:
         for k, axis in enumerate(("x", "y")):
@@ -492,7 +518,7 @@ class Chart(View):
 
     def show_bars(self) -> None:
         for pw, y_unit, x_unit in self.scale_bars():
-            show_scale_bar(pw, self.page.canvas.bars.isChecked(), self._fg(), y_unit, x_unit)
+            show_scale_bar(pw, self.bars.isChecked(), self._fg(), y_unit, x_unit)
 
     def time_range(self, end: float) -> None:
         """Its plot runs from 0 to `end` (s); a new end shows all of it."""

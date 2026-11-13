@@ -308,6 +308,15 @@ class WaveformsChart(SpikeChart):
                                    "unit's average peak = ±1), so units compare by shape and spikes keep "
                                    "their sizes within a unit")
         self.field("norm", "", self.norm_waves)
+        self.show_what = QtWidgets.QComboBox()
+        self.show_what.setToolTip("The voltage, how fast it changes (dV/dt), or how fast that changes (d²V/dt²)")
+        for label, order in (("V", 0), ("dV/dt", 1), ("d²V/dt²", 2)):
+            self.show_what.addItem(label, order)
+        self.field("show", "Show", self.show_what)
+        self.d_smooth = UnitSpinBox(0, 5, "ms", step=0.05)
+        self.d_smooth.setValue(0.1)
+        self.d_smooth.setToolTip("Differentiating amplifies noise: average over this long first (0 = none)")
+        self.field("smooth", "Smooth for d/dt", self.d_smooth)
         self.plot.getPlotItem().setLabel("bottom", "ms from the peak")
         self.apply_theme(self._mode)
 
@@ -317,11 +326,17 @@ class WaveformsChart(SpikeChart):
         if ev is None or not len(ev.t):
             return
         wp = self.plot.getPlotItem()
+        order = self.show_what.currentData()
+        name, unit = self.finder.channel.currentText(), self.finder.unit()
         if self.norm_waves.isChecked():
-            wp.setLabel("left", "÷ the unit's average peak")
+            wp.setLabel("left", "÷ the unit's average peak" if not order else f"{self.show_what.currentText()}, ÷ the unit's average peak")
             wp.getAxis("left").enableAutoSIPrefix(False)
+        elif order:
+            label_axis(wp, "left", self.show_what.currentText(), f"{unit}/s" if order == 1 else f"{unit}/s²")
         else:
-            label_axis(wp, "left", self.finder.channel.currentText(), self.finder.unit())
+            label_axis(wp, "left", name, unit)
+        fs = 1000 / float(np.median(np.diff(ev.wave_t_ms))) if len(ev.wave_t_ms) > 1 else 1.0
+        deriv = lambda w: np.array([A.derivative(r, fs, order, self.d_smooth.value()) for r in w])
         peak = int(np.argmin(np.abs(ev.wave_t_ms))) if len(ev.wave_t_ms) else 0
         rng = np.random.default_rng(0)
         spread = self.page.spread()
@@ -333,12 +348,19 @@ class WaveformsChart(SpikeChart):
                 size = float(np.abs(w[:, peak]).mean())
                 w = w / size if size > 0 else w
             shown = rng.choice(len(w), min(MAX_WAVES, len(w)), replace=False)
+            mean = w.mean(0)
+            if order:                                        # the slope of each spike, and of the average
+                mean = A.derivative(mean, fs, order, self.d_smooth.value())
+                each, w = deriv(w[shown]), (deriv(w) if spread else w)
+                shown = np.arange(len(each))
+            else:
+                each = w[shown]
             color = self.finder.qcolor(u)
             xs = np.tile(np.append(ev.wave_t_ms, ev.wave_t_ms[-1]), len(shown))
-            ys = np.column_stack([w[shown], np.full(len(shown), np.nan)]).ravel()
+            ys = np.column_stack([each, np.full(len(shown), np.nan)]).ravel()
             wp.plot(xs, ys, pen=pg.mkPen(self.faded(color, 40), width=1), connect="finite")
-            mean, sd, sem, _ = A.mean_spread(w)              # across the unit's spikes
-            if spread:
+            if spread:                                       # across the unit's spikes
+                _, sd, sem, _ = A.mean_spread(w)
                 draw_band(wp, ev.wave_t_ms, mean, sd if spread == "sd" else sem, color)
             wp.plot(ev.wave_t_ms, mean, pen=pg.mkPen(color, width=3))
 

@@ -2,8 +2,9 @@
 simulated): parts placed on a breadboard, and probes on it that Acquisition records
 like any input. See breadboard.py for the board and how the circuit is solved.
 
-Pick a part, then click two holes to place it (one for a probe). Click a part to
-select it and set its value; Delete removes it, Esc cancels a placement. Changes
+Drag a part from the strip onto the board, or pick it and click two holes (one for
+a probe). Click a part to select it and set its value; drag it, or one of its ends,
+to move it. Delete removes it, Esc cancels a placement. Changes
 apply straight away, while recording too, and Setup › Save channel setup writes the
 board to the config's [simulated] section.
 """
@@ -17,20 +18,23 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import breadboard as bb
 from . import style, theme
 from .unitbox import UnitSpinBox
+from .units import best_prefix
 from .viewkit import scroll_column
 
 PITCH = 20                                    # board units between holes
 _ROW_Y = {"t+": 20, "t-": 40, **{r: 80 + 20 * i for i, r in enumerate("abcde")},
           **{r: 200 + 20 * i for i, r in enumerate("fghij")}, "b+": 300, "b-": 320}
 _X0, _W, _H = 40, 40 + bb.COLS * PITCH + 20, 345
-_TOOLS = (("select", "Select", "Click a part to select it and change its value"),
-          ("vin", "Input voltage", "The stimulator's output, or a fixed voltage: click its + end, then its - end"),
-          ("resistor", "Resistor", "Click its two ends"),
-          ("capacitor", "Capacitor", "Click its two ends"),
-          ("wire", "Wire", "Joins two holes: click its two ends"),
-          ("probe", "Probe", "A recording site: click a hole, then pick the input it records on"))
+_TOOLS = (("select", "Select", "Click a part to select it and change its value; drag it, or one of its ends, to move it"),
+          ("vin", "Input voltage", "The stimulator's output, or a fixed voltage: drag it onto the board, "
+                                   "or click its + end, then its - end"),
+          ("resistor", "Resistor", "Drag it onto the board, or click its two ends"),
+          ("capacitor", "Capacitor", "Drag it onto the board, or click its two ends"),
+          ("wire", "Wire", "Joins two holes: drag it onto the board, or click its two ends"),
+          ("probe", "Probe", "A recording site: drag it onto a hole, or click one; then pick the input it records on"))
 _PART_COLOR = {"vin": "#7c4dff", "resistor": "#b87a1e", "capacitor": "#1e88a8", "wire": "#2e7d32"}   # all read on light and dark boards
 _PROBE_FREE = "#8a8f98"
+_WARN = {style.LIGHT: "#8a5a00", style.DARK: "#f2c14e"}
 
 
 def hole_xy(hole: str) -> QtCore.QPointF:
@@ -46,6 +50,51 @@ def nearest_hole(p: QtCore.QPointF) -> str | None:
     if abs(_ROW_Y[row] - p.y()) > 8:
         return None
     return f"{row}{col}"
+
+
+_ROWS = ["t+", "t-", *"abcde", *"fghij", "b+", "b-"]   # top to bottom
+_MIME = "application/x-newt-part"
+_SPAN = 4                                     # columns a part dropped from the strip spans
+
+
+def shifted(hole: str, drow: int, dcol: int) -> str | None:
+    """`hole` moved down `drow` rows and right `dcol` columns, or None off the board."""
+    row, col = bb.parse_hole(hole)
+    r, c = _ROWS.index(row) + drow, col + dcol
+    return f"{_ROWS[r]}{c}" if 0 <= r < len(_ROWS) and 1 <= c <= bb.COLS else None
+
+
+def dropped_part(kind: str, hole: str) -> bb.Part:
+    """A part dropped on `hole`: a probe there, anything else from there across _SPAN columns."""
+    if kind == "probe":
+        return bb.Part("probe", hole)
+    end = shifted(hole, 0, _SPAN) or shifted(hole, 0, -_SPAN)
+    return bb.Part(kind, hole, end, bb.DEFAULT_VALUE[kind], source="stim")
+
+
+class PartButton(QtWidgets.QPushButton):
+    """A part in the strip: click it to place by clicking holes, or drag it onto the board."""
+
+    def __init__(self, kind: str, label: str):
+        super().__init__(label)
+        self.kind = kind
+        self._press = None
+
+    def mousePressEvent(self, e):
+        self._press = e.position() if e.button() == QtCore.Qt.MouseButton.LeftButton else None
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._press is None or (e.position() - self._press).manhattanLength() < QtWidgets.QApplication.startDragDistance():
+            return super().mouseMoveEvent(e)
+        self._press = None
+        self.setDown(False)
+        mime = QtCore.QMimeData()
+        mime.setData(_MIME, self.kind.encode())
+        drag = QtGui.QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.exec(QtCore.Qt.DropAction.CopyAction)
 
 
 def _seg_dist(p: QtCore.QPointF, a: QtCore.QPointF, b: QtCore.QPointF) -> float:
@@ -69,6 +118,8 @@ class BoardView(QtWidgets.QWidget):
         self.pending: str | None = None       # first hole of a part being placed
         self.hover: str | None = None
         self.mouse = QtCore.QPointF()
+        self.drag: dict | None = None         # a placed part (or one end of it) being moved
+        self.setAcceptDrops(True)
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(560, 260)
@@ -101,7 +152,52 @@ class BoardView(QtWidgets.QWidget):
     def mouseMoveEvent(self, e):
         self.mouse = self._to_board(e.position())
         self.hover = nearest_hole(self.mouse)
+        d = self.drag
+        if d is not None and self.hover:
+            dr = _ROWS.index(bb.parse_hole(self.hover)[0]) - _ROWS.index(bb.parse_hole(d["from"])[0])
+            dc = bb.parse_hole(self.hover)[1] - bb.parse_hole(d["from"])[1]
+            part = d["board"].parts[d["i"]]
+            ends = {"a": part.a, "b": part.b} if d["end"] is None else {d["end"]: getattr(part, d["end"])}
+            moved = {k: shifted(h, dr, dc) for k, h in ends.items() if h}
+            if all(moved.values()):
+                board = bb.copy_board(d["board"])
+                for k, h in moved.items():
+                    setattr(board.parts[d["i"]], k, h)
+                if board.parts[d["i"]].a != board.parts[d["i"]].b:
+                    self.board = board                   # shown while dragging; applied on release
+                    d["moved"] = (dr, dc) != (0, 0)
         self.update()
+
+    def mouseReleaseEvent(self, e):
+        d, self.drag = self.drag, None
+        if d is not None and d.get("moved"):
+            self.edited.emit(self.board)
+        if self.tool == "select":
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+
+    # dragged in from the parts strip
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasFormat(_MIME):
+            e.acceptProposedAction()
+
+    def dragMoveEvent(self, e):
+        self.mouse = self._to_board(e.position())
+        self.hover = nearest_hole(self.mouse)
+        e.acceptProposedAction() if self.hover else e.ignore()
+        self.update()
+
+    def dragLeaveEvent(self, e):
+        self.hover = None
+        self.update()
+
+    def dropEvent(self, e):
+        hole = nearest_hole(self._to_board(e.position()))
+        kind = bytes(e.mimeData().data(_MIME)).decode()
+        if hole is None or kind not in bb.KINDS:
+            return
+        e.acceptProposedAction()
+        self.page.tool_buttons["select"].click()          # back to Select, so the new part can be moved
+        self._add(dropped_part(kind, hole))
 
     def leaveEvent(self, e):
         self.hover = None
@@ -113,7 +209,16 @@ class BoardView(QtWidgets.QWidget):
         self.setFocus()
         p = self._to_board(e.position())
         if self.tool == "select":
-            self.select(self._part_at(p))
+            i = self._part_at(p)
+            self.select(i)
+            if i >= 0:                                  # grab it: an end moves that end, the body the whole part
+                part = self.board.parts[i]
+                end = next((k for k in ("a", "b") if getattr(part, k) and part.kind != "probe" and
+                            math.hypot(p.x() - hole_xy(getattr(part, k)).x(), p.y() - hole_xy(getattr(part, k)).y()) < 6),
+                           None)
+                start = getattr(part, end) if end else (nearest_hole(p) or part.a)
+                self.drag = {"i": i, "end": end, "from": start, "board": self.board, "moved": False}
+                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
             return
         hole = nearest_hole(p)
         if hole is None:
@@ -293,8 +398,8 @@ class BreadboardPage(QtWidgets.QWidget):
         left = QtWidgets.QVBoxLayout()
         left.setSpacing(10)
         intro = QtWidgets.QLabel(
-            "Build a circuit on a breadboard and record from it. Pick a part, then click two holes to place it "
-            "(one for a probe). In each column, holes a–e are joined, and so are f–j; the − rails are ground. "
+            "Build a circuit on a breadboard and record from it. Drag a part onto the board, or pick it and click "
+            "two holes (one for a probe); drag a placed part, or one of its ends, to move it. In each column, holes a–e are joined, and so are f–j; the − rails are ground. "
             "Give a probe an input and Acquisition records that point of the circuit. An input voltage from "
             "the stimulator plays whatever the Stimulator or Protocols tab sends.")
         intro.setWordWrap(True)
@@ -304,7 +409,7 @@ class BreadboardPage(QtWidgets.QWidget):
         self.tool_group = QtWidgets.QButtonGroup(self)
         self.tool_buttons: dict[str, QtWidgets.QPushButton] = {}
         for key, label, tip in _TOOLS:
-            b = QtWidgets.QPushButton(label)
+            b = QtWidgets.QPushButton(label) if key == "select" else PartButton(key, label)
             b.setCheckable(True)
             b.setToolTip(tip)
             self.tool_group.addButton(b)
@@ -373,6 +478,14 @@ class BreadboardPage(QtWidgets.QWidget):
         self.probe_list.setWordWrap(True)
         pv.addWidget(self.probe_list)
         right.addWidget(self.probe_box)
+        self.timing_box = QtWidgets.QGroupBox("Timing")
+        tv = QtWidgets.QVBoxLayout(self.timing_box)
+        self.timing = QtWidgets.QLabel()
+        self.timing.setWordWrap(True)
+        self.timing.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.timing.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        tv.addWidget(self.timing)
+        right.addWidget(self.timing_box)
         right.addStretch(1)
         right_box = QtWidgets.QWidget()
         right_box.setLayout(right)
@@ -389,6 +502,7 @@ class BreadboardPage(QtWidgets.QWidget):
         for w in (self.volts, self.ohms, self.farads, self.noise):
             w.valueChanged.connect(self._part_edited)
         self.probe_input.currentIndexChanged.connect(self._part_edited)
+        main.window_box.valueChanged.connect(lambda _v: self._show_timing())
         self.tool_buttons["select"].setChecked(True)
         self.load()
         self.apply_theme(style.LIGHT)
@@ -409,7 +523,12 @@ class BreadboardPage(QtWidgets.QWidget):
         self._show_part()
         self._show_probes()
         self._redraw_preview()
+        self._show_timing()
         self.view.update()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._show_timing()                  # the Stimulator or Window may have changed meanwhile
 
     def _inputs(self) -> list:
         cfg = self.main.cfg
@@ -509,12 +628,55 @@ class BreadboardPage(QtWidgets.QWidget):
             bb.BoardState(board, 1e-4)                  # can the circuit be solved?
         except ValueError as e:
             self._show_message(str(e), error=True)
+            self.view.board = self.board                  # a refused move or drop: back as it was
             self.view.update()
             return
         # A new object, so the acquisition thread picks up the change all at once.
         self.main.cfg.sim_breadboard = board
         self._show_message("")
         self.load()
+
+    def _show_timing(self) -> None:
+        """The circuit's time constant, what to set to see it charge, and warnings when the
+        Stimulator's pulse or Acquisition's Window would hide it."""
+        def t(sec):
+            x, u = best_prefix(sec, "s")
+            return f"{x:.3g} {u}"
+        try:
+            taus = bb.time_constants(self.board)
+        except ValueError:
+            self.timing.setText("")
+            return
+        if not taus:
+            self.timing.setText("No capacitor charges through a resistor here, so the probes follow the input at once.")
+            return
+        tau = taus[0]
+        rs = [p for p in self.board.parts if p.kind == "resistor"]
+        cs = [p for p in self.board.parts if p.kind == "capacitor"]
+        parts = ""
+        if len(rs) == 1 and len(cs) == 1:
+            r, ru = best_prefix(rs[0].value, "Ω", ("", "k", "M"))
+            c, cu = best_prefix(cs[0].value, "F", ("p", "n", "µ", "m", ""))
+            parts = f" ({r:.3g} {ru} × {c:.3g} {cu})"
+        lines = [f"Time constant <b>τ = {t(tau)}</b>{parts}"
+                 + (" (the slowest of several)" if len(taus) > 1 else ""),
+                 f"The capacitor charges 63% in τ and almost fully in 5τ = {t(5 * tau)}. To see it, send a pulse "
+                 f"or step of at least {t(5 * tau)} and set Acquisition's Window to about {t(10 * tau)}–{t(50 * tau)}."]
+        warn = _WARN.get(self._mode, _WARN[style.LIGHT])
+        warnings = []
+        s = getattr(self.main, "stimulus", None)
+        if s is not None and any(p.kind == "vin" and p.source == "stim" for p in self.board.parts):
+            length = {"pulse": s.width_ms, "step": s.duration_ms}.get(s.shape)
+            if length is not None and length / 1000 < 5 * tau:
+                reach = 1 - math.exp(-length / 1000 / tau)
+                what = "pulse" if s.shape == "pulse" else "step"
+                warnings.append(f"The Stimulator's {what} is {t(length / 1000)}, shorter than 5τ: the capacitor "
+                                f"only reaches about {reach:.0%} of the input.")
+        window = self.main.window_box.value()
+        if window > 200 * tau:
+            warnings.append(f"Acquisition's Window is {t(window)}, so a {t(5 * tau)} charge will look like a thin spike.")
+        lines += [f'<span style="color:{warn}">⚠ {w}</span>' for w in warnings]
+        self.timing.setText("<br><br>".join(lines))
 
     def _show_message(self, text: str, error: bool = False) -> None:
         t = style.tokens(self._mode)
@@ -546,4 +708,5 @@ class BreadboardPage(QtWidgets.QWidget):
             a.setPen(th.foreground)
             a.setTextPen(th.foreground)
         self._redraw_preview()
+        self._show_timing()
         self.view.update()

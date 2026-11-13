@@ -129,7 +129,7 @@ def test_an_audio_device_is_an_input_with_channels_in1_in2(sd):
     assert np.allclose(np.diff(chunks[1].t)[:3], 1 / 48000)
     bad = config.Config(backend="audio", audio_device="Fake", sample_rate=20000,
                         channels=[config.Channel("in1", "A")])
-    with pytest.raises(RuntimeError, match="can't record at 20,000 Hz"):
+    with pytest.raises(RuntimeError, match="can.t record at 20 kHz"):
         make_backend(bad).start()
 
 

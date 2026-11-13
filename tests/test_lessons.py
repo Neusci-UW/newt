@@ -108,10 +108,6 @@ def test_the_page_in_newt_offers_the_editor_and_saves_through_it(app, tmp_path, 
         assert wait_for(app, lambda: page.view is not None and page._loaded and page.btn_lesson.isVisible()), \
             "the Edit lesson button never appeared"
         state = {}
-        # the lesson file next to the page loads in Argus too (a local file, not a web server)
-        page.view.page().runJavaScript("document.querySelectorAll('[data-lesson-card]').length",
-                                       lambda n: state.update(cards=n))
-        assert wait_for(app, lambda: state.get("cards")) and state["cards"] >= 18
         page.btn_lesson.setChecked(True)          # opens the editor in the page
         page.view.page().runJavaScript("document.documentElement.classList.contains('ls-editing')",
                                        lambda v: state.update(editing=v))

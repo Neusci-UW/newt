@@ -25,6 +25,8 @@ jobs:
       QT_QPA_PLATFORM: offscreen    # no screen on these machines
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true      # the lesson pages (Neusci-UW/lessons)
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}

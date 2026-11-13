@@ -281,6 +281,7 @@ class Board(QtWidgets.QWidget):
     moved = QtCore.pyqtSignal()                       # charts moved or resized, or the view changed
     context_requested = QtCore.pyqtSignal(QtCore.QPointF, QtCore.QPoint)   # board place, screen place
     delete_requested = QtCore.pyqtSignal()
+    step_requested = QtCore.pyqtSignal(int)           # Up and Down: the previous, the next trial
     zoom_changed = QtCore.pyqtSignal(float)
     export_requested = QtCore.pyqtSignal(QtCore.QRectF)   # the part of the board to save, in board pixels
 
@@ -292,6 +293,8 @@ class Board(QtWidgets.QWidget):
         self.tool = SELECT
         self.locked = False
         self.tokens = style.tokens(style.LIGHT)
+        self.mode = style.LIGHT
+        self.color: str | None = None                     # its own color (the swatch by Grid), else the mode's ground
         self.guide_x: float | None = None
         self.guide_y: float | None = None
         self.box: QtCore.QRectF | None = None
@@ -430,11 +433,18 @@ class Board(QtWidgets.QWidget):
 
     def apply_theme(self, mode: str) -> None:
         self.tokens = style.tokens(mode)
+        self.mode = mode
         for f in self.frames:
             f.restyle()
-        self.hint.setStyleSheet(f"color: {self.tokens['muted']};")
+        self._style_hint()
         self.update()
         self.minimap.update()
+
+    def _style_hint(self) -> None:
+        """The hint's ink follows the board's lightness, not the mode's, so it reads on a color of your own."""
+        ground = QtGui.QColor(self.color or self.tokens["ground"])
+        tokens = style.tokens(style.DARK if ground.lightnessF() < 0.5 else style.LIGHT)
+        self.hint.setStyleSheet(f"color: {tokens['muted']};")
 
     # -- moving and resizing ------------------------------------------------------------------
     def title_pressed(self, frame: ChartFrame, ev) -> None:
@@ -593,6 +603,9 @@ class Board(QtWidgets.QWidget):
         if ev.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace) and self.picked() and not self.locked:
             self.delete_requested.emit()
             return
+        if ev.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down) and not ev.modifiers():
+            self.step_requested.emit(-1 if ev.key() == QtCore.Qt.Key.Key_Up else 1)
+            return
         super().keyPressEvent(ev)
 
     def set_tool(self, tool: str) -> None:
@@ -657,13 +670,13 @@ class Board(QtWidgets.QWidget):
     def paintEvent(self, ev):
         t = self.tokens
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor(t["ground"]))
+        p.fillRect(self.rect(), QtGui.QColor(self.color or t["ground"]))
         if not self.grid:
             return
         step = GRID * self.zoom
         while step < 12:
             step *= 2
-        dot = QtGui.QColor(t["line"])
+        dot = QtGui.QColor(t["line"]) if self.color is None else self._dot_color()
         p.setPen(QtGui.QPen(dot, 1.6 if self.zoom >= 0.6 else 1.2))
         x0 = self.offset.x() % step
         y0 = self.offset.y() % step
@@ -676,6 +689,19 @@ class Board(QtWidgets.QWidget):
                 x += step
             y += step
         p.drawPoints(pts)
+
+    def set_color(self, color: str | None) -> None:
+        """The board's own color, or None for the mode's ground."""
+        self.color = color
+        self._style_hint()
+        self.update()
+
+    def _dot_color(self) -> QtGui.QColor:
+        """The grid's dots on a color of your own: a little lighter in dark mode, a little darker
+        in light mode, so they show."""
+        c = QtGui.QColor(self.color)
+        towards, k = (255, 0.18) if self.mode == style.DARK else (0, 0.14)
+        return QtGui.QColor(*(round(v + (towards - v) * k) for v in (c.red(), c.green(), c.blue())))
 
     def state(self) -> dict:
         return {"zoom": self.zoom, "x": self.offset.x(), "y": self.offset.y(), "grid": self.grid}

@@ -25,6 +25,7 @@ from .export import to_labchart_mat
 from .stim import Stimulus
 from . import colors
 from .mainparts import LIVE, REVIEW
+from .units import whole
 
 
 class SessionFilesMixin:
@@ -211,7 +212,7 @@ class SessionFilesMixin:
         ok = QtWidgets.QMessageBox.question(
             self, "Use this dataset's setup?",
             f"{path.name} was recorded with a different setup:\n\n• " + "\n• ".join(problems)
-            + f"\n\nSwitch to its setup ({chans} at {info['sample_rate']:,.0f} Hz) and add to it?")
+            + f"\n\nSwitch to its setup ({chans} at {whole(info['sample_rate'])}) and add to it?")
         return ok == QtWidgets.QMessageBox.StandardButton.Yes
 
     def adopt_session_setup(self, path: str | Path) -> bool:

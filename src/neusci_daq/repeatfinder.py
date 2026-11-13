@@ -31,7 +31,7 @@ class RepeatFinder(View):
         self._cycle_start: float | None = None      # where you marked a repeat (s)
         self.btn_mark = QtWidgets.QPushButton("Mark one")
         self.btn_mark.setCheckable(True)
-        self.btn_mark.setToolTip("Then drag across one repeat on the Traces or Stimulus chart, to use it as the template")
+        self.btn_mark.setToolTip("Then drag across one repeat on the Response or Stimulus chart, to use it as the template")
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
         f.addRow("Length", self.cycle_len)

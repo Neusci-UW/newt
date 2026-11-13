@@ -10,6 +10,7 @@ from pathlib import Path
 from . import breadboard, simulation
 from .colors import fill_colors
 from .dsp import Calculation
+from .units import whole
 
 # USB-6003 limits (NI spec): one multiplexed ADC, 100 kS/s aggregate,
 # 8 single-ended / 4 differential inputs, fixed +/-10 V range.
@@ -149,9 +150,9 @@ def validate(cfg: Config) -> None:
     if cfg.backend != "audio" and cfg.aggregate_rate > USB6003_MAX_AGGREGATE_RATE:
         n = len(cfg.channels)
         raise ValueError(
-            f"{n} ch × {cfg.sample_rate:g} Hz = {cfg.aggregate_rate:g} S/s, over the USB-6003's "
+            f"{n} ch × {whole(cfg.sample_rate)} = {cfg.aggregate_rate:,g} S/s, over the USB-6003's "
             f"{USB6003_MAX_AGGREGATE_RATE:,} S/s limit. With {n} channel(s), use at most "
-            f"{max_rate(n):,} Hz per channel.")
+            f"{whole(max_rate(n))} per channel.")
     allowed = valid_inputs(cfg)
     seen: dict[str, str] = {}
     names: set[str] = set()

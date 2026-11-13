@@ -26,9 +26,11 @@ LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None]}   # No
 
 class Chart(View):
     kind = ""                      # its name in Add chart (its heading there is in canvas.GROUPS)
+    y = ""                         # what runs up its y axis, shown beside its name there
     tip = ""                       # the question it answers
     counts_spikes = False          # a Measure window dragged across it counts spikes
     link = ""                      # the charts it zooms with: "time", "phase", or none
+    measure = None                 # what a Measure window on it is, (kind, on) as in measure.py; None: by its link
     help = ""                      # its help topic
     uses_units = True              # can show its own units
     uses_blocks = True             # can be pinned to chosen blocks
@@ -114,16 +116,19 @@ class Chart(View):
         self._side.addStretch(1)
         return side
 
-    def field(self, key: str, label: str, widget: QtWidgets.QWidget, then=None) -> QtWidgets.QWidget:
-        """A setting of this copy: shown with the chart's settings and saved with the layout.
-        Changing it calls then() (default: draw again)."""
+    def field(self, key: str, label: str, widget: QtWidgets.QWidget, then=None,
+              form: QtWidgets.QFormLayout | None = None) -> QtWidgets.QWidget:
+        """A setting of this copy: shown with the chart's settings (or in `form`, a section of
+        its own) and saved with the layout. Changing it calls then() (default: draw again)."""
         self._fields[key] = widget
-        self.settings_box.show()
+        form = self.form if form is None else form           # (an empty layout is falsy)
+        if form is self.form:
+            self.settings_box.show()
         shown = with_slider(widget) if isinstance(widget, QtWidgets.QAbstractSpinBox) else widget
         if label:
-            self.form.addRow(label, shown)
+            form.addRow(label, shown)
         else:
-            self.form.addRow(shown)
+            form.addRow(shown)
         changed = {QtWidgets.QCheckBox: "toggled", QtWidgets.QComboBox: "currentIndexChanged"}
         signal = next((getattr(widget, s) for t, s in changed.items() if isinstance(widget, t)), None) \
             or widget.valueChanged

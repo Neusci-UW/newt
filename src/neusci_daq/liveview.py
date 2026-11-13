@@ -21,6 +21,7 @@ from .stim import Stimulus
 from .ringbuffer import RingBuffer
 from . import colors
 from .mainparts import LIVE, REVIEW, WINDOW_MAX, _SI_BASE, _TraceViewBox
+from .units import whole
 
 
 class LiveMixin:
@@ -724,8 +725,11 @@ class LiveMixin:
         t_end = x[-1]
         # the range first, so each TraceCurve groups its samples once for this frame; it starts
         # no earlier than the oldest sample (the views' own limits are off while acquiring: they
-        # would lag a frame behind the newest data, and fight a held voltage range)
-        self.plots[0].setXRange(max(t_end - self.window_box.value(), x[0]), t_end, padding=0)
+        # would lag a frame behind the newest data, and fight a held voltage range). Always a whole
+        # Window wide: the data fills it from the left, then the window moves along with the data.
+        win = self.window_box.value()
+        start = max(t_end - win, x[0])
+        self.plots[0].setXRange(start, start + win, padding=0)
         for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
             curve.setData(x, ch.to_units(y))
         self._draw_calc_live()
@@ -738,7 +742,7 @@ class LiveMixin:
                 p.removeItem(ln)
         rate = self.backend.actual_rate
         lag = self.display_q.qsize()
-        msg = f"rate {rate:,.1f} Hz/ch" + ("" if self.backend.hardware_timed else " (software-timed!)")
+        msg = f"rate {whole(round(rate, 1))}/ch" + ("" if self.backend.hardware_timed else " (software-timed!)")
         if self.recorder.recording and self.backend.hardware_timed:
             secs = self.recorder.samples_written / max(rate, 1e-9)
             msg += f" | recorded {secs:,.1f} s"

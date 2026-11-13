@@ -13,33 +13,32 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pyqtgraph.Qt import QtCore, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import board as B
 from . import figure
 from . import style
 from .measurecharts import DataPadTableChart, ScatterChart
 from .plotzoom import AxisGroup
-from .responsecharts import (FitChart, LoopChart, PhaseChart, PsthChart, ResponseCycleChart, SpikeCycleChart, StaChart,
-                             StimulusCycleChart, TracesChart)
-from .spikecharts import (BlocksChart, IntervalsChart, PcaChart, RasterChart, RateChart, SizesChart, StimulusChart,
-                          WaveformsChart)
+from .responsecharts import (FitChart, LoopChart, PhaseChart, PsthChart, ResponseChart, ResponseCycleChart,
+                             SpikeCycleChart, StaChart, StimulusCycleChart)
+from .spikecharts import IntervalsChart, PcaChart, RasterChart, RateChart, SizesChart, StimulusChart, WaveformsChart
 from .waveformview import PhasePlotChart, SlopeChart, VoltsChart
 
-CHARTS = (StimulusChart, BlocksChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart,
-          TracesChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
+CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart,
+          ResponseChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
           LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart, DataPadTableChart, ScatterChart)
 KINDS = {c.kind: c for c in CHARTS}
-# the Add chart menu's headings: what runs along each chart's x axis
-GROUPS = {"Over the trial (time)": ("Traces", "Stimulus", "Trials", "Raster", "Rate", "Stimulus-triggered rate",
-                                    "Stimulus fit"),
-          "Over one cycle (phase)": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase",
-                                     "Response against stimulus"),
-          "Around each spike (spike shape)": ("Waveforms", "Spike-triggered average", "V", "dV/dt", "V against dV/dt"),
-          "Sorting spikes": ("PCA map", "AP sizes", "Intervals"),
-          "One value per trial (measurements)": ("DataPad table", "Scatter")}
+# the Add chart menu's headings: what runs along each chart's x axis (its y axis is beside its name)
+GROUPS = {"Time in the trial (s)": ("Response", "Stimulus", "Stimulus fit", "Raster", "Rate"),
+          "Time from an event (ms)": ("Stimulus-triggered rate", "Spike-triggered average", "Waveforms", "V",
+                                      "dV/dt"),
+          "Phase of the cycle (°)": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase"),
+          "One signal against another": ("Response against stimulus", "V against dV/dt"),
+          "A spike property (count)": ("AP sizes", "Intervals", "PCA map"),
+          "One value per trial": ("DataPad table", "Scatter")}
 BOARD = "Board"                    # the board you work on; Save… keeps it as a layout of your own
-SIZE = {"DataPad table": (560, 260), "Traces": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
+SIZE = {"DataPad table": (560, 260), "Response": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
 
 
 class _Toolbar(QtWidgets.QFrame):
@@ -56,9 +55,10 @@ class _Toolbar(QtWidgets.QFrame):
         for key, text, tip in ((B.SELECT, "Select", "Pick charts: click, shift-click, or drag a box over empty space"),
                                (B.HAND, "Hand", "Drag the board to move around it (or scroll, or drag with the "
                                                 "middle button)"),
-                               (B.MEASURE, "Measure", "Drag across a chart to measure that stretch of it: in Time on "
-                                                      "charts against time, in Phase on charts against phase. The "
-                                                      "numbers go in a DataPad table"),
+                               (B.MEASURE, "Measure", "Drag across any chart to measure part of it: a stretch of "
+                                                      "time, ms from each event, part of each cycle (Phase), or a "
+                                                      "range of values. On the PCA map and Scatter, draw around "
+                                                      "the points. The numbers go in a DataPad table"),
                                (B.EXPORT, "Export", "Drag a box anywhere, over the charts too, to save what's in it "
                                                     "as a figure: PDF, SVG, PNG or TIFF, or copy it. Click to export "
                                                     "the last box again")):
@@ -70,10 +70,12 @@ class _Toolbar(QtWidgets.QFrame):
         self.btn[B.SELECT].setChecked(True)
         self.unit = QtWidgets.QButtonGroup(self)
         self.btn_time = QtWidgets.QToolButton(text="Time", checkable=True, autoRaise=True)
-        self.btn_time.setToolTip("Measure windows in time (ms), on charts against time, such as Traces")
+        self.btn_time.setToolTip("Measure windows in time: on charts against time, such as Response, or in ms "
+                                 "from each event, on the triggered and spike charts")
         self.btn_phase = QtWidgets.QToolButton(text="Phase", checkable=True, autoRaise=True)
-        self.btn_phase.setToolTip("Measure the same part of every stimulus cycle (degrees), on charts against "
-                                  "phase, such as Response by cycle")
+        self.btn_phase.setToolTip("Measure the same part of every stimulus cycle (degrees): on charts against "
+                                  "phase, such as Response by cycle, or drag across one cycle of a chart against "
+                                  "time")
         for b in (self.btn_time, self.btn_phase):
             self.unit.addButton(b)
             row.addWidget(b)
@@ -104,6 +106,24 @@ class _Toolbar(QtWidgets.QFrame):
         self.btn_grid.setToolTip("Show or hide the board's dots. The charts still snap to them when hidden")
         self.btn_grid.setChecked(True)
         row.addWidget(self.btn_grid)
+        self.btn_color = QtWidgets.QToolButton(autoRaise=True)
+        self.btn_color.setToolTip("The board's color: click to choose it, right-click to go back to the default. "
+                                  "Kept on this computer, for light and dark mode each")
+        self.btn_color.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        row.addWidget(self.btn_color)
+
+    def show_color(self, color: str, edge: str) -> None:
+        """The swatch: the board's color, outlined so it shows on the toolbar."""
+        pix = QtGui.QPixmap(28, 28)                    # 2x, so it stays sharp on scaled displays
+        pix.setDevicePixelRatio(2.0)
+        pix.fill(QtCore.Qt.GlobalColor.transparent)
+        p = QtGui.QPainter(pix)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        p.setPen(QtGui.QPen(QtGui.QColor(edge), 1))
+        p.setBrush(QtGui.QColor(color))
+        p.drawRoundedRect(QtCore.QRectF(1.5, 1.5, 11, 11), 3, 3)
+        p.end()
+        self.btn_color.setIcon(QtGui.QIcon(pix))
 
     def restyle(self, mode: str) -> None:
         t = style.tokens(mode)
@@ -146,6 +166,9 @@ class ChartCanvas(QtWidgets.QWidget):
         self.floating.btn_out.clicked.connect(lambda: self.space.zoom_about(self.space.zoom / 1.25))
         self.floating.btn_fit.clicked.connect(lambda: self.space.fit_all())
         self.floating.btn_grid.toggled.connect(lambda on: self.space.set_grid(on))
+        self.floating.btn_color.clicked.connect(self._pick_board_color)
+        self.floating.btn_color.customContextMenuRequested.connect(self._board_color_menu)
+        self._show_board_color()
         self.btn_add = self.floating.btn_add
 
         self.layouts = QtWidgets.QComboBox()
@@ -248,12 +271,14 @@ class ChartCanvas(QtWidgets.QWidget):
         space.charts = []
         space.axes = {}
         space.apply_theme(self._mode)
+        space.set_color(self.board_color())
         space.set_tool(self.tool())
         space.set_locked(self.lock.isChecked())
         space.picked_changed.connect(lambda s=space: self._picked() if s is self.space else None)
         space.moved.connect(self.changed)
         space.context_requested.connect(self._context_menu)
         space.delete_requested.connect(self.close_picked)
+        space.step_requested.connect(self.page.step_list)
         space.export_requested.connect(self.export)
         space.zoom_changed.connect(lambda z: self.floating.zoom.setText(f"{round(z * 100)}%"))
         self.spaces[name] = space
@@ -283,9 +308,11 @@ class ChartCanvas(QtWidgets.QWidget):
 
     def _restore(self, space: B.Board, state: dict) -> None:
         loose = []
-        for s in state.get("charts", []):
-            if s["kind"] == "Blocks":             # its name before Trials
-                s = {**s, "kind": "Trials", "name": "Trials" if s.get("name") == "Blocks" else s.get("name")}
+        states = state.get("charts", [])
+        names = {s.get("name") for s in states}
+        for s in states:
+            if s["kind"] in ("Blocks", "Trials", "Traces"):
+                s = self._as_response(s, names)
             if s["kind"] not in KINDS:
                 continue
             chart = self._make_chart(space, s["kind"], s["id"])
@@ -303,6 +330,24 @@ class ChartCanvas(QtWidgets.QWidget):
             space.tidy()
         if "view" in state:
             space.restore(state["view"])
+
+    def _as_response(self, s: dict, names: set) -> dict:
+        """Response, from what it was called before (Traces), and from the Trials chart (once
+        Blocks) it took over: its channel ticked, with the threshold and the spikes' dots."""
+        old = s["kind"]
+        name = s.get("name")
+        if name in ("Traces", "Trials", "Blocks"):
+            name = next(n for n in ("Response" if k == 1 else f"Response {k}" for k in range(1, 10000))
+                        if n not in names)
+            names.add(name)
+        s = {**s, "kind": ResponseChart.kind, "name": name}
+        if old == "Traces":
+            return s
+        fields = dict(s.get("fields", {}))
+        channel = fields.pop("channel", "") or self.page.raw.channel.currentText()
+        size = fields.pop("dots", None)
+        fields.update({"threshold": True, "dots": True, **({"dot_size": size} if size is not None else {})})
+        return {**s, "fields": fields, "ticked": [[channel, 0]] if channel else [], "spikes_set": True}
 
     def changed(self) -> None:
         """Something a layout remembers changed: save it once the changes stop."""
@@ -418,7 +463,8 @@ class ChartCanvas(QtWidgets.QWidget):
             for kind in kinds:
                 c = KINDS[kind]
                 n = sum(x.kind == c.kind for x in self.here())
-                action = menu.addAction(c.kind + (f"  ({n} open)" if n else ""))
+                # Qt puts what follows the tab on the right, where a shortcut would go
+                action = menu.addAction(c.kind + (f"  ({n} open)" if n else "") + f"\t{c.y}")
                 action.setToolTip(c.tip)
                 action.setStatusTip(c.tip)
                 action.triggered.connect(lambda _=False, k=c.kind: self.add(k, at=at))
@@ -635,11 +681,41 @@ class ChartCanvas(QtWidgets.QWidget):
         """The blocks charts are pinned to."""
         return sorted({i for c in self.every() if c.pin is not None for i in c.blocks()})
 
+    # -- the board's color: one of your own for each mode, kept on this computer ---------------
+    def board_color(self) -> str | None:
+        return self.settings.value(f"analysis/board_color/{self._mode}", "") or None
+
+    def _show_board_color(self) -> None:
+        color = self.board_color()
+        for space in self.spaces.values():
+            space.set_color(color)
+        t = style.tokens(self._mode)
+        self.floating.show_color(color or t["ground"], t["subtle"])
+
+    def _pick_board_color(self) -> None:
+        now = QtGui.QColor(self.board_color() or style.tokens(self._mode)["ground"])
+        color = QtWidgets.QColorDialog.getColor(now, self, "Board color")
+        if color.isValid():
+            self.settings.setValue(f"analysis/board_color/{self._mode}", color.name())
+            self._show_board_color()
+
+    def _board_color_menu(self, at: QtCore.QPoint) -> None:
+        menu = QtWidgets.QMenu(self)
+        default = menu.addAction("Default")
+        default.setToolTip("The light or dark mode's own board color")
+        default.triggered.connect(self._default_board_color)
+        menu.exec(self.floating.btn_color.mapToGlobal(at))
+
+    def _default_board_color(self) -> None:
+        self.settings.remove(f"analysis/board_color/{self._mode}")
+        self._show_board_color()
+
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
         self.floating.restyle(mode)
         for space in self.spaces.values():
             space.apply_theme(mode)
+        self._show_board_color()
         for c in self.every():
             c.apply_theme(mode)
 

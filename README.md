@@ -16,12 +16,15 @@ Requires Python 3.11+. For recording, install the
 [NI-DAQmx driver](https://www.ni.com/en/support/downloads/drivers/download.ni-daq-mx.html) first.
  
 ```
-git clone https://github.com/Neusci-UW/newt
+git clone --recurse-submodules https://github.com/Neusci-UW/newt
 cd newt
 python -m venv .venv
 .venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -e ".[nidaqmx,dev]"
 ```
+The Lessons pages come from [Neusci-UW/lessons](https://github.com/Neusci-UW/lessons), a git
+submodule at `src/neusci_daq/lessons`. If you cloned without `--recurse-submodules`, run
+`git submodule update --init` once.
  
 ## Run
 ```
@@ -75,8 +78,8 @@ To try review mode with sample data: `python examples/make_demo_session.py demo`
   channels, so the Nernst and GHK potentials and the charge layers on the membrane emerge on their own.
   Tunable concentrations and permeabilities, a scripted action potential, the GHK derivation and a
   GHK calculator. Needs `pip install -e ".[web]"` to show inside the app; otherwise it opens in the
-  web browser. For computers without internet, run `python tools/fetch_mathjax.py` once so its
-  equations render offline.
+  web browser. For computers without internet, run
+  `python src/neusci_daq/lessons/tools/fetch_mathjax.py` once so its equations render offline.
 - **Files**: opens and saves LabChart `.mat` exports.
 - **USB audio and video** (`pip install -e ".[audio]"` for audio):
   - **Setup › Input device** switches to a USB audio interface, a SpikerBox-style device or a

@@ -835,10 +835,10 @@ def test_stacked_plots_line_up(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    for k in ("Trials", "Raster", "Rate"):
+    for k in ("Response", "Raster", "Rate"):
         ap.canvas.add(k)
     pump(app, 0.2)
-    ws = [ap.chart(k).plot.getPlotItem().getAxis("left").width() for k in ("Trials", "Raster", "Rate")]
+    ws = [ap.chart(k).plots()[0].getPlotItem().getAxis("left").width() for k in ("Response", "Raster", "Rate")]
     assert max(ws) - min(ws) < 0.5
 
 

@@ -67,6 +67,7 @@ from .mediacontrol import MediaMixin
 from .reviewview import ReviewMixin
 from .sessionfiles import SessionFilesMixin
 from .stimcontrol import StimulatorMixin
+from .units import whole
 
 
 class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, StimulatorMixin, CommentsMixin,
@@ -174,7 +175,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # Editable: pick a preset or type any rate, then press Enter.
         self.rate_box = QtWidgets.QComboBox(editable=True)
         self.rate_box.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
-        self.rate_box.addItems([f"{r:,} Hz" for r in cfgmod.RATE_PRESETS])
+        self.rate_box.addItems([whole(r) for r in cfgmod.RATE_PRESETS])
         self.rate_box.setMinimumContentsLength(8)
         self.rate_box.lineEdit().editingFinished.connect(self._rate_entered)
         self.rate_box.activated.connect(lambda *_: self._rate_entered())

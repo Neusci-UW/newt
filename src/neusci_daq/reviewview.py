@@ -12,6 +12,7 @@ from .plotzoom import OverlayCurve
 from . import groupsfile
 from .trialsbrowser import BACK as BACK_ITEM, LIVE as LIVE_ITEM
 from .mainparts import LIVE, REVIEW
+from .units import whole
 
 
 class ReviewMixin:
@@ -241,7 +242,7 @@ class ReviewMixin:
         self._show_block_media(index)
         self.status.setText(
             f"Reviewing {self.review_blocks[index].stem} ({index + 1}/{len(self.review_blocks)}) · "
-            f"{blk['duration_s']:.2f} s · {blk['sample_rate']:,.0f} Hz/ch · "
+            f"{blk['duration_s']:.2f} s · {whole(blk['sample_rate'])}/ch · "
             f"{len(blk['comments'])} comment(s)")
 
     def analysis_blocks(self) -> list[Path]:

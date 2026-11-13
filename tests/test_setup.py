@@ -34,14 +34,14 @@ def test_rate_change_updates_config_read_size_and_display(win):
     assert win.cfg.sample_rate == 5000
     assert win.cfg.chunk_size == 250          # ~50 ms per read
     assert win.cap == int(win.window_box.value() * 5000)
-    assert win.rate_box.currentText() == "5,000 Hz"
+    assert win.rate_box.currentText() == "5 kHz"
 
 
 def test_rate_over_the_limit_is_refused_with_the_max(win):
     type_rate(win, "100000")                  # 2 channels -> max 50,000
     assert win.cfg.sample_rate == 2000
-    assert "50,000" in win.statusBar().currentMessage()
-    assert win.rate_box.currentText() == "2,000 Hz"   # box put back
+    assert "50 kHz" in win.statusBar().currentMessage()
+    assert win.rate_box.currentText() == "2 kHz"   # box put back
 
 
 def test_rate_garbage_is_refused(win):

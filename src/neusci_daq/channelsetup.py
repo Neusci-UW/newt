@@ -15,6 +15,7 @@ from .channels import ChannelRow, ChannelStrip
 from .config import Channel, Config, valid_inputs
 from . import colors
 from .mainparts import LIVE, REVIEW
+from .units import whole
 
 
 class ChannelSetupMixin:
@@ -228,7 +229,7 @@ class ChannelSetupMixin:
             on = ", ".join(f"{c.name} = {c.physical}" for c in self.cfg.channels)
             self.statusBar().showMessage(f"Channels: {on}", 8000)
         elif what == "sampling rate":
-            self.statusBar().showMessage(f"Sampling rate: {self.cfg.sample_rate:,g} Hz per channel", 8000)
+            self.statusBar().showMessage(f"Sampling rate: {whole(self.cfg.sample_rate)} per channel", 8000)
         else:
             self.statusBar().showMessage(f"Input wiring: {self.cfg.terminal_config}", 8000)
         return True
@@ -276,16 +277,16 @@ class ChannelSetupMixin:
         if rate != self.cfg.sample_rate:
             self.apply_setup(sample_rate=rate)
         else:
-            self._sync_setup_controls()   # tidy the text, e.g. "1000" -> "1,000 Hz"
+            self._sync_setup_controls()   # tidy the text, e.g. "1000" -> "1 kHz"
 
     def _sync_setup_controls(self):
         """Show the current rate and wiring in the toolbar, menu and status bar."""
         self.rate_box.blockSignals(True)
-        self.rate_box.setEditText(f"{self.cfg.sample_rate:,g} Hz")
+        self.rate_box.setEditText(whole(self.cfg.sample_rate))
         self.rate_box.blockSignals(False)
         n = len(self.cfg.channels)
         self.rate_box.setToolTip(f"Samples per second, per channel. With {n} channel(s) on, "
-                                 f"the USB-6003 allows up to {cfgmod.max_rate(n):,} Hz.")
+                                 f"the USB-6003 allows up to {whole(cfgmod.max_rate(n))}.")
         self.act_wiring[self.cfg.terminal_config].setChecked(True)
         self._update_wiring_label()
 

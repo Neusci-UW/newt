@@ -1,4 +1,6 @@
 """Analysis: block lists, event detection, spike sorting, and the Analysis tab."""
+import json
+
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pytest
@@ -128,9 +130,9 @@ def test_analysis_tab_overlays_blocks_and_finds_events(app, win, tmp_path):
     pump(app, 0.2)
     page = win.analysis_page.raw
     assert page.channel.count() == 2 and win.analysis_page.current.maximum() == 3
-    assert len(C(page, "Trials").group_avgs) == 1 and not C(page, "Trials").trial_items        # nothing picked: the page's average
+    assert len(means(R(page))) == 1 and not trial_curves(R(page))        # nothing picked: the page's average
     win.analysis_page.select_blocks([1, 2])
-    assert trials_shown(page) == 2 and not C(page, "Trials").group_avgs           # blocks picked: their trials
+    assert trials_shown(page) == 2 and not means(R(page))           # blocks picked: their trials
     win.analysis_page.select_blocks([])
     ev = page.find()
     assert ev is not None and len(ev.t) > 0 and page.table.rowCount() == ev.n_units
@@ -148,8 +150,8 @@ def test_dragging_the_threshold_sets_a_fixed_level(app, win):
     pump(app, 0.2)
     page = win.analysis_page.raw
     base = page.baseline()
-    C(page, "Trials").thr_line.setValue(base - 0.3)
-    C(page, "Trials")._thr_dragged()
+    R(page).thr_line.setValue(base - 0.3)
+    R(page)._thr_dragged()
     assert page.method.currentData() is False and page.threshold.text() == "300 mV"
     assert page._threshold() == ("level", pytest.approx(0.3))
     assert page.polarity.currentData() == "negative"
@@ -236,8 +238,8 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     ap = win.analysis_page
     assert [ap.canvas.layouts.itemText(i) for i in range(ap.canvas.layouts.count())] == ["Board"]
     assert not ap.canvas.here()                                      # empty: you choose every chart
-    C(ap.raw, "Trials").plot.setFocus()
-    key(C(ap.raw, "Trials").plot, QtCore.Qt.Key.Key_Right)
+    R(ap.raw).plots()[0].setFocus()
+    key(R(ap.raw).plots()[0], QtCore.Qt.Key.Key_Right)
     pump(app, 0.05)
     assert ap.current.value() == 2 and win.block_combo.currentIndex() == 0   # Analysis, not review
     ap.slider.setValue(4)
@@ -297,11 +299,12 @@ def test_comparison_traces_derivatives_and_triggered_averages(app, win):
     ap.raw.find()
     put(ap, "Response")
     pump(app, 0.2)
-    assert len(ap.chart("Traces")._plots) == 3                                      # Ch1, Ch2 and Stim V
-    ap.chart("Traces").series.item(1, 1).setCheckState(QtCore.Qt.CheckState.Checked)   # + Ch2 dV/dt
-    assert len(ap.chart("Traces")._plots) == 4
-    ap.chart("Traces").layout_mode.setCurrentIndex(1)                               # overlaid
-    assert len(ap.chart("Traces")._plots) == 1
+    response = ap.chart("Response")
+    assert len(response._plots) == 2 and "Stim" not in response.names()   # Ch1 and Ch2: Stimulus has its own chart
+    response.series.item(1, 1).setCheckState(QtCore.Qt.CheckState.Checked)   # + Ch2 dV/dt
+    assert len(response._plots) == 3
+    ap.chart("Response").layout_mode.setCurrentIndex(1)                               # overlaid
+    assert len(ap.chart("Response")._plots) == 1
     assert ap.chart("Stimulus-triggered rate").trigger.currentData() == "Stim"                       # picked as the stimulus channel
     pp = ap.chart("Stimulus-triggered rate").plot.getPlotItem().listDataItems()[0]
     edges, rate = pp.getData()                                       # a stepped plot: bin edges
@@ -316,6 +319,14 @@ def test_comparison_traces_derivatives_and_triggered_averages(app, win):
     ap.chart("Spike-triggered average").sta_channel.setCurrentIndex(ap.chart("Spike-triggered average").sta_channel.findData("Stim"))
     t, mean = ap.chart("Spike-triggered average").plot.getPlotItem().listDataItems()[-1].getData()
     assert mean[t < 0].max() > 0.5                                   # the stimulus comes before the spike
+    ap.stim_channel.setCurrentIndex(ap.stim_channel.findData(""))   # stimuli from the notes: every channel
+    pump(app, 0.1)
+    assert "Stim" in response.names() and len(response._multi.items) == 3   # listed, to tick if you want it
+    response.series.item(2, 0).setCheckState(QtCore.Qt.CheckState.Checked)
+    assert len(response._plots) == 1 and len(response._multi.items) == 4
+    ap.stim_channel.setCurrentIndex(ap.stim_channel.findData("Stim"))
+    pump(app, 0.1)
+    assert len(response._multi.items) == 3                           # overlaid: Ch1, Ch2 and its dV/dt
 
 
 def test_cycles_of_a_sine_line_up_by_phase():
@@ -562,9 +573,9 @@ def test_raw_view_shows_the_stimulus_groups(app, win):
     pump(app, 0.2)
     ap = win.analysis_page
     assert "2 different stimuli" in ap.group_note.text()
-    assert len(C(ap.raw, "Trials").group_avgs) == 2 and len(C(ap.raw, "Raster").group_marks.data) == 4   # an average each; row marks
+    assert len(means(R(ap.raw))) == 2 and len(C(ap.raw, "Raster").group_marks.data) == 4   # an average each; row marks
     ap.select_blocks([2, 3])                                         # one group: just its blocks
-    assert ap.raw.chosen_or_none() == [2, 3] and C(ap.raw, "Trials").group_avgs == []
+    assert ap.raw.chosen_or_none() == [2, 3] and means(R(ap.raw)) == []
 
 
 def test_isi_histogram():
@@ -686,16 +697,16 @@ def test_averages_show_and_export_sd_and_sem(app, win, tmp_path):
     raw = ap.raw
     raw.channel.setCurrentText("Ch1")
     ap.spread_box.setCurrentIndex(1)                                 # ± SD
-    assert len(C(raw, "Trials").group_avgs) == 2 and len(C(raw, "Trials").bands) == 2 * 3      # each group: line + band
+    assert len(means(R(raw))) == 2 and len(bands(R(raw))) == 2           # each group: line + band
     chosen = raw.chosen_or_none()
     rows = [ap.trace(i, "Ch1") for i in chosen if i in ap.groups[0][1]][:2]
     n = min(len(y) for y in rows)                                    # blocks can differ by a chunk
     Y = np.array([y[:n] for y in rows])
     mean, sd = Y.mean(0), Y.std(0, ddof=1)
-    up = C(raw, "Trials").bands[0].getOriginalDataset()[1][:n]
+    up = bands(R(raw))[0].getOriginalDataset()[1][:n]
     assert np.allclose(up, mean + sd)                                # the band is mean ± SD
     ap.spread_box.setCurrentIndex(2)                                 # ± SEM
-    assert np.allclose(C(raw, "Trials").bands[0].getOriginalDataset()[1][:n], mean + sd / np.sqrt(2))
+    assert np.allclose(bands(R(raw))[0].getOriginalDataset()[1][:n], mean + sd / np.sqrt(2))
     out = raw.export_averages(tmp_path / "avg.csv")
     rows = list(csv.reader(out.open()))
     assert rows[0][0] == "time_s" and rows[0][1].startswith(ap.groups[0][0]) and "mean" in rows[0][1]
@@ -710,7 +721,7 @@ def test_averages_show_and_export_sd_and_sem(app, win, tmp_path):
     assert len(fills) == 2 and "SEM across stimuli" in ap.chart("Stimulus-triggered rate").plot.getPlotItem().titleLabel.text
     put(ap, "Spike Sorting")
     ap.spread_box.setCurrentIndex(0)
-    assert C(raw, "Trials").bands == []
+    assert bands(R(raw)) == []
 
 
 # ---------------------------------------------------------------- measuring (the Measure tool, DataPad table, Scatter)
@@ -754,7 +765,7 @@ def test_the_measure_tool_makes_a_window_and_a_datapad_table(app, win, tmp_path)
     from neusci_daq import datapad as D, measure as M
     ap, raw = two_stimulus_charts(app, win)
     canvas = ap.canvas
-    traces = C(raw, "Traces")
+    traces = C(raw, "Response")
     canvas.set_tool("measure", "time")
     assert traces.plots()[0].getPlotItem().vb.on_drag_select is not None   # the tool drags on charts against time
     assert canvas.first("DataPad table") is None
@@ -838,7 +849,7 @@ def test_phase_windows_measure_every_cycle_and_scatter_plots_the_columns(app, wi
 
 def test_a_window_dragged_on_its_chart_moves(app, win):
     ap, raw = two_stimulus_charts(app, win)
-    traces = C(raw, "Traces")
+    traces = C(raw, "Response")
     ap.measure.add("time", 0.1, 0.1, ap.raw.channel.currentText(), "mean")
     pump(app, 0.1)
     region = next(i for i in traces.plots()[0].getPlotItem().items if isinstance(i, M_region()))
@@ -906,22 +917,22 @@ def test_ticking_units_chooses_what_the_charts_show(app, win):
     raw._show_results()
     raw.page.events_changed()
     assert raw.table.rowCount() == 2
-    assert C(raw, "Trials").event_hl.getData()[0] is None or not len(C(raw, "Trials").event_hl.getData()[0])   # nothing yet
-    assert len(C(raw, "Trials").marks.data) == len(ev.t)                          # every chosen block's events are marked
+    assert R(raw).event_hl.getData()[0] is None or not len(R(raw).event_hl.getData()[0])   # nothing yet
+    assert len(R(raw).marks.data) == len(ev.t)                          # every chosen block's events are marked
     assert raw.table.item(0, 0).checkState() == QtCore.Qt.CheckState.Checked
     raw.table.item(0, 0).setCheckState(QtCore.Qt.CheckState.Unchecked)   # leave out unit 1
     mine = ev.unit == 1
-    xs = C(raw, "Trials").event_hl.getData()[0]
+    xs = R(raw).event_hl.getData()[0]
     assert np.isfinite(xs).sum() > 0 and mine.sum() == np.isnan(xs).sum()   # one segment per event, in any block
-    assert len(C(raw, "Trials").marks.data) == mine.sum() and len(C(raw, "Raster").raster_dots.data) == mine.sum()   # the others are gone
+    assert len(R(raw).marks.data) == mine.sum() and len(C(raw, "Raster").raster_dots.data) == mine.sum()   # the others are gone
     assert len(C(raw, "AP sizes").plot.getPlotItem().listDataItems()) == 1   # just that unit on the charts
     assert set(C(raw, "Rate")._rate_items) == {1}
     C(raw, "Waveforms").norm_waves.setChecked(True)                                  # redrawn: the ticks stay
     assert raw.shown_units() == {1} and raw.table.item(0, 0).checkState() == QtCore.Qt.CheckState.Unchecked
     raw.show_units(set())                                            # none: nothing to see
-    assert len(C(raw, "Trials").marks.data) == 0 and not C(raw, "Rate")._rate_items
+    assert len(R(raw).marks.data) == 0 and not C(raw, "Rate")._rate_items
     raw.show_units({0, 1})
-    assert len(C(raw, "Trials").marks.data) == len(ev.t) and None in C(raw, "Rate")._rate_items
+    assert len(R(raw).marks.data) == len(ev.t) and None in C(raw, "Rate")._rate_items
 
 
 def test_normalize_options(app, win):
@@ -958,7 +969,44 @@ def test_normalize_options(app, win):
 
 
 def trials_shown(raw):
-    return sum(item.getOriginalDataset()[1].shape[0] for item in C(raw, "Trials").trial_items)
+    return sum(item.getOriginalDataset()[1].shape[0] for item in trial_curves(R(raw)))
+
+
+def R(raw):
+    """Response showing just the sorted channel's V, as the Trials chart did (Response took
+    its place)."""
+    chart = C(raw, "Response")
+    want = {(raw.channel.currentText(), 0)}
+    if chart.ticked() != want:
+        chart.series.blockSignals(True)
+        for r in range(chart.series.rowCount()):
+            name = chart.series.verticalHeaderItem(r).text()
+            for c in range(chart.series.columnCount()):
+                chart.series.item(r, c).setCheckState(QtCore.Qt.CheckState.Checked if (name, c) in want
+                                                      else QtCore.Qt.CheckState.Unchecked)
+        chart.series.blockSignals(False)
+        chart.refresh()
+    return chart
+
+
+def trial_curves(chart):
+    """The trials drawn on a chart's first plot."""
+    from neusci_daq.plotzoom import OverlayCurve
+    return [i for i in chart.plots()[0].getPlotItem().listDataItems() if isinstance(i, OverlayCurve)]
+
+
+def means(chart):
+    """The averages drawn on a chart's first plot."""
+    from neusci_daq.plotzoom import OverlayCurve, TraceCurve
+    return [i for i in chart.plots()[0].getPlotItem().listDataItems()
+            if isinstance(i, TraceCurve) and not isinstance(i, OverlayCurve) and i.zValue() == 6]
+
+
+def bands(chart):
+    """The ± SD / SEM bands on a chart's first plot: each one's upper edge."""
+    from neusci_daq.plotzoom import OverlayCurve, TraceCurve
+    return [i for i in chart.plots()[0].getPlotItem().listDataItems()
+            if isinstance(i, TraceCurve) and not isinstance(i, OverlayCurve) and i.zValue() == 4][::2]
 
 
 def C(raw, kind):
@@ -972,8 +1020,8 @@ def C(raw, kind):
 
 # The charts the tests use together: what the built-in layouts held, before the board started empty.
 SETS = {
-    "Spike Sorting": ("Stimulus", "Trials", "Raster", "Rate", "PCA map", "Waveforms", "AP sizes", "Intervals"),
-    "Response": ("Traces", "Stimulus-triggered rate", "Spike-triggered average", "Response against stimulus",
+    "Spike Sorting": ("Stimulus", "Response", "Raster", "Rate", "PCA map", "Waveforms", "AP sizes", "Intervals"),
+    "Response": ("Response", "Stimulus-triggered rate", "Spike-triggered average", "Response against stimulus",
                  "Stimulus fit", "Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase"),
     "Waveforms": ("V against dV/dt", "V", "dV/dt"),
 }
@@ -1089,16 +1137,16 @@ def test_the_central_plots_share_one_time_axis_that_stops_at_the_data(app, win):
     ap, raw = _spike_sorting(app, win)
     raw.find()
     pump(app, 0.05)
-    plots = [C(raw, "Trials").plot, C(raw, "Stimulus").plot, C(raw, "Raster").plot, C(raw, "Rate").plot]
+    plots = [R(raw).plots()[0], C(raw, "Stimulus").plot, C(raw, "Raster").plot, C(raw, "Rate").plot]
     x = lambda pw: pw.getPlotItem().vb.viewRange()[0]
-    end = C(raw, "Trials")._end
+    end = R(raw)._end
     for pw in plots:
         assert x(pw) == pytest.approx([0, end], abs=1e-6)
     C(raw, "Rate").plot.getPlotItem().vb.zoom_time(0.5, end / 2)           # zoom one: they all follow
     pump(app, 0.05)
-    assert x(C(raw, "Trials").plot)[1] - x(C(raw, "Trials").plot)[0] == pytest.approx(end / 2, rel=0.01)
+    assert x(R(raw).plots()[0])[1] - x(R(raw).plots()[0])[0] == pytest.approx(end / 2, rel=0.01)
     for pw in plots:
-        assert x(pw) == pytest.approx(x(C(raw, "Trials").plot))
+        assert x(pw) == pytest.approx(x(R(raw).plots()[0]))
     C(raw, "Raster").plot.getPlotItem().vb.zoom_time(100, end / 2)              # out: never past the data
     pump(app, 0.05)
     for pw in plots:
@@ -1108,9 +1156,12 @@ def test_the_central_plots_share_one_time_axis_that_stops_at_the_data(app, win):
 def test_spikes_per_second_during_a_block():
     ev = A.Events(block=np.array([0, 0, 1, 1]), t=np.array([0.1, 0.2, 0.1, 1.2]), unit=np.zeros(4, int),
                   amplitude=np.ones(4), waves=np.empty((4, 0)), wave_t_ms=np.empty(0), level=1.0, duration_s=3.0)
-    edges, rates = A.block_rate(ev, 2, 1.5, 1.0)
+    edges, rates = A.block_rate(ev, {0: 1.5, 1: 1.5}, 1.0)
     assert edges.tolist() == [0, 1, 1.5]                             # the last bin stops at the data
-    assert rates[None].tolist() == [1.5, 1.0]                        # the mean of the 2 blocks
+    assert rates[None].tolist() == [[2.0, 0.0], [1.0, 2.0]]          # each block's
+    assert A.mean_spread(rates[None])[0].tolist() == [1.5, 1.0]      # the mean of the 2 blocks
+    edges, rates = A.block_rate(ev, {0: 1.0, 1: 1.5}, 1.0)           # block 0 stops after 1 s
+    assert np.isnan(rates[None][0, 1]) and A.mean_spread(rates[None])[0].tolist() == [1.5, 2.0]   # not pulled down
 
 
 def test_new_charts_go_where_there_is_room_and_the_block_bar_picks_the_trial(app, win):
@@ -1142,13 +1193,13 @@ def test_a_page_shows_its_average_and_blocks_their_trials(app, win):
     ap, raw = _spike_sorting(app, win)
     name = ap.shown[0][0]
     ap.select_pages([name])
-    assert len(C(raw, "Trials").group_avgs) == 1 and not C(raw, "Trials").trial_items
-    assert C(raw, "Trials").group_avgs[0].opts["pen"].color() == QtGui.QColor(ap.group_color(0))
+    assert len(means(R(raw))) == 1 and not trial_curves(R(raw))
+    assert means(R(raw))[0].opts["pen"].color() == QtGui.QColor(ap.group_color(0))
     ap.select_blocks([0, 1])
-    assert not C(raw, "Trials").group_avgs and trials_shown(raw) == 2
-    alpha = C(raw, "Trials").trial_items[0].opts["pen"].color().alpha()
+    assert not means(R(raw)) and trials_shown(raw) == 2
+    alpha = trial_curves(R(raw))[0].opts["pen"].color().alpha()
     ap.select_blocks([0])
-    assert C(raw, "Trials").trial_items[0].opts["pen"].color().alpha() == 255 > alpha   # one on its own is solid
+    assert trial_curves(R(raw))[0].opts["pen"].color().alpha() == 255 > alpha   # one on its own is solid
 
 
 def test_page_colors_are_editable_and_saved_with_the_session(app, win):
@@ -1156,7 +1207,7 @@ def test_page_colors_are_editable_and_saved_with_the_session(app, win):
     name = ap.shown[0][0]
     ap.set_page_color(name, "#123456")
     ap.select_pages([name])
-    assert C(raw, "Trials").group_avgs[0].opts["pen"].color() == QtGui.QColor("#123456")
+    assert means(R(raw))[0].opts["pen"].color() == QtGui.QColor("#123456")
     assert groupsfile.load(ap._folder())["colors"] == {name: "#123456"}
     ap.set_page_color(name, None)
     assert ap.group_color(0) != "#123456"
@@ -1169,10 +1220,10 @@ def test_color_maps_run_across_pages_and_trials(app, win):
     assert groupsfile.load(ap._folder())["page_map"] == "Viridis"
     ap.select_blocks([0, 1, 2])
     ap.trial_map.setCurrentText("Opacity")
-    alphas = sorted(item.opts["pen"].color().alpha() for item in C(raw, "Trials").trial_items)
+    alphas = sorted(item.opts["pen"].color().alpha() for item in trial_curves(R(raw)))
     assert len(alphas) == 3 and alphas[0] < alphas[-1] == 255
     ap.trial_map.setCurrentText("Plasma")
-    assert len({item.opts["pen"].color().name() for item in C(raw, "Trials").trial_items}) == 3
+    assert len({item.opts["pen"].color().name() for item in trial_curves(R(raw))}) == 3
 
 
 def test_the_stimulus_chart_shows_every_chosen_block(app, win):
@@ -1186,10 +1237,10 @@ def test_the_stimulus_is_the_color_of_its_response(app, win):
     ap, raw = _spike_sorting(app, win)
     name = ap.shown[0][0]
     ap.select_pages([name])
-    assert C(raw, "Stimulus").stim_items[0].opts["pen"].color() == C(raw, "Trials").group_avgs[0].opts["pen"].color()
+    assert C(raw, "Stimulus").stim_items[0].opts["pen"].color() == means(R(raw))[0].opts["pen"].color()
     ap.trial_map.setCurrentText("Plasma")
     ap.select_blocks([0, 1])
-    trials = {item.opts["pen"].color().name() for item in C(raw, "Trials").trial_items}
+    trials = {item.opts["pen"].color().name() for item in trial_curves(R(raw))}
     assert {item.opts["pen"].color().name() for item in C(raw, "Stimulus").stim_items} == trials and len(trials) == 2
 
 
@@ -1215,36 +1266,39 @@ def test_raster_points_keep_their_size_and_it_can_be_set(app, win):
     ev.unit = np.arange(len(ev.t)) % 2
     raw._show_results()
     raw.page.events_changed()
-    C(raw, "Trials").mark_size.setValue(4)
-    assert C(raw, "Trials").marks.opts["size"] == 4
-    C(raw, "Trials").mark_size.setValue(9)
+    R(raw).mark_size.setValue(4)
+    assert R(raw).marks.opts["size"] == 4
+    R(raw).mark_size.setValue(9)
     C(raw, "Raster").point_size.setValue(5)
     assert C(raw, "Raster").raster_dots.opts["size"] == 5
     raw.find()
     raw.show_units({0})
     assert C(raw, "Raster").raster_dots.opts["size"] == 5
-    C(raw, "Trials").mark_size.setValue(4)
-    assert C(raw, "Trials").marks.opts["size"] == 4
-    C(raw, "Trials").mark_size.setValue(9)
+    R(raw).mark_size.setValue(4)
+    assert R(raw).marks.opts["size"] == 4
+    R(raw).mark_size.setValue(9)
     raw.show_units(raw.shown_units() | set(range(raw.events.n_units)))
 
 
 def test_the_threshold_says_what_it_is(app, win):
     ap, raw = _spike_sorting(app, win)
     raw.find()
-    assert "threshold" in C(raw, "Trials").thr_label.toPlainText()
+    assert "threshold" in R(raw).thr_label.toPlainText()
 
 
 def test_the_threshold_can_be_hidden_without_changing_the_search(app, win):
     ap, raw = _spike_sorting(app, win)
-    assert C(raw, "Trials").show_thr.isChecked()
+    raw.btn_clear.click()
+    ap.canvas.close_chart(R(raw))
+    assert not R(raw).show_thr.isChecked() and not R(raw).show_dots.isChecked()   # off until spikes are found
     found = len(raw.find().t)
-    C(raw, "Trials").show_thr.setChecked(False)
-    assert not C(raw, "Trials").thr_line.isVisible()
+    assert R(raw).show_thr.isChecked() and R(raw).show_dots.isChecked() and R(raw).thr_line.isVisible()
+    R(raw).show_thr.setChecked(False)
+    assert not R(raw).thr_line.isVisible()
     assert len(raw.find().t) == found
-    assert not C(raw, "Trials").thr_line.isVisible()                              # a new search leaves it hidden
-    C(raw, "Trials").show_thr.setChecked(True)
-    assert C(raw, "Trials").thr_line.isVisible()
+    assert not R(raw).thr_line.isVisible()                              # a new search leaves it hidden
+    R(raw).show_thr.setChecked(True)
+    assert R(raw).thr_line.isVisible()
 
 
 def test_the_raster_shows_as_many_rows_as_blocks_are_chosen(app, win):
@@ -1350,11 +1404,11 @@ def test_a_pinned_chart_keeps_its_blocks(app, win):
     assert raster.pin["stems"] == [ap._paths[0].stem] and "1 trial" in raster.dock.bar.tag.text()
     ap.select_blocks([1, 2])
     pump(app, 0.1)
-    assert raster.blocks() == [0] and C(raw, "Trials").blocks() == [1, 2]
+    assert raster.blocks() == [0] and R(raw).blocks() == [1, 2]
     ev = raw.find()
     assert set(ev.block.tolist()) <= {0, 1, 2} and 0 in ev.block.tolist()   # its blocks are searched too
     assert len(raster.raster_dots.data) == (ev.block == 0).sum()
-    assert len(C(raw, "Trials").marks.data) == (ev.block != 0).sum()
+    assert len(R(raw).marks.data) == (ev.block != 0).sum()
     raster.set_pinned(False)
     assert raster.blocks() == [1, 2]
 
@@ -1368,8 +1422,9 @@ def test_a_copy_is_the_same_size_as_its_chart_and_goes_beside_it(app, win):
     pump(app, 0.2)
     assert second.dock.place.size() == first.dock.place.size()
     assert not second.dock.place.intersects(first.dock.place)
-    sizes = [c.dock.place.size() for c in ap.canvas.here() if c not in (first, second)]
-    assert all(s == QtCore.QSizeF(400, 280) for s in sizes)          # nothing else was resized
+    from neusci_daq.canvas import SIZE
+    assert all(c.dock.place.size() == QtCore.QSizeF(*SIZE.get(c.kind, (400, 280)))
+               for c in ap.canvas.here() if c not in (first, second))   # nothing else was resized
 
 
 def test_charts_move_snap_and_resize_on_the_board(app, win):
@@ -1447,10 +1502,69 @@ def test_picking_several_charts_changes_them_together(app, win):
     assert ap.chart("Raster") is None and ap.chart("Rate") is None
 
 
+def test_the_board_has_a_color_of_its_own_for_each_mode(app, win, monkeypatch):
+    from neusci_daq import style
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    canvas = win.analysis_page.canvas
+    monkeypatch.setattr(QtWidgets.QColorDialog, "getColor", staticmethod(lambda *a: QtGui.QColor("#335577")))
+    canvas.floating.btn_color.click()                                # the swatch beside Grid
+    assert canvas.space.color == "#335577" and win.settings.value("analysis/board_color/light") == "#335577"
+    assert canvas.space._dot_color().lightness() < QtGui.QColor("#335577").lightness()   # darker dots in light mode
+    assert "board_color" not in json.dumps(canvas.state_of(canvas.space))   # not part of a layout
+    canvas.apply_theme(style.DARK)
+    assert canvas.space.color is None                                # dark mode keeps its own
+    canvas.floating.btn_color.click()
+    assert canvas.space._dot_color().lightness() > QtGui.QColor("#335577").lightness()   # lighter in dark mode
+    canvas._default_board_color()                                    # right-click › Default
+    assert canvas.space.color is None
+    canvas.apply_theme(style.LIGHT)
+    assert canvas.space.color == "#335577"
+
+
+def test_the_add_chart_menu_is_grouped_by_x_axis(app, win):
+    from neusci_daq.canvas import GROUPS
+    ap, raw = _spike_sorting(app, win)
+    menu = ap.canvas.add_menu
+    ap.canvas._fill_add_menu(menu, None)
+    heads = [a.text() for a in menu.actions() if a.isSeparator() and a.text()]
+    assert heads == list(GROUPS) and "Sorting spikes" not in heads
+    items = {a.text().split("\t")[0].split("  (")[0]: a.text() for a in menu.actions() if not a.isSeparator()}
+    assert items["Rate"].endswith("\tspikes/s") and items["Raster"].endswith("\ttrial")   # its y axis, on the right
+    assert "(1 open)" in items["Response"] and "Trials" not in items
+
+
+def test_old_traces_and_trials_charts_open_as_response(app, win):
+    import json
+    ap, raw = _spike_sorting(app, win)
+    raw.btn_clear.click()                                            # no spikes yet
+    old = {"charts": [{"id": "Traces 1", "kind": "Traces", "name": "Traces", "ticked": [["Ch1", 0], ["Stim", 0]],
+                       "place": [0, 0, 400, 280]},
+                      {"id": "Trials 2", "kind": "Trials", "name": "Trials", "fields": {"channel": "", "dots": 5},
+                       "place": [0, 300, 400, 280]}]}
+    ap.canvas.settings.setValue("analysis/layouts", json.dumps(["Old"]))
+    ap.canvas.settings.setValue("analysis/layout/Old", json.dumps(old))
+    ap.canvas._list_layouts()
+    ap.show_layout("Old")
+    pump(app, 0.2)
+    traces, trials = ap.canvas.here()
+    assert traces.kind == trials.kind == "Response" and (traces.name, trials.name) == ("Response", "Response 2")
+    assert traces.ticked() == {("Ch1", 0)}                           # the stimulus is left out
+    assert not traces.show_thr.isChecked()
+    assert trials.ticked() == {("Ch2", 0)} and trials.show_thr.isChecked() and trials.show_dots.isChecked()
+    assert trials.mark_size.value() == 5
+    raw.find()
+    assert trials.show_thr.isChecked() and traces.show_thr.isChecked()   # spikes found: on by themselves
+    trials.show_dots.setChecked(False)
+    raw.find()
+    assert not trials.show_dots.isChecked() and not len(trials.marks.data)   # after that, as you set it
+
+
 def test_a_chart_can_show_its_own_groups(app, win):
     ap, raw = two_stimulus_charts(app, win)
     first, second = ap.shown[0][0], ap.shown[1][0]
-    trials = C(raw, "Trials")
+    trials = R(raw)
     ap.canvas.select(trials)
     pump(app, 0.05)
     groups = ap.side.groups
@@ -1774,7 +1888,7 @@ def test_scale_bars_replace_the_axes_and_follow_the_zoom(app, win):
     ap, raw = _spike_sorting(app, win)
     win.resize(1600, 1000)
     pump(app, 0.1)
-    p = C(raw, "Trials").plot.getPlotItem()
+    p = R(raw).plots()[0].getPlotItem()
     assert p.getAxis("left").isVisible() and getattr(p, "_scale_bar", None) is None
     ap.canvas.bars.setChecked(True)
     pump(app, 0.05)
@@ -1798,16 +1912,18 @@ def test_scale_bars_replace_the_axes_and_follow_the_zoom(app, win):
     bar.mouseDragEvent(Drag())
     assert bar.pos().x() == pytest.approx(at.x() - 30)
     gap = bar.gap
-    C(raw, "Trials").redraw()                                              # redrawing keeps it there
+    R(raw).redraw()                                              # redrawing keeps it there
+    p = R(raw).plots()[0].getPlotItem()                              # (Response draws its plots anew)
     assert p._scale_bar.gap == gap
     ap.canvas.bars.setChecked(False)
     assert p.getAxis("left").isVisible() and p._scale_bar is None
     assert win.settings.value("analysis/scale_bars", True, type=bool) is False
-    put(ap, "Response")
+    R(raw).series.item(0, 0).setCheckState(QtCore.Qt.CheckState.Checked)   # Ch1 too: two rows
     pump(app, 0.1)
     ap.canvas.bars.setChecked(True)
-    plots = ap.chart("Traces")._plots
-    assert plots[-1].getPlotItem()._scale_bar.x_text and not plots[0].getPlotItem()._scale_bar.x_text
+    plots = ap.chart("Response")._plots
+    assert len(plots) == 2
+    assert not plots[0].getPlotItem()._scale_bar.x_text                 # the time only on the last row (or below)
     ap.canvas.bars.setChecked(False)
 
 
@@ -1836,17 +1952,17 @@ def test_response_traces_follow_spike_sortings_rules(app, win):
     from neusci_daq.plotzoom import OverlayCurve, TraceCurve
     name = ap.shown[0][0]
     ap.select_pages([name])
-    items = ap.chart("Traces")._plots[0].getPlotItem().listDataItems()
+    items = ap.chart("Response")._plots[0].getPlotItem().listDataItems()
     assert len(items) == 1 and isinstance(items[0], TraceCurve) and not isinstance(items[0], OverlayCurve)
     assert items[0].opts["pen"].color() == QtGui.QColor(ap.group_color(0))
     ap.select_blocks([0, 1])
     ap.trial_map.setCurrentText("Plasma")
-    items = ap.chart("Traces")._plots[0].getPlotItem().listDataItems()
+    items = ap.chart("Response")._plots[0].getPlotItem().listDataItems()
     assert sum(i.getOriginalDataset()[1].shape[0] for i in items if isinstance(i, OverlayCurve)) == 2
     assert len({i.opts["pen"].color().name() for i in items}) == 2
     ap.spread_box.setCurrentIndex(1)
     ap.select_pages([name])
-    assert any(isinstance(i, __import__("pyqtgraph").FillBetweenItem) for i in ap.chart("Traces")._plots[0].getPlotItem().items)
+    assert any(isinstance(i, __import__("pyqtgraph").FillBetweenItem) for i in ap.chart("Response")._plots[0].getPlotItem().items)
     ap.spread_box.setCurrentIndex(0)
 
 
@@ -1913,14 +2029,14 @@ def test_repeats_can_be_typed_or_marked_and_a_one_off_says_so(app, win):
     assert "from your repeat" in ap.chart("Stimulus cycle").plot.getPlotItem().titleLabel.text
     ap.repeats.cycle_len.setValue(0)
     ap.repeats.btn_mark.setChecked(True)
-    vb = ap.chart("Traces")._plots[0].getPlotItem().vb
+    vb = ap.chart("Response")._plots[0].getPlotItem().vb
     assert vb.on_drag_select is not None
     vb.on_drag_select(0.1, 0.15, True)
     assert not ap.repeats.btn_mark.isChecked() and ap.repeats.cycle_len.value() == pytest.approx(50)
-    assert ap.repeats._cycle_start == pytest.approx(0.1) and vb.on_drag_select is None or ap.chart("Traces")._plots
+    assert ap.repeats._cycle_start == pytest.approx(0.1) and vb.on_drag_select is None or ap.chart("Response")._plots
     ap.repeats.cycle_len.setValue(0)
     assert ap.repeats._cycle_start is None
-    marks = [i for pw in ap.chart("Traces")._plots for i in pw.getPlotItem().items
+    marks = [i for pw in ap.chart("Response")._plots for i in pw.getPlotItem().items
              if isinstance(i, __import__("pyqtgraph").ScatterPlotItem)]
     assert not marks                                                 # the cuts aren't marked on the traces
 
@@ -1955,28 +2071,28 @@ def test_find_rescales_y_and_settings_search_again(app, win):
     first = raw.events
     assert first is not None
     pump(app, 0.2)
-    vb = C(raw, "Trials").plot.getPlotItem().vb
-    fit = vb.viewRange()[1]
-    vb.setYRange(fit[0] / 100, fit[1] / 100, padding=0)              # zoomed in, as by hand
+    vb = lambda: R(raw).plots()[0].getPlotItem().vb                  # Response draws its plots again
+    fit = vb().viewRange()[1]
+    vb().setYRange(fit[0] / 100, fit[1] / 100, padding=0)              # zoomed in, as by hand
     C(raw, "AP sizes").plot.getPlotItem().setYRange(0, 0.001, padding=0)
     C(raw, "Raster").plot.getPlotItem().setYRange(1, 2, padding=0)
     raw.btn_find.click()
     pump(app, 0.2)
-    lo, hi = vb.viewRange()[1]
-    assert lo <= C(raw, "Trials").marks.data["y"].min() and hi - lo > 50 * (fit[1] - fit[0]) / 100
+    lo, hi = vb().viewRange()[1]
+    assert lo <= R(raw).marks.data["y"].min() and hi - lo > 50 * (fit[1] - fit[0]) / 100
     assert C(raw, "AP sizes").plot.getPlotItem().vb.viewRange()[1][1] > 0.001
     assert C(raw, "Raster").plot.getPlotItem().vb.viewRange()[1] == pytest.approx([0.5, len(C(raw, "Raster")._rows) + 0.5])
     zoomed = (fit[0] / 100, fit[1] / 100)
-    vb.setYRange(*zoomed, padding=0)
+    vb().setYRange(*zoomed, padding=0)
     for change in (lambda: raw.dead.setValue(2.0), lambda: raw.post.setValue(3.0),
                    lambda: raw.units.setCurrentIndex(2), lambda: raw.bip_frac.setValue(0.5)):
         was = raw.events
         change()
         pump(app, 0.5)
         assert raw.events is not None and raw.events is not was      # searched without pressing Find
-    assert vb.viewRange()[1] == pytest.approx(zoomed, rel=1e-3)      # and left the zoom alone
-    C(raw, "Trials").thr_line.setValue(C(raw, "Trials").thr_line.value() * 1.1)
-    C(raw, "Trials")._thr_dragged()
+    assert vb().viewRange()[1] == pytest.approx(zoomed, rel=1e-3)      # and left the zoom alone
+    R(raw).thr_line.setValue(R(raw).thr_line.value() * 1.1)
+    R(raw)._thr_dragged()
     pump(app, 0.5)
     assert raw.events is not None
 
@@ -1996,7 +2112,7 @@ def test_a_unit_color_reaches_every_graph(app, win):
         assert C(raw, kind).plot.getPlotItem().listDataItems()[1 if kind == "Waveforms" else 0].opts["pen"].color() == want
     first = np.flatnonzero(ev.unit == 0)[0]
     assert C(raw, "Raster").raster_dots.data["brush"][first].color() == want
-    assert C(raw, "Trials").marks.data["brush"][first].color() == want
+    assert R(raw).marks.data["brush"][first].color() == want
 
 
 def test_groups_and_trials_can_be_hidden_and_color_maps_skip_them(app, win):
@@ -2167,7 +2283,7 @@ def test_a_units_opacity_reaches_the_charts(app, win):
     pump(app, 0.2)
     assert raw.opacity_of(0) == pytest.approx(0.3)
     assert raw.table.cellWidget(0, 5) is button                      # the menu stays open as it moves
-    brush = C(raw, "Trials").marks.data["brush"][0]
+    brush = R(raw).marks.data["brush"][0]
     assert brush.color().alphaF() == pytest.approx(0.3, abs=0.01)
     assert C(raw, "Raster").raster_dots.data["brush"][0].color().alphaF() == pytest.approx(0.3, abs=0.01)
 

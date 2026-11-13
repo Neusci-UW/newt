@@ -635,7 +635,6 @@ class AnalysisPage(QtWidgets.QWidget):
             "No stimuli in the notes")
         if hasattr(self, "side"):                 # the group lists beside the board
             self.group_colors.fill()
-            self.side.groups.show_for(self.canvas.picked())
 
 
     @staticmethod

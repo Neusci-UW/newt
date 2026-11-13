@@ -257,6 +257,9 @@ class ReviewMixin:
     def step_block(self, d: int) -> None:
         """↑ / ↓: the next entry in the Acquisition Blocks panel, in the order it shows
         (Live, then each page's blocks), opening it as a click would. Not while recording."""
+        if self.tabs.is_visible("analysis"):          # Analysis: the next trial in the Trials list
+            self.analysis_page.step_list(d)
+            return
         if not self.tabs.is_visible("acq") or self.recorder.recording:
             return
         role = QtCore.Qt.ItemDataRole.UserRole

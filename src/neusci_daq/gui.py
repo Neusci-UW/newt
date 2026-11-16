@@ -30,6 +30,7 @@ program crashes or someone chooses Don't Save.
 """
 from __future__ import annotations
 
+import os
 import queue
 import sys
 import time
@@ -750,4 +751,12 @@ def run(cfg: Config, config_path: str | Path | None = None, open_path: str | Non
     QtCore.QTimer.singleShot(0, lambda: opener.ready(w))
     left = SPLASH_S - (time.monotonic() - shown)       # long enough to see, on a fast computer too
     QtCore.QTimer.singleShot(max(0, int(left * 1000)), lambda: splash.finish(w))
-    return app.exec()
+    code = app.exec()
+    # closeEvent has already stopped the hardware and saved/closed every file. Exit
+    # here rather than through Python's shutdown: PyQt's exit cleanup walks every Qt
+    # wrapper still alive, and one whose C++ object Qt already freed (pyqtgraph,
+    # QtWebEngine) segfaults it — the crash seen on quitting.
+    QtCore.QSettings("neusci", "neusci-daq-visualizer").sync()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

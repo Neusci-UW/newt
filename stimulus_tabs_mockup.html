@@ -1,0 +1,262 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stimulus tabs mockup</title>
+<style>
+:root{--ink:#1f2328;--muted:#4a5058;--subtle:#5c6370;--ground:#f3f4f6;--panel:#fff;--button:#e3e6ea;--field:#fff;--fb:#c9ced6;--line:#d9dce1;--focus:#1a5fd0;--sel:#eef3fb;--start:#1a5fd0;--stop:#c0392b;--wave:#1a5fd0;--dim:#d9822b;--grid:#eceef1;--ok:#1e8e3e}
+@media (prefers-color-scheme:dark){:root{--ink:#e6e8eb;--muted:#a9b0b9;--subtle:#8b929c;--ground:#1b1d22;--panel:#202328;--button:#2f333a;--field:#24272d;--fb:#3f444c;--line:#3a3f47;--focus:#4d8dff;--sel:#2c3a52;--start:#3a78e8;--stop:#e0574a;--wave:#5b93ff;--dim:#f0a35a;--grid:#2a2e34;--ok:#4cc26a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:13px system-ui,sans-serif;padding:16px}
+h2{font-size:15px;margin:0 0 4px}
+.note{color:var(--subtle);font-size:12px;margin:0 0 12px;max-width:940px;line-height:1.45}
+.note b{color:var(--ink)}
+input.tab{position:absolute;opacity:0;pointer-events:none;width:0}
+button,.btn{font:13px system-ui;padding:5px 12px;border:none;border-radius:6px;background:var(--button);color:var(--ink);cursor:pointer;display:inline-block}
+.go{background:var(--start);color:#fff;font-weight:600}
+.stop{background:var(--stop);color:#fff;font-weight:600}
+.link{background:none;color:var(--focus);padding:2px 4px}
+select,input{font:13px system-ui;background:var(--field);color:var(--ink);border:1px solid var(--fb);border-radius:6px;padding:3px 6px}
+input{width:58px}
+.muted{color:var(--subtle)}.small{font-size:12px}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--subtle);font:12px system-ui}
+.app{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;max-width:1100px}
+
+/* page tabs */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);padding:0 12px;background:var(--ground)}
+.tabs label{padding:9px 16px;cursor:pointer;color:var(--subtle);border-bottom:3px solid transparent;margin-bottom:-1px}
+#tS:checked~.tabs label[for=tS],#tD:checked~.tabs label[for=tD]{color:var(--ink);font-weight:600;border-bottom-color:var(--focus);background:var(--panel)}
+.page{display:none}
+#tS:checked~#pS,#tD:checked~#pD{display:block}
+.seg{display:inline-flex;gap:2px;background:var(--button);border-radius:8px;padding:2px}
+.seg label{padding:5px 12px;border-radius:6px;cursor:pointer;color:var(--muted)}
+
+/* ---------- Simple ---------- */
+.simple{display:grid;grid-template-columns:1fr 320px;min-height:540px}
+.sL{padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+.sR{border-left:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:14px;background:var(--ground)}
+#mP:checked~.modes label[for=mP],#mD:checked~.modes label[for=mD],#mT:checked~.modes label[for=mT]{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.mode{display:none}
+#mP:checked~.mP,#mD:checked~.mD,#mT:checked~.mT{display:block}
+.diagram{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel)}
+.fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.f{display:flex;flex-direction:column;gap:4px}
+.f>span{font-size:12px;color:var(--muted)}
+.f>span i{font-style:normal;display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--dim);vertical-align:middle;margin-right:4px}
+.stepper{display:flex;align-items:stretch}
+.stepper button{border-radius:6px 0 0 6px;padding:4px 10px;font-size:15px}
+.stepper button:last-child{border-radius:0 6px 6px 0}
+.stepper input{border-radius:0;width:84px;text-align:center;font-size:15px;border-left:none;border-right:none}
+.stepper em{font-style:normal;align-self:center;margin-left:6px;color:var(--muted)}
+.repeat{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.repeat label{display:flex;gap:5px;align-items:center}
+.repeat input[type=radio],.repeat input[type=checkbox]{width:auto}
+.ramp{border-top:1px dashed var(--line);padding-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--muted)}
+.bigbtn{font-size:16px;padding:14px;border-radius:10px;width:100%;text-align:center}
+.lamp{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.lamp i{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.log{font-size:12px;border-collapse:collapse;width:100%}
+.log td{padding:3px 4px;border-bottom:1px solid var(--grid)}
+.log td:last-child{text-align:right}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;font-size:12px;align-items:center}
+.kv span:nth-child(odd){color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.card h4{margin:0 0 8px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+
+/* ---------- Design ---------- */
+.design{display:grid;grid-template-columns:1fr 300px;min-height:540px}
+.dL{padding:14px 16px;display:flex;flex-direction:column;gap:14px}
+.dR{border-left:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:14px;background:var(--ground)}
+.sec h3{font-size:13px;margin:0 0 6px;display:flex;gap:6px;align-items:center}
+.sec h3 b{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--sel);color:var(--focus);font-size:11px}
+.sec h3 .hint{color:var(--subtle);font-weight:400;font-size:12px;margin-left:auto}
+.segs{display:flex;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.sg{flex:1;padding:8px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:5px;min-width:0}
+.sg:last-child{border-right:none}
+.sg .nm{font-weight:600;display:flex;justify-content:space-between}
+.sg .nm span{color:var(--subtle);font-weight:400}
+.sg label{font-size:11px;color:var(--subtle)}
+.sg input{width:100%}
+.sg input.pt{border-style:dashed}
+.sg input.pt.set{border-style:solid;border-color:var(--focus);background:var(--sel)}
+.sg.add{flex:0 0 60px;display:grid;place-items:center;color:var(--focus);cursor:pointer;background:var(--ground)}
+.trials{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center}
+.trials .seg label{padding:4px 10px}
+.trials .seg label.on{background:var(--panel);color:var(--ink);font-weight:600}
+.progress{height:8px;border-radius:4px;background:var(--button);overflow:hidden}.progress i{display:block;height:100%;width:40%;background:var(--focus)}
+.lib{display:flex;flex-direction:column;gap:4px}
+.lib div{padding:6px 8px;border-radius:6px;background:var(--panel);border:1px solid var(--line);font-size:12px;display:flex;justify-content:space-between;cursor:pointer}
+.lib div.on{border-color:var(--focus);background:var(--sel)}
+.lib div span{color:var(--subtle)}
+.pros{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;max-width:1100px}
+.pros div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:12px;line-height:1.5}
+.pros h4{margin:0 0 2px;font-size:12px}.pros ul{margin:0;padding-left:16px}
+@media (max-width:860px){.simple,.design,.pros{grid-template-columns:1fr}.sR,.dR{border-left:none;border-top:1px solid var(--line)}.segs{flex-wrap:wrap}.sg{flex:1 1 45%}}
+</style></head><body>
+
+<h2>Stimulus — two tabs</h2>
+<p class="note"><b>Simple Stimulus</b> is a stimulator box on screen: pick a pulse type, read the labeled picture, set the numbers, press Stimulate. No plans, curves or response charts — the recording on the Chart page is where students watch what happens. <b>Stimulus Design</b> is today's segments + trials editor for instructors and projects, also without the Plan / Responses / Curve views. A design made there can be saved and shows up as a choice in Simple (“Lab presets”).</p>
+
+<div class="app">
+<input type="radio" name="tab" id="tS" class="tab" checked><input type="radio" name="tab" id="tD" class="tab">
+<div class="tabs"><label for="tS">Simple Stimulus</label><label for="tD">Stimulus Design</label></div>
+
+<!-- ======================= SIMPLE ======================= -->
+<div class="page" id="pS"><div class="simple">
+<div class="sL">
+  <input type="radio" name="mode" id="mP" class="tab" checked><input type="radio" name="mode" id="mD" class="tab"><input type="radio" name="mode" id="mT" class="tab">
+  <div class="seg modes"><label for="mP">Single pulse</label><label for="mD">Pulse pair</label><label for="mT">Train</label></div>
+
+  <!-- single -->
+  <div class="mode mP">
+    <div class="diagram"><svg viewBox="0 0 600 170">
+      <line x1="20" y1="130" x2="580" y2="130" stroke="var(--fb)"/>
+      <path d="M20 130 H250 V40 H330 V130 H580" fill="none" stroke="var(--wave)" stroke-width="3"/>
+      <line x1="230" y1="40" x2="230" y2="130" stroke="var(--dim)" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+      <text x="222" y="90" text-anchor="end" style="fill:var(--dim);font-weight:600">Amplitude 2.0 V</text>
+      <line x1="250" y1="152" x2="330" y2="152" stroke="var(--dim)" stroke-width="2" marker-start="url(#a)" marker-end="url(#a)"/>
+      <text x="290" y="167" text-anchor="middle" style="fill:var(--dim);font-weight:600">Width 0.2 ms</text>
+      <text x="250" y="30" text-anchor="middle">▼ stimulate</text>
+      <defs><marker id="a" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker></defs>
+    </svg></div>
+    <div class="fields" style="margin-top:14px">
+      <div class="f"><span><i></i>Amplitude</span><div class="stepper"><button>−</button><input value="2.0"><button>+</button><em>V</em></div></div>
+      <div class="f"><span><i></i>Width</span><div class="stepper"><button>−</button><input value="0.2"><button>+</button><em>ms</em></div></div>
+    </div>
+  </div>
+  <!-- pair -->
+  <div class="mode mD">
+    <div class="diagram"><svg viewBox="0 0 600 170">
+      <line x1="20" y1="130" x2="580" y2="130" stroke="var(--fb)"/>
+      <path d="M20 130 H170 V40 H200 V130 H390 V40 H420 V130 H580" fill="none" stroke="var(--wave)" stroke-width="3"/>
+      <line x1="150" y1="40" x2="150" y2="130" stroke="var(--dim)" stroke-width="2" marker-start="url(#a2)" marker-end="url(#a2)"/>
+      <text x="142" y="90" text-anchor="end" style="fill:var(--dim);font-weight:600">2.0 V</text>
+      <line x1="170" y1="152" x2="390" y2="152" stroke="var(--dim)" stroke-width="2" marker-start="url(#a2)" marker-end="url(#a2)"/>
+      <text x="280" y="167" text-anchor="middle" style="fill:var(--dim);font-weight:600">Interval 20 ms (start to start)</text>
+      <text x="185" y="30" text-anchor="middle">0.2 ms</text><text x="405" y="30" text-anchor="middle">0.2 ms</text>
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker></defs>
+    </svg></div>
+    <div class="fields" style="margin-top:14px">
+      <div class="f"><span><i></i>Amplitude (both)</span><div class="stepper"><button>−</button><input value="2.0"><button>+</button><em>V</em></div></div>
+      <div class="f"><span>Width</span><div class="stepper"><button>−</button><input value="0.2"><button>+</button><em>ms</em></div></div>
+      <div class="f"><span><i></i>Interval</span><div class="stepper"><button>−</button><input value="20"><button>+</button><em>ms</em></div></div>
+    </div>
+  </div>
+  <!-- train -->
+  <div class="mode mT">
+    <div class="diagram"><svg viewBox="0 0 600 170">
+      <line x1="20" y1="130" x2="580" y2="130" stroke="var(--fb)"/>
+      <path d="M20 130 H120 V40 H135 V130 H200 V40 H215 V130 H280 V40 H295 V130 H360 V40 H375 V130 H440 V40 H455 V130 H580" fill="none" stroke="var(--wave)" stroke-width="3"/>
+      <line x1="100" y1="40" x2="100" y2="130" stroke="var(--dim)" stroke-width="2" marker-start="url(#a3)" marker-end="url(#a3)"/>
+      <text x="92" y="90" text-anchor="end" style="fill:var(--dim);font-weight:600">2.0 V</text>
+      <line x1="120" y1="152" x2="200" y2="152" stroke="var(--dim)" stroke-width="2" marker-start="url(#a3)" marker-end="url(#a3)"/>
+      <text x="160" y="167" text-anchor="middle" style="fill:var(--dim);font-weight:600">50 ms → 20 Hz</text>
+      <path d="M120 28 V22 H455 V28" fill="none" stroke="var(--dim)" stroke-width="2"/>
+      <text x="288" y="16" text-anchor="middle" style="fill:var(--dim);font-weight:600">5 pulses</text>
+      <defs><marker id="a3" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker></defs>
+    </svg></div>
+    <div class="fields" style="margin-top:14px">
+      <div class="f"><span><i></i>Amplitude</span><div class="stepper"><button>−</button><input value="2.0"><button>+</button><em>V</em></div></div>
+      <div class="f"><span>Width</span><div class="stepper"><button>−</button><input value="0.2"><button>+</button><em>ms</em></div></div>
+      <div class="f"><span><i></i>Rate</span><div class="stepper"><button>−</button><input value="20"><button>+</button><em>Hz</em></div></div>
+      <div class="f"><span><i></i>Pulses</span><div class="stepper"><button>−</button><input value="5"><button>+</button><em></em></div></div>
+    </div>
+  </div>
+
+  <div class="repeat"><b>Send</b>
+    <label><input type="radio" name="rep" checked> once per click</label>
+    <label><input type="radio" name="rep"> every <input value="2" style="width:48px"> s until Stop</label>
+  </div>
+  <div class="ramp"><label style="display:flex;gap:5px;align-items:center"><input type="checkbox" style="width:auto"> After each stimulus, raise amplitude by</label> <input value="0.2"> V, up to <input value="5"> V
+    <span class="small muted" style="flex-basis:100%">For threshold and recruitment labs: press Start, watch the Chart page, press Stop when the response stops growing.</span></div>
+</div>
+
+<div class="sR">
+  <button class="go bigbtn">Stimulate</button>
+  <div style="display:flex;gap:8px"><button style="flex:1">Start repeating</button><button class="stop" style="flex:1">Stop</button></div>
+  <div class="lamp"><i></i>Ready · output on AO0, recorded on AI1</div>
+  <div class="card"><h4>Sent</h4>
+    <table class="log">
+      <tr><td>#14</td><td>2.0 V · 0.2 ms</td><td class="muted">10:42:18</td></tr>
+      <tr><td>#13</td><td>1.8 V · 0.2 ms</td><td class="muted">10:42:16</td></tr>
+      <tr><td>#12</td><td>1.6 V · 0.2 ms</td><td class="muted">10:42:14</td></tr>
+      <tr><td colspan="3" class="muted">Each one is also a comment on the recording.</td></tr>
+    </table></div>
+  <div class="card"><h4>Lab presets</h4>
+    <div class="lib"><div class="on">Single pulse <span>built in</span></div><div>Frog sciatic — threshold <span>saved</span></div><div>Paired-pulse 10–200 ms <span>saved</span></div></div></div>
+  <div style="margin-top:auto" class="small muted">Output limit ±10 V · <button class="link small">Output settings…</button></div>
+</div>
+</div></div>
+
+<!-- ======================= DESIGN ======================= -->
+<div class="page" id="pD"><div class="design">
+<div class="dL">
+  <div class="sec"><h3><b>1</b>Stimulus<span class="hint">segments, left to right · dashed box = changes each trial</span></h3>
+    <div class="segs">
+      <div class="sg"><div class="nm">A <span>Baseline</span></div><label>Level (V)</label><input value="0"><label>Duration (ms)</label><input value="5"></div>
+      <div class="sg"><div class="nm">B <span>Pulse</span></div><label>Level (V)</label><input value="0.5"><input class="pt set" value="+0.5" title="per trial"><label>Duration (ms)</label><input value="0.2"><input class="pt" placeholder="per trial"></div>
+      <div class="sg"><div class="nm">C <span>Baseline</span></div><label>Level (V)</label><input value="0"><label>Duration (ms)</label><input value="20"></div>
+      <div class="sg"><div class="nm">D <span>Pulse</span></div><label>Level (V)</label><input value="0.5"><input class="pt set" value="+0.5"><label>Duration (ms)</label><input value="0.2"><input class="pt" placeholder="per trial"></div>
+      <div class="sg add">+ Add</div>
+    </div>
+  </div>
+  <div class="sec"><h3>Preview<span class="hint">all 10 trials, trial 3 in bold</span></h3>
+    <div class="diagram"><svg viewBox="0 0 640 170">
+      <line x1="20" y1="140" x2="620" y2="140" stroke="var(--fb)"/>
+      <g fill="none" stroke="var(--wave)" stroke-width="1.2" opacity=".28">
+        <path d="M20 140 H150 V128 H165 V140 H430 V128 H445 V140 H620"/>
+        <path d="M20 140 H150 V116 H165 V140 H430 V116 H445 V140 H620"/>
+        <path d="M20 140 H150 V92 H165 V140 H430 V92 H445 V140 H620"/>
+        <path d="M20 140 H150 V80 H165 V140 H430 V80 H445 V140 H620"/>
+        <path d="M20 140 H150 V68 H165 V140 H430 V68 H445 V140 H620"/>
+        <path d="M20 140 H150 V56 H165 V140 H430 V56 H445 V140 H620"/>
+        <path d="M20 140 H150 V44 H165 V140 H430 V44 H445 V140 H620"/>
+        <path d="M20 140 H150 V32 H165 V140 H430 V32 H445 V140 H620"/>
+        <path d="M20 140 H150 V20 H165 V140 H430 V20 H445 V140 H620"/>
+      </g>
+      <path d="M20 140 H150 V104 H165 V140 H430 V104 H445 V140 H620" fill="none" stroke="var(--wave)" stroke-width="3"/>
+      <text x="157" y="160" text-anchor="middle">B</text><text x="437" y="160" text-anchor="middle">D</text>
+      <text x="300" y="160" text-anchor="middle">C · 20 ms</text>
+      <text x="175" y="100">1.5 V</text>
+    </svg></div>
+    <div class="small muted" style="margin-top:4px">◀ trial 3 of 10 ▶ · B and D 1.5 V</div>
+  </div>
+  <div class="sec"><h3><b>2</b>Trials</h3>
+    <div class="trials">
+      <span class="muted">Trials</span><span><input value="10" style="width:48px"> <span class="muted small">(set by the dashed boxes: 0.5 → 5 V)</span></span>
+      <span class="muted">Repeat each</span><span><input value="3" style="width:48px"> times</span>
+      <span class="muted">Order</span><span class="seg"><label>In order</label><label>Interleaved</label><label class="on">Shuffled</label></span>
+      <span class="muted">Every</span><span><input value="2" style="width:48px"> s, start to start</span>
+    </div>
+  </div>
+</div>
+<div class="dR">
+  <button class="go bigbtn">Run 30 stimuli</button>
+  <div class="small muted" style="margin-top:-6px;text-align:center">about 1 min</div>
+  <div class="card"><h4>Running</h4>
+    <div class="progress"><i></i></div>
+    <div class="small" style="margin-top:6px">12 of 30 · trial 7 (3.5 V) · 36 s left</div>
+    <div style="display:flex;gap:6px;margin-top:8px"><button style="flex:1">Pause</button><button class="stop" style="flex:1">Stop</button></div></div>
+  <div class="card"><h4>3 · Output</h4>
+    <div class="kv"><span>Send on</span><span><select><option>AO0</option></select></span><span>Recorded on</span><span><select><option>AI1 · Stim</option></select></span></div></div>
+  <div class="card"><h4>Save</h4>
+    <div class="kv"><span>Name</span><span><input value="Paired-pulse recruitment" style="width:100%"></span></div>
+    <div style="display:flex;gap:6px;margin-top:8px"><button>Save as preset</button><button>Load…</button></div>
+    <div class="small muted" style="margin-top:6px">Presets appear under Simple Stimulus.</div></div>
+  <div style="margin-top:auto" class="small muted">Responses are analyzed later on the Analysis page — each stimulus is marked with its trial and values.</div>
+</div>
+</div></div>
+</div>
+
+<div class="pros">
+  <div><h4>Simple Stimulus — ideas taken from a hardware stimulator / LabChart</h4><ul>
+    <li>Three pulse types, each with a picture whose labels match the boxes (orange = the numbers you set).</li>
+    <li>−/+ buttons step amplitude in sensible jumps; one big Stimulate button.</li>
+    <li>“Raise amplitude after each” covers threshold/recruitment labs without a protocol.</li>
+    <li>A sent-log, and a comment on the recording for each stimulus.</li></ul></div>
+  <div><h4>Stimulus Design</h4><ul>
+    <li>Same segments + per-trial boxes + Trials as today, minus Plan / Responses / Curve.</li>
+    <li>Run panel shows progress only.</li>
+    <li>“Save as preset” is the bridge: instructors build here, students pick it in Simple.</li>
+    <li>Open question: is the Output card needed here, or only in settings?</li></ul></div>
+</div>
+</body></html>

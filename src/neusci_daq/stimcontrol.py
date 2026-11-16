@@ -143,6 +143,8 @@ class StimulatorMixin:
                           if stimulus2 is not None and len(channels) > 1 else None)
                 self.recorder.add_stimulus(stimulus.to_dict(), self.cfg.stim_rate,
                                            output=self.cfg.stim_output, second=second)
+        for fn in getattr(self, "sent_hooks", ()):     # pages that list what was sent
+            fn(desc, stimulus)
         self._stim_message(f"Stimulus sent on {' and '.join(channels)}: {desc}")
         self._update_stim_chip()
         return True

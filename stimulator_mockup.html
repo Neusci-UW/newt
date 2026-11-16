@@ -1,0 +1,195 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stimulator mockup</title>
+<style>
+:root{--ink:#1f2328;--muted:#4a5058;--subtle:#5c6370;--ground:#f3f4f6;--panel:#fff;--button:#e3e6ea;--field:#fff;--fb:#c9ced6;--line:#d9dce1;--focus:#1a5fd0;--sel:#eef3fb;--ao0:#2f6fe0;--ao1:#d9822b;--start:#1a5fd0}
+@media (prefers-color-scheme:dark){:root{--ink:#e6e8eb;--muted:#a9b0b9;--subtle:#8b929c;--ground:#1b1d22;--panel:#202328;--button:#2f333a;--field:#24272d;--fb:#3f444c;--line:#3a3f47;--focus:#4d8dff;--sel:#2c3a52;--ao0:#5b93ff;--ao1:#f0a35a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:13px system-ui,sans-serif;padding:16px}
+h2{font-size:15px;margin:0 0 4px}
+.note{color:var(--subtle);font-size:12px;margin:0 0 14px;max-width:900px}
+.sw{display:flex;gap:6px;margin-bottom:12px}
+.sw button,.btn{font:13px system-ui;padding:5px 12px;border:none;border-radius:6px;background:var(--button);color:var(--ink);cursor:pointer}
+.sw button.on{outline:2px solid var(--focus)}
+.btn.go{background:var(--start);color:#fff;font-weight:600}
+.app{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.top{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+.top .sp{flex:1}
+select,input{font:13px system-ui;background:var(--field);color:var(--ink);border:1px solid var(--fb);border-radius:6px;padding:3px 6px}
+input{width:64px}
+.grid{display:grid;grid-template-columns:minmax(340px,420px) 1fr;min-height:560px}
+.left{border-right:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.sec h3{font-size:13px;margin:0 0 6px;display:flex;gap:6px;align-items:center}
+.sec h3 b{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--sel);color:var(--focus);font-size:11px}
+.sec h3 .hint{color:var(--subtle);font-weight:400;font-size:12px;margin-left:auto}
+table.seg{border-collapse:collapse;width:100%}
+.seg th,.seg td{padding:2px 3px;text-align:left;white-space:nowrap}
+.seg th{color:var(--subtle);font-weight:500;font-size:12px}
+.seg td:first-child{color:var(--muted);font-size:12px}
+.seg input{width:58px}
+.seg tr.pt td{padding-top:0}
+.seg tr.pt input{border-style:dashed}
+.seg tr.pt input:not(:placeholder-shown){border-style:solid;border-color:var(--focus);background:var(--sel)}
+.outtag{display:inline-flex;gap:5px;align-items:center;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.chips span{padding:1px 8px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px;cursor:pointer}
+.add{color:var(--focus);font-size:12px;cursor:pointer;margin-top:4px;display:inline-block}
+.form{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
+.form label{color:var(--muted)}
+.seg2{display:inline-flex;border:1px solid var(--fb);border-radius:6px;overflow:hidden}
+.seg2 span{padding:2px 9px;cursor:pointer}.seg2 span.on{background:var(--sel);color:var(--focus)}
+.sum{color:var(--subtle);font-size:12px;margin-top:6px}
+.right{display:flex;flex-direction:column;min-width:0}
+.prevhead{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.prevhead .sp{flex:1}
+svg{display:block;width:100%}
+.lower{display:grid;grid-template-columns:1fr 240px;border-top:1px solid var(--line);flex:1;min-height:0}
+.trials{border-left:1px solid var(--line);overflow:auto;max-height:240px}
+.trials table{width:100%;border-collapse:collapse;font-size:12px}
+.trials td,.trials th{padding:3px 8px;text-align:left}
+.trials th{color:var(--subtle);font-weight:500;position:sticky;top:0;background:var(--panel)}
+.trials tr.cur{background:var(--sel)}
+.runbar{display:flex;gap:8px;align-items:center;padding:10px 12px}
+.runbar .sp{flex:1}
+.lbl{color:var(--subtle);font-size:12px}
+/* record page */
+.rec{position:relative;height:420px;padding:12px;display:grid;grid-template-rows:1fr 1fr;gap:8px}
+.trace{background:var(--ground);border-radius:6px;position:relative}
+.trace span{position:absolute;left:8px;top:6px;color:var(--subtle);font-size:12px}
+.mini{position:absolute;right:24px;top:24px;width:250px;background:var(--panel);border:1px solid var(--fb);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:10px;display:flex;flex-direction:column;gap:8px}
+.mini .hd{display:flex;align-items:center;gap:6px;font-weight:600}
+.mini .hd .sp{flex:1}.mini .hd a{color:var(--focus);font-weight:400;font-size:12px;cursor:pointer}
+.mini input[type=range]{width:100%;padding:0;border:none}
+.bar{height:6px;border-radius:3px;background:var(--button);overflow:hidden}.bar i{display:block;height:100%;background:var(--focus)}
+.hidden{display:none}
+</style></head><body>
+
+<h2>Stimulator, reorganized</h2>
+<p class="note">Suggestions 1–5 in one page. A stimulus is a row of segments per output. Any level or duration can change per trial (the dashed "per trial" boxes, blank by default). Set Trials above 1 and it's a protocol: no separate mode. The preview overlays every trial, with the selected trial in bold. On Record, a floating mini stimulator runs it. Try typing in the boxes.</p>
+
+<div class="sw"><button class="on" data-v="stim">Stimulus page</button><button data-v="rec">Record page · mini stimulator</button></div>
+
+<div id="stim" class="app">
+  <div class="top">
+    <span class="lbl">Protocol</span>
+    <select id="preset"><option>Single pulse</option><option selected>Strength–duration</option><option>Paired pulse</option><option>I–V steps</option><option>Ramp</option><option>New…</option></select>
+    <button class="btn">Save</button><button class="btn">Load…</button>
+    <span class="sp"></span><span class="lbl">Simulated device · ao0, ao1</span>
+  </div>
+  <div class="grid">
+    <div class="left">
+      <div class="sec">
+        <h3><b>1</b>Stimulus<span class="hint">segments, left to right</span></h3>
+        <div class="chips"><span>+ Pulse</span><span>+ Step</span><span>+ Ramp</span><span>+ Train</span><span>+ Sine</span><span>+ From file</span></div>
+        <div id="segs"></div>
+      </div>
+      <div class="sec">
+        <h3><b>2</b>Trials</h3>
+        <div class="form">
+          <label>Trials</label><span><input id="nTrials" type="number" value="8" min="1" max="30"> <span class="lbl">different stimuli</span></span>
+          <label>Repeats</label><span><input id="nRep" type="number" value="3" min="1"> <span class="lbl">of each</span></span>
+          <label>Order</label><span class="seg2" id="order"><span class="on">Blocked</span><span>Interleaved</span></span>
+          <label>Every</label><span><input id="every" type="number" value="2" step="0.5"> s <span class="lbl">start to start</span></span>
+        </div>
+        <div class="sum" id="sum"></div>
+      </div>
+      <div class="sec">
+        <h3><b>3</b>Output</h3>
+        <div class="form">
+          <label><span class="outtag"><i class="dot" style="background:var(--ao0)"></i>ao0</span></label><span>recorded on <select><option>ai1 · Stim monitor</option><option>none</option></select></span>
+          <label><span class="outtag"><i class="dot" style="background:var(--ao1)"></i>ao1</span></label><span>recorded on <select><option>none</option><option>ai2</option></select></span>
+          <label>Isolator</label><span>1 V out = <input value="1" style="width:46px"> mA</span>
+        </div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="prevhead">
+        <b>Preview</b><span class="lbl">every trial, one time axis for both outputs</span><span class="sp"></span>
+        <span class="lbl">Trial</span><input id="cur" type="range" min="1" max="8" value="3" style="width:140px;border:none"><span id="curlbl" class="lbl"></span>
+      </div>
+      <svg id="prev" viewBox="0 0 700 300" preserveAspectRatio="none" style="height:300px"></svg>
+      <div class="lower">
+        <div>
+          <div class="runbar">
+            <button class="btn go">Run 24 trials</button><button class="btn">Fire trial 3 once</button><button class="btn">Pause</button><button class="btn">Stop</button>
+            <span class="sp"></span>
+          </div>
+          <div style="padding:0 12px 12px" class="lbl">Responses and Curve sit here as tabs once trials have run (as today). With Trials = 1, Run becomes Fire, the trial table goes and the page is the plain stimulator.</div>
+        </div>
+        <div class="trials"><table><thead><tr><th>#</th><th>ao0 level</th><th>Width</th><th>Done</th></tr></thead><tbody id="ttab"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="rec" class="app hidden">
+  <div class="top"><b>Acquisition › Record</b><span class="sp"></span><span class="lbl">recording…</span></div>
+  <div class="rec">
+    <div class="trace"><span>ai0 · Response</span></div>
+    <div class="trace"><span>ai1 · Stim monitor</span></div>
+    <div class="mini">
+      <div class="hd"><i class="dot" style="background:var(--ao0)"></i>Stimulator<span class="sp"></span><a>Edit…</a></div>
+      <div class="lbl">Strength–duration · trial 7 of 24</div>
+      <div class="bar"><i style="width:29%"></i></div>
+      <div style="display:flex;gap:6px"><button class="btn go" style="flex:1">Run</button><button class="btn">Fire</button><button class="btn">Stop</button></div>
+      <div class="form"><label>Level</label><span><input type="range" min="0" max="5" step="0.1" value="1.5" id="mlv"> </span>
+      <label></label><span class="lbl" id="mlvl">1.5 V, base level for trial 1</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const S={outs:[
+  {name:'ao0',col:'--ao0',segs:[
+    {type:'Baseline',level:0,dur:10},
+    {type:'Pulse',level:0.5,dLevel:0.5,dur:1,dDur:''},
+    {type:'Baseline',level:0,dur:30}]},
+  {name:'ao1',col:'--ao1',segs:[
+    {type:'Baseline',level:0,dur:4},
+    {type:'Step',level:1,dLevel:'',dur:3,dDur:''},
+    {type:'Baseline',level:0,dur:34}]}]};
+const $=id=>document.getElementById(id);
+function num(v){const n=parseFloat(v);return isNaN(n)?0:n}
+function renderSegs(){
+  let h='';
+  S.outs.forEach((o,oi)=>{
+    h+=`<div style="margin:6px 0 2px" class="outtag"><i class="dot" style="background:var(${o.col})"></i>${o.name}</div><table class="seg"><tr><th></th>${o.segs.map((s,i)=>`<th>${String.fromCharCode(65+i)} · ${s.type}</th>`).join('')}</tr>`;
+    const row=(lab,key,cls,ph)=>`<tr class="${cls}"><td>${lab}</td>${o.segs.map((s,i)=>s.type==='Baseline'&&key[0]==='d'&&key!=='dur'?'<td></td>':`<td><input data-o="${oi}" data-i="${i}" data-k="${key}" value="${s[key]??''}" placeholder="${ph}"></td>`).join('')}</tr>`;
+    h+=row('Level V','level','','')+row('per trial','dLevel','pt','+0')+row('Duration ms','dur','','')+row('per trial','dDur','pt','+0')+'</table>';
+  });
+  h+='<span class="add">+ Add a second output (ao1)</span>'.replace('a second output (ao1)','a segment');
+  $('segs').innerHTML=h;
+  $('segs').querySelectorAll('input').forEach(el=>el.oninput=()=>{S.outs[el.dataset.o].segs[el.dataset.i][el.dataset.k]=el.value;draw()});
+}
+function trialSegs(o,t){return o.segs.map(s=>({level:num(s.level)+num(s.dLevel)*t,dur:Math.max(0,num(s.dur)+num(s.dDur)*t)}))}
+function draw(){
+  const n=Math.max(1,Math.min(30,num($('nTrials').value)|0)),rep=Math.max(1,num($('nRep').value)|0),cur=Math.min(n,num($('cur').value));
+  $('cur').max=n;$('curlbl').textContent=cur+' of '+n;
+  const tot=Math.max(...S.outs.map(o=>Math.max(...Array.from({length:n},(_,t)=>trialSegs(o,t).reduce((a,s)=>a+s.dur,0)))));
+  const W=700,lanes=S.outs.length,LH=300/lanes;let g='';
+  S.outs.forEach((o,oi)=>{
+    const all=Array.from({length:n},(_,t)=>trialSegs(o,t));
+    const vmax=Math.max(0.1,...all.flat().map(s=>Math.abs(s.level)));
+    const y0=oi*LH+LH-22,sc=(LH-44)/vmax;
+    g+=`<text x="6" y="${oi*LH+16}" fill="var(${o.col})" font-size="12" font-weight="600">${o.name}</text><line x1="0" x2="${W}" y1="${y0}" y2="${y0}" stroke="var(--line)"/>`;
+    if(oi)g+=`<line x1="0" x2="${W}" y1="${oi*LH}" y2="${oi*LH}" stroke="var(--line)"/>`;
+    all.forEach((segs,t)=>{let x=0,p=`M0 ${y0}`;segs.forEach(s=>{const y=y0-s.level*sc,x1=x+s.dur/tot*W;p+=` L${x} ${y} L${x1} ${y}`;x=x1});
+      const on=t===cur-1;g+=`<path d="${p}" fill="none" stroke="var(${o.col})" stroke-width="${on?2.4:1}" opacity="${on?1:.28}"/>`});
+  });
+  g+=`<text x="${W-6}" y="296" text-anchor="end" fill="var(--subtle)" font-size="11">${tot.toFixed(0)} ms</text>`;
+  $('prev').innerHTML=g;
+  const every=num($('every').value),N=n*rep,secs=N*every;
+  $('sum').textContent=`${n} trials × ${rep} repeats = ${N} stimuli, one every ${every} s · about ${Math.floor(secs/60)} min ${Math.round(secs%60)} s`;
+  document.querySelector('.go').textContent=N>1?`Run ${N} trials`:'Fire';
+  const a=S.outs[0];let tb='';
+  for(let t=0;t<n;t++){const s=trialSegs(a,t)[1];tb+=`<tr class="${t===cur-1?'cur':''}"><td>${t+1}</td><td>${s.level.toFixed(2)} V</td><td>${s.dur.toFixed(1)} ms</td><td>${t<2?'✓ '+rep+'/'+rep:'0/'+rep}</td></tr>`}
+  $('ttab').innerHTML=tb;
+}
+['nTrials','nRep','every','cur'].forEach(id=>$(id).oninput=draw);
+$('order').querySelectorAll('span').forEach(s=>s.onclick=()=>{$('order').querySelectorAll('span').forEach(x=>x.classList.toggle('on',x===s))});
+document.querySelectorAll('.sw button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.sw button').forEach(x=>x.classList.toggle('on',x===b));$('stim').classList.toggle('hidden',b.dataset.v!=='stim');$('rec').classList.toggle('hidden',b.dataset.v!=='rec')});
+$('mlv').oninput=e=>$('mlvl').textContent=e.target.value+' V, base level for trial 1';
+renderSegs();draw();
+</script>
+</body></html>

@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Breadboard parts mockup</title>
+<style>
+  body { font: 13px -apple-system, "Helvetica Neue", sans-serif; color: #1d2330; background: #ececec; margin: 24px; }
+  .win { background: #f6f6f6; border-radius: 8px; padding: 14px; max-width: 980px; box-shadow: 0 1px 4px #0003; }
+  .tools { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .b { border: 1px solid #b9b9b9; background: #fff; border-radius: 5px; padding: 4px 10px; }
+  .b.on { background: #2f6fd0; color: #fff; border-color: #2f6fd0; }
+  .new { outline: 2px dashed #d08a1c; outline-offset: 2px; }
+  .menu { position: relative; display: inline-block; }
+  .drop { position: absolute; top: 28px; left: 0; background: #fff; border: 1px solid #b9b9b9; border-radius: 6px; box-shadow: 0 4px 12px #0003; width: 290px; z-index: 2; padding: 4px 0; }
+  .drop div { padding: 5px 12px; display: flex; gap: 8px; align-items: baseline; }
+  .drop div:hover { background: #e8effa; }
+  .drop small { color: #777; }
+  .drop .sep { border-top: 1px solid #ddd; margin: 4px 0; padding: 0; }
+  .spacer { flex: 1; }
+  .row { display: grid; grid-template-columns: 1fr 260px; gap: 16px; }
+  .panel { background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 10px; }
+  .panel h4 { margin: 0 0 8px; font-size: 13px; }
+  .f { display: grid; grid-template-columns: 90px 1fr; gap: 6px; align-items: center; margin: 4px 0; }
+  .f span.v { border: 1px solid #bbb; border-radius: 4px; padding: 2px 6px; background: #fff; }
+  .note { color: #666; font-size: 12.5px; margin-top: 10px; max-width: 900px; }
+</style></head><body>
+<div class="win">
+  <div class="tools">
+    <span class="b on">Select</span><span class="b">Input voltage</span><span class="b">Resistor</span><span class="b">Capacitor</span>
+    <span class="b">Switch</span><span class="b">Wire</span><span class="b">Probe</span>
+    <span class="b new">⏚ Ground</span>
+    <span class="menu new"><span class="b">More parts ▾</span>
+      <div class="drop">
+        <div><b style="color:#d32f2f">●</b> LED <small>lights when current flows forward</small></div>
+        <div><b>▷|</b> Diode <small>current flows one way only</small></div>
+        <div class="sep"></div>
+        <div><b>⊸</b> Push button <small>closed only while you hold it</small></div>
+        <div><b>⟿</b> Potentiometer <small>three legs, adjustable divider</small></div>
+        <div><b>⌇</b> Inductor <small>henries</small></div>
+        <div class="sep"></div>
+        <div><b>▭</b> Battery <small>fixed voltage, + and − ends</small></div>
+      </div>
+    </span>
+    <span class="spacer"></span>
+    <span class="b">Delete part</span><span class="b">Reset board</span><span class="b">Clear board</span>
+  </div>
+  <div class="row">
+  <svg viewBox="0 0 700 330" width="100%" style="background:#fff;border:1px solid #ccc;border-radius:6px">
+    <!-- rails -->
+    <rect x="10" y="10" width="680" height="34" fill="#f3f3f3"/>
+    <line x1="20" y1="18" x2="680" y2="18" stroke="#d32f2f"/><line x1="20" y1="36" x2="680" y2="36" stroke="#2f6fd0"/>
+    <text x="12" y="22" font-size="10" fill="#d32f2f">+</text><text x="12" y="40" font-size="10" fill="#2f6fd0">−</text>
+    <!-- holes -->
+    <g fill="#c9c9c9">
+      <script>/* static */</script>
+    </g>
+    <g id="h"></g>
+    <rect x="12" y="160" width="676" height="14" fill="#e6e6e6"/>
+    <!-- dot grid drawn with patterns -->
+    <defs><pattern id="hp" width="22" height="22" patternUnits="userSpaceOnUse"><rect x="8" y="8" width="6" height="6" rx="1" fill="#cfcfcf"/></pattern></defs>
+    <rect x="20" y="52" width="660" height="108" fill="url(#hp)"/>
+    <rect x="20" y="174" width="660" height="108" fill="url(#hp)"/>
+    <!-- input voltage -->
+    <line x1="53" y1="63" x2="53" y2="129" stroke="#7c4dff" stroke-width="4"/><circle cx="53" cy="96" r="12" fill="#fff" stroke="#7c4dff" stroke-width="2"/><text x="53" y="100" font-size="10" text-anchor="middle" fill="#7c4dff">V</text>
+    <!-- resistor -->
+    <line x1="53" y1="63" x2="185" y2="63" stroke="#b87a1e" stroke-width="3"/><rect x="100" y="57" width="38" height="12" rx="5" fill="#e8c48c" stroke="#b87a1e"/>
+    <!-- LED (new) -->
+    <g class="newsvg">
+      <line x1="185" y1="63" x2="185" y2="85" stroke="#999" stroke-width="2"/>
+      <line x1="207" y1="63" x2="207" y2="85" stroke="#999" stroke-width="2"/>
+      <circle cx="196" cy="72" r="20" fill="#ff5252" opacity="0.25"/>
+      <path d="M184 66 a12 12 0 0 1 24 0 v10 h-24z" fill="#ff5252" stroke="#b71c1c"/>
+      <text x="215" y="58" font-size="10" fill="#b71c1c">LED (lit)</text>
+      <text x="178" y="98" font-size="9" fill="#666">+</text><text x="204" y="98" font-size="9" fill="#666">−</text>
+    </g>
+    <!-- ground symbol in a hole (new) -->
+    <g>
+      <line x1="207" y1="129" x2="207" y2="140" stroke="#444" stroke-width="2"/>
+      <line x1="197" y1="140" x2="217" y2="140" stroke="#444" stroke-width="2"/>
+      <line x1="200" y1="144" x2="214" y2="144" stroke="#444" stroke-width="2"/>
+      <line x1="203" y1="148" x2="211" y2="148" stroke="#444" stroke-width="2"/>
+      <circle cx="207" cy="129" r="4" fill="#444"/>
+      <text x="222" y="146" font-size="10" fill="#444">ground (any hole)</text>
+    </g>
+    <line x1="207" y1="85" x2="207" y2="129" stroke="#2e7d32" stroke-width="3"/>
+    <rect x="160" y="40" width="130" height="118" fill="none" stroke="#d08a1c" stroke-dasharray="4 3"/>
+    <text x="300" y="80" font-size="11" fill="#d08a1c">new: LED + ground</text>
+  </svg>
+  <div class="panel new">
+    <h4>Selected part</h4>
+    <div>LED, legs at c8 (+) and c9 (−)</div>
+    <div class="f"><span>Colour</span><span class="v">Red ▾</span></div>
+    <div class="f"><span>Forward V</span><span class="v">2.0 V</span></div>
+    <div class="f"><span>Current</span><span>12.4 mA (lit)</span></div>
+    <div class="f"><span>Max current</span><span class="v">20 mA</span></div>
+    <p style="color:#777;font-size:12px;margin:8px 0 0">Brightness follows the current; over the maximum it shows a warning instead of burning out.</p>
+  </div>
+  </div>
+  <p class="note"><b>Dashed = new.</b> <b>Ground</b> is a one-hole part, like a probe: it ties that hole's strip to 0 V, so you don't need a wire to the − rail. <b>More parts ▾</b> holds less-used parts; picking one works like the other part buttons (then click or drag onto the board). LED and diode are modelled as off below their forward voltage and as forward voltage + small resistance above it, checked each sample like the MOSFET switch. Default LED colours: red 2.0 V, green 2.2 V, blue 3.0 V, with the colour preset setting the forward voltage. Push button: a switch that is closed only while the mouse is down on it. Potentiometer: three holes (ends + wiper), a value in Ω and a wiper position slider. Inductor and battery are suggestions; drop any you don't want.</p>
+</div>
+</body></html>

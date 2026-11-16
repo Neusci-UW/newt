@@ -330,13 +330,14 @@ class DockedDesign(QtWidgets.QFrame):
         main = self.main
         s = stimmod.to_segments(main.stimulus)
         n = main.stimulus_page.n_trials.value() if hasattr(main, "stimulus_page") else 1
-        waves = []
+        waves, ids = [], []
         for t in list(range(1, min(n, self.MAX_DRAWN))) + [0]:
             try:
                 waves.append(s.at_trial(t).waveform(main.cfg.stim_rate))
+                ids.append(t)
             except (ValueError, OSError):
                 pass
-        self.picture.set_data(waves, [], [], -1, [], main.cfg.stim_rate, "V", 1.0)
+        self.picture.set_data(waves, [], [], -1, [], main.cfg.stim_rate, "V", 1.0, trial_ids=ids, n_trials=n)
         self.refresh()
 
     def refresh(self) -> None:

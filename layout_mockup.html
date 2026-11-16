@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Membrane layout mockup</title>
+<style>
+:root{--bg:#f6f5f1;--s1:#efede6;--s2:#fff;--line:rgba(0,0,0,.12);--strong:rgba(0,0,0,.25);--ink:#1f1f1d;--muted:#6b6a65;--acc:#185FA5;--accbg:#E6F1FB}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1b;--s1:#262624;--s2:#2e2e2c;--line:rgba(255,255,255,.12);--strong:rgba(255,255,255,.25);--ink:#eee;--muted:#a3a29c;--acc:#85B7EB;--accbg:#0C447C}}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;padding:16px}
+.fr{aspect-ratio:15/8;max-height:calc(100vh - 70px);margin:0 auto;border:1px solid var(--strong);border-radius:12px;background:var(--s1);padding:12px;box-sizing:border-box;display:grid;gap:10px;font-size:13px;color:var(--muted)}
+.cd{background:var(--s2);border:1px solid var(--line);border-radius:8px;padding:6px 8px;min-width:0;min-height:0;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+.tb{display:flex;gap:4px}.tb span{padding:1px 7px;border:1px solid var(--line);border-radius:4px}.tb span.on{background:var(--accbg);color:var(--acc);border-color:var(--acc)}
+.bx{flex:1;border-radius:4px;background:var(--s1);min-height:0}
+.sl{height:4px;border-radius:2px;background:var(--strong);margin:4px 0}
+.hd{display:flex;justify-content:space-between;align-items:center;color:var(--ink);font-size:15px}
+.sw{display:flex;gap:8px;align-items:center;margin:0 auto 10px}
+.sw button{font:13px system-ui;padding:5px 12px;border:1px solid var(--strong);border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+.sw button.on{border-color:var(--acc);color:var(--acc)}
+</style></head><body>
+<div class="sw"><button data-l="A">A · right rail</button><button data-l="B" class="on">B · three panels below</button><button data-l="C">C · controls drawer</button>
+<span style="font-size:12px;color:var(--muted);margin-left:auto">1500 × 800 aspect</span></div>
+<div class="fr" id="fr"></div>
+<script>
+const fr=document.getElementById('fr');
+const hd=`<div class="hd" style="grid-column:1/-1"><span>Exploring the membrane potential</span><span class="tb"><span>Goals</span><span>How to start</span></span></div>`;
+const sim=st=>`<div class="cd" style="align-items:center;${st}"><div class="tb" style="align-self:flex-start"><span class="on">Simulation</span><span>What you see</span><span>How it works</span><span>Notes</span></div><div class="bx" style="aspect-ratio:16/9;height:100%;flex:none"><canvas id="sim" style="width:100%;height:100%;display:block"></canvas></div></div>`;
+const run=st=>`<div class="cd" style="flex-direction:row;align-items:center;gap:10px;${st}"><span>▶ Run</span><span>Reset</span><div class="sl" style="flex:1;max-width:240px"></div><span style="font-family:ui-monospace,monospace">speed 1×</span><span style="margin-left:auto">V<sub>m</sub> −68 mV</span></div>`;
+const ctl=`<div class="cd"><div class="tb"><span class="on">Ions</span><span>Key</span><span>Model</span></div><div>K⁺<div class="sl"></div></div><div>Na⁺<div class="sl"></div></div><div>Cl⁻<div class="sl"></div></div><div>Pump<div class="sl"></div></div></div>`;
+const P='M0 25 H44 Q47 25 48 8 L49 25 L51 25 L52 42 Q53 25 56 25 H100', V='M0 40 C20 40 25 14 45 14 S80 13 100 13';
+const chart=(t,d,c)=>`<div class="cd"><div class="tb">${t}</div><div class="bx"><svg viewBox="0 0 100 50" preserveAspectRatio="none" style="width:100%;height:100%"><path d="${d}" fill="none" stroke="${c}" stroke-width="1" vector-effect="non-scaling-stroke"/></svg></div></div>`;
+const ion=(c,s,n)=>`<span style="display:inline-flex;align-items:center;gap:4px"><i style="width:12px;height:12px;border-radius:50%;background:${c};color:#fff;font:700 10px/12px system-ui;text-align:center;font-style:normal">${s}</i>${n}</span>`;
+const key=`<div class="cd" style="grid-column:2;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 14px">${ion('#378ADD','+','K⁺')}${ion('#D85A30','+','Na⁺')}${ion('#1D9E75','−','Cl⁻')}${ion('#7F77DD','−','A⁻')}<span style="border-left:1px solid var(--line);height:14px"></span><span>▭ leak channel</span><span>▬ Na⁺/K⁺ pump</span><span>○ just crossed</span><span style="display:inline-flex;align-items:center;gap:4px">net −<i style="width:60px;height:8px;border-radius:3px;border:1px solid var(--line);background:linear-gradient(90deg,#378ADD,transparent 50%,#D85A30)"></i>net +</span></div>`;
+const L={
+ B:{s:'grid-template-rows:auto minmax(0,1fr) auto minmax(0,.78fr);grid-template-columns:repeat(3,minmax(0,1fr))',
+    h:hd+sim('grid-column:1/-1')+run('grid-column:1/-1')+ctl+chart('<span class="on">Charge profile</span><span>?</span>',P,'#7F77DD')+chart('<span class="on">V<sub>m</sub></span><span>Pump vs leak</span><span>?</span>',V,'var(--ink)')},
+ A:{s:'grid-template-columns:minmax(0,1fr) 27%;grid-template-rows:auto minmax(0,1fr) minmax(0,1fr) auto',
+    h:hd+sim('grid-row:2/4')+chart('<span class="on">Charge profile</span><span>V<sub>m</sub></span><span>Pump vs leak</span>',P,'#7F77DD')+ctl+run('')+'<div></div>'},
+ C:{s:'grid-template-columns:36px minmax(0,1.15fr) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto auto',
+    h:hd+`<div class="cd" style="grid-row:2/5;align-items:center;padding:6px 2px;gap:10px"><span>☰</span><span>⚙</span><span>i</span></div>`+sim('')
+     +`<div style="grid-row:2/5;grid-column:3;display:grid;grid-template-rows:1fr 1fr;gap:10px;min-height:0">`+chart('<span class="on">Charge profile</span><span>?</span>',P,'#7F77DD')+chart('<span class="on">V<sub>m</sub></span><span>Pump vs leak</span><span>?</span>',V,'var(--ink)')+`</div>`
+     +key+run('')}};
+function dots(){const c=document.getElementById('sim'),r=c.getBoundingClientRect();c.width=r.width*2;c.height=r.height*2;const x=c.getContext('2d'),w=c.width,h=c.height;x.fillStyle='rgba(136,135,128,.5)';x.fillRect(w*.49,0,w*.02,h);const col=['#378ADD','#D85A30','#1D9E75','#7F77DD'];for(let i=0;i<300;i++){x.fillStyle=col[i%4];x.beginPath();x.arc(Math.random()*w,Math.random()*h,3,0,7);x.fill()}}
+function show(k){fr.setAttribute('style',L[k].s);fr.innerHTML=L[k].h;document.querySelectorAll('.sw button').forEach(b=>b.classList.toggle('on',b.dataset.l===k));dots()}
+document.querySelectorAll('.sw button').forEach(b=>b.onclick=()=>show(b.dataset.l));
+show('C');
+</script></body></html>

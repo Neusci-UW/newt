@@ -139,47 +139,38 @@ class StimulusPage(QtWidgets.QWidget):
         self.left_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.left_scroll.setMinimumWidth(480)
 
-        # ---- right: Run or Send, progress, send one trial, Output, Save --------------
+        # ---- right, like Simple Stimulus's: the big button, Pause/Repeat and Stop, the
+        # state, progress, what was sent, saving, and the output -----------------------
         side = QtWidgets.QWidget()
         side.setObjectName("designSide")
         side.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
-        side.setFixedWidth(290)
+        side.setFixedWidth(310)
         rv = QtWidgets.QVBoxLayout(side)
         rv.setContentsMargins(16, 16, 16, 16)
         rv.setSpacing(10)
         big = trials.btn_run.font()
-        big.setPointSizeF(big.pointSizeF() * 1.25)
-        # a protocol: Run, what it is, progress, Pause and Stop
+        big.setPointSizeF(big.pointSizeF() * 1.3)
+        # a protocol: Run, then Pause and Stop
         self.run_box = QtWidgets.QWidget()
         rb = QtWidgets.QVBoxLayout(self.run_box)
         rb.setContentsMargins(0, 0, 0, 0)
         rb.setSpacing(8)
-        trials.btn_run.setMinimumHeight(46)
+        trials.btn_run.setMinimumHeight(48)
         trials.btn_run.setFont(big)
         rb.addWidget(trials.btn_run)
-        rb.addWidget(trials.summary)
-        self.progress = QtWidgets.QProgressBar()
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(8)
-        self.progress_text = QtWidgets.QLabel()
-        rb.addWidget(self.progress)
-        rb.addWidget(self.progress_text)
         ps = QtWidgets.QHBoxLayout()
         ps.addWidget(trials.btn_pause, 1)
         ps.addWidget(trials.btn_stop, 1)
         rb.addLayout(ps)
-        self.btn_once = QtWidgets.QPushButton()
-        self.btn_once.setToolTip("Send the trial the picture shows, once, outside the protocol")
-        rb.addWidget(self.btn_once)
         rv.addWidget(self.run_box)
-        # one stimulus: Send, and Repeat every … with Stop
+        # one stimulus: Send, then Repeat every … and Stop
         self.fire_box = QtWidgets.QWidget()
         fb = QtWidgets.QGridLayout(self.fire_box)
         fb.setContentsMargins(0, 0, 0, 0)
         fb.setSpacing(6)
         stim.btn_fire.setText("Send")
         stim.btn_fire.setObjectName("start")
-        stim.btn_fire.setMinimumHeight(46)
+        stim.btn_fire.setMinimumHeight(48)
         stim.btn_fire.setFont(big)
         stim.btn_fire.style().unpolish(stim.btn_fire)
         stim.btn_fire.style().polish(stim.btn_fire)
@@ -189,10 +180,45 @@ class StimulusPage(QtWidgets.QWidget):
         fb.addWidget(stim.repeat, 1, 2)
         fb.addWidget(stim.btn_stop, 1, 3)
         rv.addWidget(self.fire_box)
+        self.lamp = QtWidgets.QLabel()
+        self.lamp.setWordWrap(True)
+        rv.addWidget(self.lamp)
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(8)
+        rv.addWidget(self.progress)
         rv.addWidget(trials.message)
+        self.btn_once = QtWidgets.QPushButton()
+        self.btn_once.setToolTip("Send the trial the picture shows, once, outside the protocol")
+        rv.addWidget(self.btn_once)
 
-        self.out_fold = self._fold(rv, "Output")
-        ol = self.out_fold.layout()
+        rv.addWidget(self._side_heading("Sent"))
+        self.log = QtWidgets.QListWidget()
+        self.log.setToolTip("Each stimulus is also a comment on the recording")
+        self.log.setMinimumHeight(120)
+        rv.addWidget(self.log, 1)
+        self._sent = 0
+        self._once = False
+
+        rv.addWidget(self._side_heading("Saved"))
+        nrow = QtWidgets.QHBoxLayout()
+        nrow.addWidget(QtWidgets.QLabel("Name"))
+        nrow.addWidget(trials.name, 1)
+        rv.addLayout(nrow)
+        srow = QtWidgets.QHBoxLayout()
+        for b in (trials.btn_save, trials.btn_load, stim.btn_save, stim.btn_load):
+            srow.addWidget(b)
+        srow.addStretch(1)
+        rv.addLayout(srow)
+
+        self.output_note = QtWidgets.QLabel()
+        self.output_note.setWordWrap(True)
+        self.output_note.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self.output_note.linkActivated.connect(lambda *_: self.out_body.setVisible(not self.out_body.isVisible()))
+        rv.addWidget(self.output_note)
+        self.out_body = QtWidgets.QWidget()
+        ol = QtWidgets.QVBoxLayout(self.out_body)
+        ol.setContentsMargins(0, 0, 0, 0)
         ol.addWidget(stim.output_panel)
         orow = QtWidgets.QHBoxLayout()
         self.btn_second = QtWidgets.QPushButton()
@@ -200,21 +226,9 @@ class StimulusPage(QtWidgets.QWidget):
         orow.addWidget(self.btn_second)
         orow.addStretch(1)
         ol.addLayout(orow)
-        self.save_fold = self._fold(rv, "Save")
-        sl = self.save_fold.layout()
-        nrow = QtWidgets.QHBoxLayout()
-        nrow.addWidget(QtWidgets.QLabel("Name"))
-        nrow.addWidget(trials.name, 1)
-        sl.addLayout(nrow)
-        srow = QtWidgets.QHBoxLayout()
-        for b in (trials.btn_save, trials.btn_load, stim.btn_save, stim.btn_load):
-            srow.addWidget(b)
-        srow.addStretch(1)
-        sl.addLayout(srow)
-        rv.addStretch(1)
-        self.note = QtWidgets.QLabel("Responses are looked at on the Record page and in Analysis.")
-        self.note.setWordWrap(True)
-        rv.addWidget(self.note)
+        self.out_body.setVisible(not main.cfg.stim_monitor)     # open until the stimulus is recorded
+        rv.addWidget(self.out_body)
+        main.sent_hooks = getattr(main, "sent_hooks", []) + [self._sent_one]
 
         # what the Stimulator and the protocol have that this page doesn't show
         self._hidden = QtWidgets.QWidget()
@@ -267,6 +281,23 @@ class StimulusPage(QtWidgets.QWidget):
         self.progress_timer = QtCore.QTimer(self, interval=250, timeout=self._show_progress)
         self.progress_timer.start()
         self.place()
+
+    @staticmethod
+    def _side_heading(text: str) -> QtWidgets.QLabel:
+        lab = QtWidgets.QLabel(f"<b>{text.upper()}</b>")
+        lab.setContentsMargins(0, 6, 0, 0)
+        return lab
+
+    def _sent_one(self, desc: str, stimulus) -> None:
+        """A stimulus went out: list it if it was this page's (a protocol's trial, Send,
+        or Send trial N once), not Simple Stimulus's."""
+        if not (self.trials.running or self._once or stimulus is self.main.stimulus):
+            return
+        import time
+        self._sent += 1
+        self.log.insertItem(0, f"#{self._sent}   {desc}   {time.strftime('%H:%M:%S')}")
+        while self.log.count() > 300:
+            self.log.takeItem(self.log.count() - 1)
 
     def _fold(self, parent_layout, title: str) -> QtWidgets.QWidget:
         """A line that opens to show its settings."""
@@ -373,8 +404,12 @@ class StimulusPage(QtWidgets.QWidget):
         except ValueError as e:
             self._show_problem(str(e))
             return
-        main.send_wave(wave, f"Trial {t + 1}: " + s1.describe(cfg.stim_units, cfg.stim_scale), s1,
-                       channels=chans, stimulus2=s2)
+        self._once = True
+        try:
+            main.send_wave(wave, f"Trial {t + 1}: " + s1.describe(cfg.stim_units, cfg.stim_scale), s1,
+                           channels=chans, stimulus2=s2)
+        finally:
+            self._once = False
 
     # -- showing it ----------------------------------------------------------------------
     def refresh(self, editor: bool = True) -> None:
@@ -394,11 +429,12 @@ class StimulusPage(QtWidgets.QWidget):
         cur = min(self.trial_slider.value(), n) - 1
         self.trial_label.setText(f"Trial {cur + 1} of {n}")
         rate = main.cfg.stim_rate
-        waves, problem = [], ""
+        waves, ids, problem = [], [], ""
         order = [i for i in range(n) if i != cur][:MAX_FADED] + [cur]
         for t in order:
             try:
                 waves.append(s.at_trial(t).waveform(rate))
+                ids.append(t)
             except (ValueError, OSError) as e:
                 if t == cur:
                     problem = f"Trial {t + 1}: {e}"
@@ -420,7 +456,8 @@ class StimulusPage(QtWidgets.QWidget):
             self.panel.show_part(self.sel, parts[self.sel], units, k, len(parts))
         else:
             self.panel.part = dict(parts[self.sel])
-        self.picture.set_data(waves, spans, names, self.sel, self.panel.dims(), rate, units, k)
+        self.picture.set_data(waves, spans, names, self.sel, self.panel.dims(), rate, units, k,
+                              trial_ids=ids, n_trials=n)
         total = spans[-1][1] / rate * 1000 if spans else 0
         self.summary_label.setText(f"{len(parts)} segments · {total:.4g} ms")
         self._show_problem(problem)
@@ -509,23 +546,34 @@ class StimulusPage(QtWidgets.QWidget):
         self._show_progress()
 
     def _show_progress(self) -> None:
-        tr = self.trials
+        """The state line (like Simple Stimulus's), the progress, and what can be pressed."""
+        tr, main = self.trials, self.main
+        t = style.tokens(self._mode)
         running = tr.running and self.isVisible()
         self.progress.setVisible(running)
-        self.progress_text.setVisible(running)
         self.btn_once.setEnabled(not running)
         if running:
             n, total = min(tr.next_i, len(tr.trials)), max(1, len(tr.trials))
             self.progress.setMaximum(total)
             self.progress.setValue(n)
-            self.progress_text.setText(f"Stimulus {n} of {len(tr.trials)}" + (" · paused" if tr.paused else ""))
+            state, ok = f"Stimulus {n} of {len(tr.trials)}" + (" · paused" if tr.paused else ""), True
+        elif tr.varying:
+            state, ok = tr.summary.text(), tr.btn_run.isEnabled()
+            if ok and not (getattr(main, "backend", None) is not None and main.backend.running):
+                state, ok = "Press Start on the Record page first. " + state, False
+        else:
+            state, ok = main.simple_page.state() if hasattr(main, "simple_page") else ("Ready", True)
+        self.lamp.setText(f"<span style='color:{'#1e8e3e' if ok else t['error']}'>●</span> {state}")
+        n = tr.chk.n_trials if tr.varying and tr.chk is not None and tr.chk.ok else 0
+        tr.btn_run.setText(f"Run {n} stimuli" if n and not running else ("Running…" if running else "Run"))
 
     def _output_title(self) -> None:
         cfg = self.main.cfg
+        t = style.tokens(self._mode)
         mon = next((c for c in cfg.channels if c.physical == cfg.stim_monitor), None) if cfg.stim_monitor else None
         where = f"recorded on {mon.name}" if mon is not None else "not recorded"
-        self.out_fold.button.setText(f"Output   {cfg.stim_output}, {where}")
-        self.save_fold.button.setText(f"Save   “{self.trials.name.text()}”")
+        self.output_note.setText(f"Output {cfg.stim_output}, {where}, limit ±{cfg.stim_max_v:g} V · "
+                                 f"<a href='#' style='color:{t['focus']}'>change…</a>")
 
     def apply_theme(self, mode: str) -> None:
         self._mode = mode
@@ -535,7 +583,8 @@ class StimulusPage(QtWidgets.QWidget):
         self.setStyleSheet(f"QWidget#designSide {{ background: {t['ground']}; border-left: 1px solid {t['line']}; }}"
                            f"QPushButton#addSegment {{ color: {t['focus']}; font-weight: 600;"
                            f" border: 1px solid {t['focus']}; background: {t['selection']}; padding: 5px 14px; }}")
-        for lab in (self.note, self.pic_hint, self.summary_label):
+        self._output_title()
+        for lab in (self.pic_hint, self.summary_label):
             lab.setStyleSheet(f"color: {t['subtle']}")
         self.picture.apply_theme(mode)
         self.panel.apply_theme(mode)

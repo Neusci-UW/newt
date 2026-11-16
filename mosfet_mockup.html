@@ -1,0 +1,131 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>MOSFET switch mockup</title>
+<style>
+  body { font: 14px "IBM Plex Sans", system-ui, sans-serif; color: #1d2330; background: #f4f2ee; margin: 24px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px 20px; max-width: 1080px; box-shadow: 0 1px 3px #0002; }
+  .chips { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .chip { border: 1px solid #c9c4ba; border-radius: 6px; padding: 4px 12px; background: #fff; }
+  .chip.on { background: #1d2330; color: #fff; border-color: #1d2330; }
+  .new { outline: 2px dashed #d08a1c; outline-offset: 3px; }
+  .wrap { display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+  .box { border: 1px solid #e6e2da; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+  .box h4 { margin: 0 0 8px; font-size: 13px; color: #6b6f78; font-weight: 600; }
+  .row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; margin: 6px 0; }
+  .row input, .row select { font: inherit; padding: 2px 6px; }
+  .note { color: #6b6f78; font-size: 13px; margin-top: 10px; max-width: 760px; }
+  .state { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .state.on { background: #e3f1e4; color: #2e7d32; } .state.off { background: #eee; color: #6b6f78; }
+</style></head><body>
+<div class="card">
+  <div class="chips">
+    <span class="chip">Select</span><span class="chip">Input voltage</span><span class="chip">Resistor</span>
+    <span class="chip">Capacitor</span><span class="chip on new">Switch</span><span class="chip">Wire</span><span class="chip">Probe</span>
+  </div>
+  <div class="wrap">
+  <svg viewBox="0 0 700 380" width="100%" font-family="IBM Plex Sans, sans-serif" font-size="11">
+    <rect width="700" height="380" fill="#faf8f4" rx="6"/>
+    <!-- rails -->
+    <line x1="30" y1="22" x2="670" y2="22" stroke="#d33" stroke-width="1"/>
+    <line x1="30" y1="42" x2="670" y2="42" stroke="#33a" stroke-width="1"/>
+    <text x="14" y="26" fill="#d33">+</text><text x="14" y="46" fill="#33a">−</text>
+    <g fill="#cfc9be" id="holes"></g>
+    <!-- stimulator to gate -->
+    <g stroke="#7c4dff" stroke-width="2.2" fill="none">
+      <line x1="140" y1="42" x2="140" y2="110"/>
+      <line x1="140" y1="110" x2="140" y2="200"/>
+      <circle cx="140" cy="155" r="10" fill="#faf8f4"/>
+      <polyline points="134,158 138,158 138,152 142,152 142,158 146,158"/>
+    </g>
+    <text x="150" y="146" fill="#6b6f78">+</text>
+    <line x1="140" y1="200" x2="300" y2="200" stroke="#2e7d32" stroke-width="2.6"/>
+    <!-- battery -> resistor -> drain -->
+    <g stroke="#7c4dff" stroke-width="2.2" fill="none">
+      <line x1="460" y1="42" x2="460" y2="22"/>
+    </g>
+    <g stroke="#b87a1e" stroke-width="2.2" fill="none">
+      <line x1="460" y1="22" x2="460" y2="0" stroke="none"/>
+      <line x1="520" y1="22" x2="520" y2="90"/>
+      <polyline points="520,90 515,96 525,102 515,108 525,114 515,120 520,126"/>
+      <line x1="520" y1="126" x2="520" y2="160"/>
+    </g>
+    <text x="530" y="112" fill="#b87a1e">1 kΩ load</text>
+    <line x1="520" y1="160" x2="280" y2="160" stroke="#2e7d32" stroke-width="2.6"/>
+    <!-- source to ground -->
+    <line x1="320" y1="240" x2="320" y2="42" stroke="#2e7d32" stroke-width="2.6" stroke-dasharray="0" opacity="0"/>
+    <line x1="320" y1="200" x2="380" y2="200" stroke="none"/>
+    <polyline points="320,200 360,200 360,42" stroke="#2e7d32" stroke-width="2.6" fill="none"/>
+
+    <!-- MOSFET part (new): legs in 3 adjacent holes, G-D-S -->
+    <g class="new-part">
+      <rect x="262" y="96" width="76" height="76" rx="6" fill="#fff4e3" stroke="#d08a1c" stroke-dasharray="4 3"/>
+      <g stroke="#c2185b" stroke-width="2.2" fill="none" stroke-linecap="round">
+        <!-- leg stubs to holes -->
+        <line x1="280" y1="160" x2="280" y2="150"/>
+        <line x1="300" y1="200" x2="300" y2="134"/>
+        <line x1="320" y1="200" x2="320" y2="150"/>
+        <!-- symbol -->
+        <line x1="290" y1="112" x2="290" y2="140"/>        <!-- gate plate -->
+        <line x1="300" y1="134" x2="290" y2="134" stroke="none"/>
+        <line x1="296" y1="108" x2="296" y2="116" stroke-width="3"/>
+        <line x1="296" y1="120" x2="296" y2="128" stroke-width="3"/>
+        <line x1="296" y1="132" x2="296" y2="140" stroke-width="3"/>
+        <polyline points="296,112 320,112 320,150"/>
+        <polyline points="296,136 320,136"/>
+        <polyline points="296,124 308,124"/>
+        <polygon points="300,124 306,120 306,128" fill="#c2185b"/>
+      </g>
+      <line x1="280" y1="150" x2="280" y2="160" stroke="#c2185b" stroke-width="2.2"/>
+      <polyline points="280,150 280,126 290,126" stroke="#c2185b" stroke-width="2.2" fill="none"/>
+      <!-- channel glow when on -->
+      <line x1="296" y1="106" x2="296" y2="142" stroke="#2e7d32" stroke-width="8" opacity=".25"/>
+      <text x="270" y="92" fill="#c2185b" font-weight="600">MOSFET · on</text>
+      <text x="266" y="168" fill="#6b6f78">G</text>
+      <text x="324" y="108" fill="#6b6f78">D</text>
+      <text x="324" y="160" fill="#6b6f78">S</text>
+    </g>
+
+    <!-- probe on drain -->
+    <circle cx="420" cy="160" r="7" fill="#fff" stroke="#e8710a" stroke-width="2.2"/>
+    <circle cx="420" cy="160" r="2.5" fill="#e8710a"/>
+    <text x="430" y="150" fill="#e8710a">AI0</text>
+
+    <text x="30" y="300" fill="#6b6f78" font-size="12">Example: the stimulator drives the gate; when the pulse is above the threshold, the</text>
+    <text x="30" y="318" fill="#6b6f78" font-size="12">MOSFET connects drain to source and the load pulls the drain probe down to ground.</text>
+    <text x="30" y="345" fill="#d08a1c" font-size="12">Dashed orange = new. Green glow on the channel shows it's on (redrawn live while recording).</text>
+  </svg>
+  <div>
+    <div class="box new">
+      <h4>Selected part</h4>
+      <b>Switch</b> <span class="state on">closed</span>
+      <div class="row"><span>Flipped by</span><select><option>Gate voltage (MOSFET)</option><option>Hand (toggle)</option></select></div>
+      <div class="row"><span>Type</span><select><option>N-channel</option><option>P-channel</option></select></div>
+      <div class="row"><span>Threshold V<sub>th</sub></span><input value="2.0 V"></div>
+      <div class="row"><span>R<sub>on</sub></span><input value="1 Ω"></div>
+      <div class="note">Closes when the gate is more than V<sub>th</sub> above the source (N-channel). Closed, it's a small resistor; open, no connection. No current flows into the gate.</div>
+    </div>
+    <div class="box new">
+      <h4>Selected part · Hand (toggle) mode</h4>
+      <b>Switch</b> <span class="state off">open</span>
+      <div class="row"><span>Flipped by</span><select><option>Hand (toggle)</option><option>Gate voltage (MOSFET)</option></select></div>
+      <div class="row"><span>State</span><span><button>Close it</button></span></div>
+      <div class="note">Two legs only; the gate leg goes away. Double-click the switch on the board to flip it too, even while recording.</div>
+    </div>
+    <svg viewBox="0 0 280 60" width="100%" class="new"><rect width="280" height="60" fill="#faf8f4" rx="6"/>
+      <g stroke="#c2185b" stroke-width="2.2" fill="none" stroke-linecap="round">
+        <line x1="30" y1="40" x2="110" y2="40"/><line x1="110" y1="40" x2="160" y2="20"/><line x1="170" y1="40" x2="250" y2="40"/>
+      </g><circle cx="110" cy="40" r="3" fill="#c2185b"/><circle cx="170" cy="40" r="3" fill="#c2185b"/>
+      <text x="100" y="56" font-size="11" fill="#6b6f78">toggle, drawn open</text></svg>
+    <div class="box">
+      <h4>Placing it</h4>
+      Drag it onto the board: its legs sit in three holes side by side, gate · drain · source, like a real TO-220 part. Drag a leg to move just that leg.
+    </div>
+  </div>
+  </div>
+  <p class="note"><b>Model:</b> an ideal switch, not a transistor curve. Each sample the sim checks V<sub>GS</sub>; if it crosses V<sub>th</sub>, drain–source flips between R<sub>on</sub> and open. Capacitors keep their charge across the flip, so a MOSFET can discharge a capacitor on a pulse.</p>
+</div>
+<script>
+  const g = document.getElementById('holes');
+  for (const y of [60,80,100,120,140,160,180,200,220,240]) for (let x = 40; x <= 660; x += 20)
+    g.insertAdjacentHTML('beforeend', `<circle cx="${x}" cy="${y}" r="2"/>`);
+</script>
+</body></html>

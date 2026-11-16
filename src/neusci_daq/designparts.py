@@ -176,6 +176,21 @@ def segment_spans(s: stimmod.Stimulus, rate: float) -> list[tuple[int, int]]:
     return out
 
 
+# Trial colors: a continuous map from the first trial to the last (dark blue, teal,
+# amber, red-orange), readable on light and dark backgrounds.
+TRIAL_STOPS = ((0.0, (40, 70, 190)), (0.35, (16, 150, 150)), (0.7, (225, 160, 30)), (1.0, (215, 70, 40)))
+
+
+def trial_color(f: float) -> QtGui.QColor:
+    """The color for a trial at fraction f (0 = the first, 1 = the last)."""
+    f = min(1.0, max(0.0, f))
+    for (a, ca), (b, cb) in zip(TRIAL_STOPS, TRIAL_STOPS[1:]):
+        if f <= b:
+            u = (f - a) / (b - a)
+            return QtGui.QColor(*(round(x + (y - x) * u) for x, y in zip(ca, cb)))
+    return QtGui.QColor(*TRIAL_STOPS[-1][1])
+
+
 class StimPicture(QtWidgets.QWidget):
     picked = QtCore.Signal(int)
 
@@ -184,6 +199,8 @@ class StimPicture(QtWidgets.QWidget):
         self.setMinimumHeight(230)
         self.setMouseTracking(True)
         self.waves: list[np.ndarray] = []      # every trial's waveform; the shown one last
+        self.trial_ids: list[int] = []         # which trial each wave is (0 = the first)
+        self.n_trials = 1
         self.spans: list[tuple[int, int]] = []
         self.names: list[str] = []
         self.sel = -1
@@ -196,8 +213,10 @@ class StimPicture(QtWidgets.QWidget):
         self._hover = -1
         self.compact = False          # a small copy: just the traces, no letters, axis or numbers
 
-    def set_data(self, waves, spans, names, sel, dims, rate, units, k) -> None:
+    def set_data(self, waves, spans, names, sel, dims, rate, units, k, trial_ids=None, n_trials=1) -> None:
         self.waves, self.spans, self.names, self.sel, self.dims = waves, spans, names, sel, dims
+        self.trial_ids = list(trial_ids) if trial_ids is not None else [0] * len(waves)
+        self.n_trials = max(1, n_trials)
         self.rate, self.units, self.k = rate, units, k
         self.update()
 
@@ -314,15 +333,35 @@ class StimPicture(QtWidgets.QWidget):
                            f"{v * self.k:.3g} {self.units}")
         total_ms = n / self.rate * 1000
         if not self.compact:
-            p.drawText(QtCore.QRectF(R - 120, B + 20, 120, 16), QtCore.Qt.AlignmentFlag.AlignRight, f"{total_ms:.4g} ms")
-        # every trial faded, the shown one bold
-        wc = QtGui.QColor(c["wave"])
+            p.drawText(QtCore.QRectF(R - 120, B + 4, 120, 16), QtCore.Qt.AlignmentFlag.AlignRight, f"{total_ms:.4g} ms")
+        # every trial in its color along the map, the shown one last and thickest
+        many = self.n_trials > 1
         for j, w in enumerate(self.waves):
             last = j == len(self.waves) - 1
-            col = QtGui.QColor(wc)
-            col.setAlpha(255 if last else 55)
-            p.setPen(QtGui.QPen(col, 2.2 if last else 1))
+            tid = self.trial_ids[j] if j < len(self.trial_ids) else 0
+            col = trial_color(tid / (self.n_trials - 1)) if many else QtGui.QColor(c["wave"])
+            if many and not last:
+                col.setAlpha(170)
+            pen = QtGui.QPen(col, (3.2 if last else 2.0) if not self.compact else (2.2 if last else 1.4))
+            pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
             p.drawPath(self._trace(w, X, Y, L, R))
+        # the map's key: trial 1 → n
+        if many and not self.compact:
+            kw, kh = 110, 8
+            x0, y0 = R - kw - 40, B + 24
+            grad = QtGui.QLinearGradient(x0, 0, x0 + kw, 0)
+            for f, _ in TRIAL_STOPS:
+                grad.setColorAt(f, trial_color(f))
+            p.setPen(QtCore.Qt.PenStyle.NoPen)
+            p.setBrush(QtGui.QBrush(grad))
+            p.drawRoundedRect(QtCore.QRectF(x0, y0, kw, kh), 3, 3)
+            p.setFont(small)
+            p.setPen(QtGui.QColor(c["text"]))
+            p.drawText(QtCore.QRectF(x0 - 60, y0 - 4, 56, 16),
+                       QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, "Trial 1")
+            p.drawText(QtCore.QRectF(x0 + kw + 4, y0 - 4, 40, 16),
+                       QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter, str(self.n_trials))
         # the picked segment's numbers, in orange, above it
         if 0 <= self.sel < len(self.spans) and self.dims:
             a, b = self.spans[self.sel]

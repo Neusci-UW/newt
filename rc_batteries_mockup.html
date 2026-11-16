@@ -1,0 +1,85 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Two-battery mode mockup</title>
+<style>
+  body { font: 14px "IBM Plex Sans", system-ui, sans-serif; color: #1d2330; background: #f4f2ee; margin: 24px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px 20px; max-width: 1000px; box-shadow: 0 1px 3px #0002; }
+  .chips { display: flex; gap: 8px; margin-bottom: 12px; }
+  .chip { border: 1px solid #c9c4ba; border-radius: 16px; padding: 4px 12px; background: #fff; }
+  .chip.on { background: #1d2330; color: #fff; border-color: #1d2330; }
+  .new { outline: 2px dashed #d08a1c; outline-offset: 3px; }
+  .row { display: grid; grid-template-columns: 70px 1fr 110px; gap: 10px; align-items: center; margin: 6px 0; }
+  .group { border-top: 1px solid #e6e2da; padding: 6px 0; }
+  .note { color: #6b6f78; font-size: 13px; margin-top: 10px; max-width: 760px; }
+  .wrap { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+  input[type=range] { width: 100%; }
+</style></head><body>
+<div class="card">
+  <div class="chips">
+    <span class="chip">Current injection</span>
+    <span class="chip on new">Two batteries</span>
+    <span class="chip">Conductance change (Na⁺ channels)</span>
+  </div>
+  <div class="wrap">
+  <svg viewBox="0 0 780 470" width="100%" font-family="IBM Plex Sans, sans-serif">
+    <rect width="780" height="470" fill="#fff"/>
+    <!-- rails and branches -->
+    <g stroke="#1d2330" stroke-width="2.2" fill="none">
+      <line x1="140" y1="70" x2="640" y2="70"/><line x1="140" y1="410" x2="640" y2="410"/>
+      <line x1="140" y1="70" x2="140" y2="410"/><line x1="400" y1="70" x2="400" y2="410"/><line x1="640" y1="70" x2="640" y2="410"/>
+    </g>
+    <text x="40" y="74" fill="#6b6f78" font-size="13" font-weight="600">ground</text>
+    <!-- branch 1: switch, resistor, battery -->
+    <rect x="137" y="150" width="6" height="210" fill="#fff"/>
+    <circle cx="140" cy="312" r="3.5" fill="#1d2330"/><circle cx="140" cy="352" r="3.5" fill="#1d2330"/>
+    <line x1="140" y1="352" x2="116" y2="318" stroke="#1d2330" stroke-width="2.6" stroke-linecap="round"/>
+    <line x1="140" y1="150" x2="140" y2="162" stroke="#1d2330" stroke-width="2.2"/>
+    <line x1="140" y1="174" x2="140" y2="312" stroke="#1d2330" stroke-width="2.2"/>
+    <line x1="140" y1="352" x2="140" y2="360" stroke="#1d2330" stroke-width="2.2"/>
+    <rect x="137" y="205" width="6" height="70" fill="#fff"/>
+    <path d="M140 210 L151 215 L129 225 L151 235 L129 245 L151 255 L129 265 L140 270" stroke="#1d2330" stroke-width="2.2" fill="none"/>
+    <line x1="120" y1="174" x2="160" y2="174" stroke="#1d2330" stroke-width="2.4"/>
+    <line x1="130" y1="162" x2="150" y2="162" stroke="#1d2330" stroke-width="4.5"/>
+    <text x="170" y="336" font-size="13">switch open</text>
+    <text x="166" y="244" font-size="13">R<tspan baseline-shift="sub" font-size="10">1</tspan> 1.4 kΩ·cm²</text>
+    <text x="170" y="173" font-size="13">E<tspan baseline-shift="sub" font-size="10">1</tspan> +60</text>
+    <text x="170" y="126" font-size="12.5" font-family="IBM Plex Mono">I<tspan baseline-shift="sub" font-size="9">1</tspan> 0.0</text>
+    <!-- branch 2: resistor, battery, always connected -->
+    <rect x="397" y="150" width="6" height="125" fill="#fff"/>
+    <line x1="400" y1="150" x2="400" y2="162" stroke="#1d2330" stroke-width="2.2"/>
+    <line x1="400" y1="174" x2="400" y2="210" stroke="#1d2330" stroke-width="2.2"/>
+    <path d="M400 210 L411 215 L389 225 L411 235 L389 245 L411 255 L389 265 L400 270" stroke="#1d2330" stroke-width="2.2" fill="none"/>
+    <line x1="400" y1="270" x2="400" y2="275" stroke="#1d2330" stroke-width="2.2"/>
+    <line x1="380" y1="162" x2="420" y2="162" stroke="#1d2330" stroke-width="2.4"/>
+    <line x1="390" y1="174" x2="410" y2="174" stroke="#1d2330" stroke-width="4.5"/>
+    <text x="426" y="244" font-size="13">R<tspan baseline-shift="sub" font-size="10">2</tspan> 2.0 kΩ·cm²</text>
+    <text x="426" y="173" font-size="13">E<tspan baseline-shift="sub" font-size="10">2</tspan> −86</text>
+    <text x="426" y="126" font-size="12.5" font-family="IBM Plex Mono">I<tspan baseline-shift="sub" font-size="9">2</tspan> 0.0</text>
+    <!-- capacitor -->
+    <rect x="637" y="230" width="6" height="20" fill="#fff"/>
+    <line x1="600" y1="234" x2="680" y2="234" stroke="#1d2330" stroke-width="3"/>
+    <line x1="600" y1="246" x2="680" y2="246" stroke="#1d2330" stroke-width="3"/>
+    <!-- voltmeter -->
+    <g stroke="#6b6f78" stroke-width="1.2" stroke-dasharray="3 4" fill="none">
+      <line x1="640" y1="410" x2="740" y2="410"/><line x1="640" y1="70" x2="740" y2="70"/>
+      <line x1="740" y1="410" x2="740" y2="262"/><line x1="740" y1="218" x2="740" y2="70"/></g>
+    <circle cx="740" cy="240" r="22" fill="#fff" stroke="#6b6f78" stroke-width="1.2"/>
+    <text x="740" y="245" text-anchor="middle" fill="#6b6f78" font-weight="600" font-size="15">V</text>
+    <text x="740" y="208" text-anchor="middle" font-family="IBM Plex Mono" font-size="13" font-weight="600">−86</text>
+  </svg>
+  <div>
+    <div class="group new">
+      <div class="row"><span>R<sub>1</sub></span><input type="range"><span>1.4 kΩ·cm²</span></div>
+      <div class="row"><span>E<sub>1</sub></span><input type="range"><span>+60 mV</span></div>
+    </div>
+    <div class="group new">
+      <div class="row"><span>R<sub>2</sub></span><input type="range"><span>2.0 kΩ·cm²</span></div>
+      <div class="row"><span>E<sub>2</sub></span><input type="range"><span>−86 mV</span></div>
+    </div>
+    <div class="group">
+      <div class="row"><span>C</span><input type="range"><span>1.0 µF/cm²</span></div>
+    </div>
+  </div>
+  </div>
+  <p class="note"><b>Dashed = new.</b> No current source, no ion or cell labels. Battery 1 has a switch; battery 2 is always connected. Each battery has its own R and E. With the switch open, V sits at E<sub>2</sub>. Closing it moves V toward (E<sub>1</sub>/R<sub>1</sub> + E<sub>2</sub>/R<sub>2</sub>) / (1/R<sub>1</sub> + 1/R<sub>2</sub>), the value nearer the battery with the smaller R, with τ = C·(R<sub>1</sub> ∥ R<sub>2</sub>). Same charts and readouts as the other modes, with I<sub>1</sub> and I<sub>2</sub> plotted separately.</p>
+</div>
+</body></html>

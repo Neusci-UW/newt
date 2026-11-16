@@ -1,0 +1,65 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Breadboard key mockup</title>
+<style>
+  body { font: 13px -apple-system, "Helvetica Neue", sans-serif; color: #1d2330; background: #ececec; margin: 24px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .col { width: 290px; display: flex; flex-direction: column; gap: 10px; }
+  .box { background: #fff; border: 1px solid #c8c8c8; border-radius: 6px; padding: 10px 12px; }
+  .box h4 { margin: 0 0 8px; font-size: 12.5px; color: #444; }
+  .new { outline: 2px dashed #d08a1c; outline-offset: 3px; }
+  .f { display: grid; grid-template-columns: 90px 1fr; gap: 6px; margin: 4px 0; }
+  .v { border: 1px solid #bbb; border-radius: 4px; padding: 1px 6px; }
+  .legs { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+  .legs li { margin: 4px 0; display: grid; grid-template-columns: 22px 1fr; gap: 4px; }
+  .tag { display: inline-block; width: 18px; height: 18px; border-radius: 9px; background: #1d2330; color: #fff; font-size: 11px; text-align: center; line-height: 18px; font-weight: 600; }
+  .what { color: #555; font-size: 12.5px; margin-top: 6px; }
+  .cap { width: 100%; color: #666; font-size: 12.5px; max-width: 920px; }
+</style></head><body>
+
+<div class="col">
+  <div class="box"><h4>Selected part</h4><b>LED</b> (+ c7, − c11)
+    <div class="f"><span>Colour</span><span class="v">Red ▾</span></div>
+    <div class="f"><span>Forward V</span><span class="v">2.0 V</span></div>
+    <div class="f"><span>Max current</span><span class="v">20 mA</span></div>
+  </div>
+  <div class="box new"><h4>Key: LED</h4>
+    <svg viewBox="0 0 260 90" width="100%">
+      <circle cx="30" cy="45" r="4" fill="#e53935"/><circle cx="230" cy="45" r="4" fill="#e53935"/>
+      <line x1="30" y1="45" x2="112" y2="45" stroke="#e53935" stroke-width="2.4"/><line x1="148" y1="45" x2="230" y2="45" stroke="#e53935" stroke-width="2.4"/>
+      <polygon points="112,30 112,60 142,45" fill="#e53935"/><line x1="144" y1="30" x2="144" y2="60" stroke="#e53935" stroke-width="3"/>
+      <line x1="126" y1="26" x2="134" y2="14" stroke="#e53935" stroke-width="1.5"/><line x1="134" y1="28" x2="142" y2="16" stroke="#e53935" stroke-width="1.5"/>
+      <text x="30" y="72" text-anchor="middle" font-size="12" font-weight="600">+</text><text x="230" y="72" text-anchor="middle" font-size="12" font-weight="600">−</text>
+      <text x="30" y="28" text-anchor="middle" font-size="11" fill="#555">anode</text><text x="230" y="28" text-anchor="middle" font-size="11" fill="#555">cathode</text>
+      <path d="M70 80 L190 80" stroke="#888" stroke-width="1" marker-end="url(#ar)"/><text x="130" y="76" text-anchor="middle" font-size="10" fill="#888">current</text>
+      <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8z" fill="#888"/></marker></defs>
+    </svg>
+    <ul class="legs">
+      <li><span class="tag">+</span><span><b>Anode</b> (first hole you click): toward the higher voltage.</span></li>
+      <li><span class="tag">−</span><span><b>Cathode</b>: toward ground.</span></li>
+    </ul>
+    <div class="what">Lights when + is more than its forward voltage above −; brighter with more current. Put a resistor in series to keep the current under the maximum.</div>
+  </div>
+</div>
+
+<div class="col">
+  <div class="box"><h4>Selected part</h4>Click a part to select it, or pick a part above to place one.</div>
+  <div class="box new"><h4>Key: Switch (MOSFET), the tool you're placing</h4>
+    <svg viewBox="0 0 260 110" width="100%">
+      <circle cx="30" cy="40" r="4" fill="#c2185b"/><circle cx="230" cy="40" r="4" fill="#c2185b"/><circle cx="130" cy="95" r="4" fill="#c2185b"/>
+      <line x1="30" y1="40" x2="100" y2="40" stroke="#c2185b" stroke-width="2.2"/><line x1="160" y1="40" x2="230" y2="40" stroke="#c2185b" stroke-width="2.2"/>
+      <line x1="100" y1="40" x2="100" y2="52" stroke="#c2185b" stroke-width="2.2"/><line x1="160" y1="40" x2="160" y2="52" stroke="#c2185b" stroke-width="2.2"/>
+      <line x1="100" y1="52" x2="160" y2="52" stroke="#c2185b" stroke-width="3" stroke-dasharray="14 6"/>
+      <line x1="102" y1="62" x2="158" y2="62" stroke="#c2185b" stroke-width="2.2"/><line x1="130" y1="62" x2="130" y2="95" stroke="#c2185b" stroke-width="2.2"/>
+      <text x="30" y="24" text-anchor="middle" font-size="11" fill="#555">drain</text><text x="230" y="24" text-anchor="middle" font-size="11" fill="#555">source</text><text x="150" y="99" font-size="11" fill="#555">gate</text>
+      <text x="30" y="60" text-anchor="middle" font-size="12" font-weight="600">1</text><text x="230" y="60" text-anchor="middle" font-size="12" font-weight="600">2</text><text x="118" y="99" font-size="12" font-weight="600">G</text>
+    </svg>
+    <ul class="legs">
+      <li><span class="tag">1</span><span><b>Drain</b>: first hole you click.</span></li>
+      <li><span class="tag">2</span><span><b>Source</b>: second hole; the gate is measured against it.</span></li>
+      <li><span class="tag">G</span><span><b>Gate</b>: placed beside the middle; draws no current.</span></li>
+    </ul>
+    <div class="what">Closes drain to source while the gate is more than V<sub>th</sub> above the source (n-channel) or below it (p-channel).</div>
+  </div>
+</div>
+
+<p class="cap"><b>Dashed = new.</b> A "Key" box under Selected part on the right. It shows the selected part; with nothing selected, the tool you're about to place (and with Select and nothing selected, it's hidden). Each key has a small drawing in the board's colours with every leg named, a line per leg saying which hole it goes in and what it does, and one sentence on what the part does. Every part gets one: input voltage (+/−), resistor and capacitor (either way round), switch (hand or MOSFET), wire, probe, ground, LED, diode, push button, potentiometer (end, wiper, end) and inductor.</p>
+</body></html>

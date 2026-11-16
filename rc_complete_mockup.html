@@ -1,0 +1,162 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Complete membrane mockup</title>
+<style>
+  body { font: 14px "IBM Plex Sans", system-ui, sans-serif; color: #1d2330; background: #f4f2ee; margin: 24px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px 20px; max-width: 1080px; box-shadow: 0 1px 3px #0002; margin-bottom: 24px; }
+  h3 { margin: 0 0 10px; font-size: 15px; }
+  .chips { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .chip { border: 1px solid #c9c4ba; border-radius: 16px; padding: 4px 12px; background: #fff; }
+  .chip.on { background: #1d2330; color: #fff; border-color: #1d2330; }
+  .new { outline: 2px dashed #d08a1c; outline-offset: 3px; }
+  .row { display: grid; grid-template-columns: 96px 1fr 110px; gap: 10px; align-items: center; margin: 5px 0; }
+  .group { border-top: 1px solid #e6e2da; padding: 6px 0; }
+  .na { color: #d07a1f; } .k { color: #6b3fb8; } .cl { color: #2e8b57; } .mx { color: #1d2330; }
+  .note { color: #6b6f78; font-size: 13px; margin-top: 10px; max-width: 820px; }
+  .wrap { display: grid; grid-template-columns: 1fr 330px; gap: 20px; }
+  .hint { grid-column: 2 / 4; color: #6b6f78; font-size: 12px; margin-top: -4px; }
+  input[type=range] { width: 100%; }
+  .btn { border: 1px solid #c9c4ba; border-radius: 6px; padding: 4px 10px; background: #fff; display: inline-block; margin-right: 6px; }
+</style></head><body>
+
+<div class="card">
+  <h3>1 · The circuit</h3>
+  <div class="chips">
+    <span class="chip">Current injection</span>
+    <span class="chip">Two batteries</span>
+    <span class="chip">Conductance change (Na⁺ channels)</span>
+    <span class="chip on new">Complete membrane</span>
+  </div>
+  <div class="wrap">
+  <svg viewBox="0 0 780 470" width="100%" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <rect width="780" height="470" fill="#fff"/>
+    <rect x="14" y="18" width="170" height="32" rx="6" fill="#1d2330"/><text x="99" y="40" fill="#fff" font-weight="700" font-size="17" text-anchor="middle">EXTRACELLULAR</text>
+    <rect x="14" y="430" width="160" height="32" rx="6" fill="#1d2330"/><text x="94" y="452" fill="#fff" font-weight="700" font-size="17" text-anchor="middle">INTRACELLULAR</text>
+    <!-- rails: mixed channel forks into two sub-branches under one switch -->
+    <g stroke="#1d2330" stroke-width="2.2" fill="none">
+      <line x1="50" y1="70" x2="660" y2="70"/><line x1="90" y1="410" x2="660" y2="410"/>
+      <!-- mixed: common switch then fork -->
+      <line x1="90" y1="410" x2="90" y2="350"/><line x1="90" y1="310" x2="90" y2="290"/>
+      <line x1="50" y1="290" x2="130" y2="290"/>
+      <line x1="50" y1="290" x2="50" y2="70"/><line x1="130" y1="290" x2="130" y2="70"/>
+      <line x1="270" y1="70" x2="270" y2="410"/><line x1="400" y1="70" x2="400" y2="410"/>
+      <line x1="530" y1="70" x2="530" y2="410"/><line x1="660" y1="70" x2="660" y2="410"/>
+    </g>
+    <!-- switch -->
+    <circle cx="90" cy="310" r="3.5" fill="#1d2330"/><circle cx="90" cy="350" r="3.5" fill="#1d2330"/>
+    <line x1="90" y1="350" x2="66" y2="316" stroke="#1d2330" stroke-width="2.6" stroke-linecap="round"/>
+    <text x="104" y="336" font-size="12.5">mixed channels closed</text>
+    <!-- resistor+battery helper -->
+    <defs>
+      <g id="res"><rect x="-3" y="-32" width="6" height="64" fill="#fff"/><path d="M0 -30 L11 -25 L-11 -15 L11 -5 L-11 5 L11 15 L-11 25 L0 30" stroke-width="2.2" fill="none"/></g>
+      <g id="batUp"><rect x="-3" y="-8" width="6" height="16" fill="#fff"/><line x1="-18" y1="-6" x2="18" y2="-6" stroke-width="2.4"/><line x1="-9" y1="6" x2="9" y2="6" stroke-width="4.5"/></g>
+      <g id="batDn"><rect x="-3" y="-8" width="6" height="16" fill="#fff"/><line x1="-18" y1="6" x2="18" y2="6" stroke-width="2.4"/><line x1="-9" y1="-6" x2="9" y2="-6" stroke-width="4.5"/></g>
+    </defs>
+    <!-- mixed Na part / K part -->
+    <use href="#res" x="50" y="210" stroke="#d07a1f"/><use href="#batDn" x="50" y="140" stroke="#d07a1f"/>
+    <use href="#res" x="130" y="210" stroke="#6b3fb8"/><use href="#batUp" x="130" y="140" stroke="#6b3fb8"/>
+    <text x="22" y="262" class="na" fill="#d07a1f">g<tspan baseline-shift="sub" font-size="9">mix,Na</tspan> 0.35</text>
+    <text x="104" y="262" fill="#6b3fb8">g<tspan baseline-shift="sub" font-size="9">mix,K</tspan> 0.35</text>
+    <text x="150" y="144" fill="#6b3fb8">E<tspan baseline-shift="sub" font-size="9">K</tspan></text>
+    <text x="10" y="120" fill="#d07a1f">E<tspan baseline-shift="sub" font-size="9">Na</tspan></text>
+    <!-- leaks -->
+    <use href="#res" x="270" y="240" stroke="#d07a1f"/><use href="#batDn" x="270" y="168" stroke="#d07a1f"/>
+    <text x="290" y="244" fill="#d07a1f">g<tspan baseline-shift="sub" font-size="9">Na</tspan> 0.03</text>
+    <text x="290" y="172" fill="#d07a1f">E<tspan baseline-shift="sub" font-size="9">Na</tspan> +60</text>
+    <use href="#res" x="400" y="240" stroke="#6b3fb8"/><use href="#batUp" x="400" y="168" stroke="#6b3fb8"/>
+    <text x="420" y="244" fill="#6b3fb8">g<tspan baseline-shift="sub" font-size="9">K</tspan> 0.50</text>
+    <text x="420" y="172" fill="#6b3fb8">E<tspan baseline-shift="sub" font-size="9">K</tspan> −86</text>
+    <use href="#res" x="530" y="240" stroke="#2e8b57"/><use href="#batUp" x="530" y="168" stroke="#2e8b57"/>
+    <text x="550" y="244" fill="#2e8b57">g<tspan baseline-shift="sub" font-size="9">Cl</tspan> 0.10</text>
+    <text x="550" y="172" fill="#2e8b57">E<tspan baseline-shift="sub" font-size="9">Cl</tspan> −70</text>
+    <text x="236" y="380" font-size="11.5" fill="#6b6f78">leak channels, always open</text>
+    <!-- capacitor -->
+    <rect x="657" y="230" width="6" height="20" fill="#fff"/>
+    <line x1="625" y1="234" x2="695" y2="234" stroke="#1d2330" stroke-width="3"/>
+    <line x1="625" y1="246" x2="695" y2="246" stroke="#1d2330" stroke-width="3"/>
+    <!-- voltmeter -->
+    <g stroke="#6b6f78" stroke-width="1.2" stroke-dasharray="3 4" fill="none">
+      <line x1="660" y1="410" x2="745" y2="410"/><line x1="660" y1="70" x2="745" y2="70"/>
+      <line x1="745" y1="410" x2="745" y2="262"/><line x1="745" y1="218" x2="745" y2="70"/></g>
+    <circle cx="745" cy="240" r="22" fill="#fff" stroke="#6b6f78" stroke-width="1.2"/>
+    <text x="745" y="245" text-anchor="middle" fill="#6b6f78" font-weight="600" font-size="15">V</text>
+    <text x="745" y="208" text-anchor="middle" font-family="IBM Plex Mono" font-size="13" font-weight="600">−77</text>
+  </svg>
+  <div>
+    <div class="group new">
+      <div class="row mx"><span>mixed g<sub>Na</sub></span><input type="range"><span>0.35 mS/cm²</span></div>
+      <div class="row mx"><span>mixed g<sub>K</sub></span><input type="range"><span>0.35 mS/cm²</span></div>
+      <span class="hint">one switch opens both parts of the mixed channel</span>
+    </div>
+    <div class="group">
+      <div class="row na"><span>leak g<sub>Na</sub></span><input type="range"><span>0.03 mS/cm²</span></div>
+      <div class="row na"><span>E<sub>Na</sub></span><input type="range"><span>+60 mV</span></div>
+    </div>
+    <div class="group">
+      <div class="row k"><span>leak g<sub>K</sub></span><input type="range"><span>0.50 mS/cm²</span></div>
+      <div class="row k"><span>E<sub>K</sub></span><input type="range"><span>−86 mV</span></div>
+    </div>
+    <div class="group new">
+      <div class="row cl"><span>leak g<sub>Cl</sub></span><input type="range"><span>0.10 mS/cm²</span></div>
+      <div class="row cl"><span>E<sub>Cl</sub></span><input type="range"><span>−70 mV</span></div>
+    </div>
+    <div class="group">
+      <div class="row"><span>C</span><input type="range"><span>1.0 µF/cm²</span></div>
+    </div>
+  </div>
+  </div>
+  <p class="note"><b>Dashed = new.</b> The switched "current source" is a mixed cation channel: one switch connects a Na⁺ part and a K⁺ part together. Each part uses the same E<sub>Na</sub> / E<sub>K</sub> battery as its leak, so the mixed channel pulls V toward a value between them (about −13 mV with equal parts). Leak Na⁺, K⁺ and Cl⁻ are always on: rest ≈ −77 mV; switch closed → V<sub>∞</sub> ≈ −43 mV. Current chart: I<sub>mix</sub> (Na⁺ + K⁺ parts), I<sub>Na</sub>, I<sub>K</sub>, I<sub>Cl</sub>, I<sub>C</sub>, dashed sum.</p>
+</div>
+
+<div class="card">
+  <h3>2 · The same thing, ion by ion</h3>
+  <div class="chips">
+    <span class="chip">Na⁺ channels</span>
+    <span class="chip on new">Complete membrane</span>
+  </div>
+  <div class="wrap">
+  <svg viewBox="0 0 780 360" width="100%" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <rect width="780" height="360" fill="#eef3f6"/>
+    <rect x="0" y="0" width="360" height="360" fill="#eaf2ec"/><text x="16" y="24" fill="#6b6f78" font-weight="600">OUTSIDE</text>
+    <text x="680" y="24" fill="#6b6f78" font-weight="600">INSIDE</text>
+    <rect x="360" y="0" width="40" height="360" fill="#d8cdb8"/>
+    <!-- pores -->
+    <g font-size="10.5" font-weight="600">
+      <rect x="360" y="40" width="40" height="18" fill="#fff" stroke="#1d2330" stroke-dasharray="3 2"/><text x="410" y="53">mixed (gated, Na⁺ + K⁺)</text>
+      <rect x="360" y="100" width="40" height="12" fill="#fff" stroke="#6b3fb8"/><text x="410" y="110" fill="#6b3fb8">K⁺ leak</text>
+      <rect x="360" y="160" width="40" height="18" fill="#fff" stroke="#1d2330" stroke-dasharray="3 2"/><text x="410" y="173">mixed (gated)</text>
+      <rect x="360" y="215" width="40" height="12" fill="#fff" stroke="#2e8b57"/><text x="410" y="225" fill="#2e8b57">Cl⁻ leak</text>
+      <rect x="360" y="270" width="40" height="12" fill="#fff" stroke="#d07a1f"/><text x="410" y="280" fill="#d07a1f">Na⁺ leak</text>
+    </g>
+    <!-- ions: outside many Na, Cl; inside many K -->
+    <g fill="#d07a1f"><circle cx="60" cy="70" r="6"/><circle cx="140" cy="120" r="6"/><circle cx="220" cy="80" r="6"/><circle cx="90" cy="200" r="6"/><circle cx="300" cy="160" r="6"/><circle cx="180" cy="260" r="6"/><circle cx="270" cy="310" r="6"/><circle cx="40" cy="300" r="6"/><circle cx="560" cy="300" r="6"/></g>
+    <g fill="#2e8b57"><circle cx="110" cy="40" r="6"/><circle cx="200" cy="170" r="6"/><circle cx="320" cy="240" r="6"/><circle cx="60" cy="140" r="6"/><circle cx="150" cy="320" r="6"/><circle cx="250" cy="220" r="6"/><circle cx="620" cy="130" r="6"/></g>
+    <g fill="#6b3fb8"><circle cx="480" cy="90" r="6"/><circle cx="560" cy="60" r="6"/><circle cx="650" cy="150" r="6"/><circle cx="520" cy="200" r="6"/><circle cx="700" cy="250" r="6"/><circle cx="600" cy="320" r="6"/><circle cx="740" cy="90" r="6"/><circle cx="460" cy="290" r="6"/><circle cx="120" cy="250" r="6"/></g>
+    <g fill="#9aa29e"><circle cx="500" cy="140" r="6"/><circle cx="680" cy="200" r="6"/><circle cx="590" cy="240" r="6"/><circle cx="720" cy="320" r="6"/></g>
+    <g font-size="12" font-weight="600">
+      <circle cx="30" cy="345" r="5" fill="#d07a1f"/><text x="40" y="349">Na⁺</text>
+      <circle cx="90" cy="345" r="5" fill="#6b3fb8"/><text x="100" y="349">K⁺</text>
+      <circle cx="140" cy="345" r="5" fill="#2e8b57"/><text x="150" y="349">Cl⁻ (new)</text>
+      <circle cx="230" cy="345" r="5" fill="#9aa29e"/><text x="240" y="349">A⁻ (fixed anions)</text>
+    </g>
+  </svg>
+  <div>
+    <span class="btn">Mixed channels ◯ closed</span><span class="btn">Pause</span><span class="btn">Reset ions</span>
+    <div class="group new" style="margin-top:10px">
+      <div class="row mx"><span>mixed</span><input type="range"><span>12</span></div>
+      <span class="hint">gated channels that pass both Na⁺ and K⁺: the switch</span>
+    </div>
+    <div class="group">
+      <div class="row k"><span>K⁺ leak</span><input type="range"><span>9</span></div>
+      <div class="row na"><span>Na⁺ leak</span><input type="range"><span>1</span></div>
+    </div>
+    <div class="group new">
+      <div class="row cl"><span>Cl⁻ leak</span><input type="range"><span>3</span></div>
+    </div>
+    <div class="group">
+      <div class="row"><span>Membrane C</span><input type="range"><span>11</span></div>
+    </div>
+  </div>
+  </div>
+  <p class="note"><b>Dashed = new.</b> A second mode in the particle model; today's Na⁺-channel mode stays as it is. Adds Cl⁻ ions (high outside, low inside) and Cl⁻ leak pores, a small Na⁺ leak, and gated mixed pores that let either Na⁺ or K⁺ through. The ion chart gets Cl⁻ and mixed-channel traffic; readouts gain E<sub>Cl</sub>, and GHK includes Cl⁻.</p>
+</div>
+</body></html>

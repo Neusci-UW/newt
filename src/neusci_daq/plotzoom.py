@@ -38,9 +38,9 @@ class WheelViewBox(pg.ViewBox):
         self.y_free = False                     # y set by hand (Max/Min, the scale buttons): may go past the data
 
     def _refresh_limits(self) -> None:
+        lim = self.state["limits"]
+        lim["xLimits"], lim["yLimits"] = [None, None], [None, None]    # none while live: old edges would cut Autoscale short
         if self.clamp_to_data:
-            lim = self.state["limits"]
-            lim["xLimits"], lim["yLimits"] = [None, None], [None, None]
             for axis, key in ((0, "xLimits"), (1, "yLimits")):
                 if axis == 1 and self.y_free:
                     continue

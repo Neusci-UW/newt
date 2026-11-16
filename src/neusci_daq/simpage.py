@@ -1,8 +1,8 @@
-"""The Neural network simulator page, under Data Simulation (only with --backend
-simulated): the network of cells the simulated backend records from, the synapses
-between them, and which cell each input records.
+"""The Neural network simulator page, under Data Simulation: the network of cells
+the simulated backend records from, the synapses between them, and which cell each input records.
 
-Changes apply straight away, while recording too, and Setup › Save channel setup
+Changes apply straight away, while recording too (with another input device, a
+banner says they're recorded only on Simulated cells), and Setup › Save channel setup
 writes them to the config's [simulated] section. See simulation.py for the model.
 """
 from __future__ import annotations
@@ -516,27 +516,41 @@ class SimPage(QtWidgets.QWidget):
         self._redraw()
 
 
-class SimOffPage(QtWidgets.QWidget):
-    """Data Simulation with a real input device: the simulators need the simulated
-    backend, so this says so and offers to switch."""
+class SimOffBanner(QtWidgets.QFrame):
+    """Over a simulator page while a real input device records: the settings can be
+    edited, but Acquisition records them only on Simulated cells."""
 
     def __init__(self, main):
         super().__init__()
         self.main = main
-        v = QtWidgets.QVBoxLayout(self)
-        v.setContentsMargins(24, 24, 24, 24)
-        v.setSpacing(12)
-        title = QtWidgets.QLabel("<b>The simulators record instead of a real input device</b>")
+        self.setObjectName("simOffBanner")
+        h = QtWidgets.QHBoxLayout(self)
+        h.setContentsMargins(12, 8, 12, 8)
         text = QtWidgets.QLabel(
-            "The Neural network simulator and the Breadboard simulator make the data Acquisition records, "
-            "in place of the DAQ or an audio input. To use them, switch the input device to Simulated cells "
-            "(Setup › Input device › Simulated cells). Your channel setup is remembered, so you can switch back.")
+            "Acquisition is recording from a real input device, so changes here are saved but not recorded. "
+            "Switch the input device to Simulated cells to record this. Your channel setup is remembered.")
         text.setWordWrap(True)
-        text.setMaximumWidth(720)
         btn = QtWidgets.QPushButton("Switch to Simulated cells")
         btn.setToolTip("Reopen NEWT on the simulated input device (stop recording first)")
         btn.clicked.connect(lambda: self.main.switch_input("simulated"))
-        v.addWidget(title)
-        v.addWidget(text)
-        v.addWidget(btn, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
-        v.addStretch(1)
+        h.addWidget(text, 1)
+        h.addWidget(btn, 0)
+        self.apply_theme(style.LIGHT)
+
+    def apply_theme(self, mode: str) -> None:
+        t = style.tokens(mode)
+        self.setStyleSheet(f"#simOffBanner {{ border: 1px solid {t['line']}; border-radius: 6px; }}")
+
+
+def with_banner(main, page: QtWidgets.QWidget) -> QtWidgets.QWidget:
+    """`page`, with a SimOffBanner above it unless the simulated backend records."""
+    if main.cfg.backend == "simulated":
+        return page
+    box = QtWidgets.QWidget()
+    v = QtWidgets.QVBoxLayout(box)
+    v.setContentsMargins(0, 8, 0, 0)
+    v.setSpacing(4)
+    page.sim_banner = SimOffBanner(main)
+    v.addWidget(page.sim_banner)
+    v.addWidget(page, 1)
+    return box

@@ -485,9 +485,8 @@ class SessionFilesMixin:
         d = {"version": newtfile.VERSION, "tabs": {"shown": list(self.tabs.shown), "layout": self.tabs.layout_mode},
              "analysis": self.analysis_page.app_state(), "stimulus": self.stimulus.to_dict(),
              "protocol": self.trials_page.protocol.to_dict()}
-        if self.cfg.backend == "simulated":
-            d["sim"] = dataclasses.asdict(self.cfg.sim_network)
-            d["board"] = dataclasses.asdict(self.cfg.sim_breadboard)
+        d["sim"] = dataclasses.asdict(self.cfg.sim_network)
+        d["board"] = dataclasses.asdict(self.cfg.sim_breadboard)
         return d
 
     def restore_app_state(self, d: dict) -> None:
@@ -506,12 +505,12 @@ class SessionFilesMixin:
             self.trials_page.protocol = p
             self.trials_page._load_protocol_into_widgets(p)
         part("the protocol", protocol)
-        if "sim" in d and self.cfg.backend == "simulated" and self.sim_page is not None:
+        if "sim" in d:
             def network():
                 self.cfg.sim_network = sim.network_from_dict(d["sim"])
                 self.sim_page.load()
             part("the simulation", network)
-        if "board" in d and self.cfg.backend == "simulated" and getattr(self, "board_page", None) is not None:
+        if "board" in d:
             def board():
                 b = bb.board_from_dict(d["board"])
                 bb.validate(b)

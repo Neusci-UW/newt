@@ -53,7 +53,7 @@ from .analysispage import AnalysisPage
 from .trialsbrowser import TrialsBrowser
 from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
-from .simpage import SimOffPage, SimPage
+from .simpage import SimPage, with_banner
 from .breadpage import BreadboardPage
 from .membranepage import AP_PAGE, HH_PAGE, RC_PAGE, SUM_PAGE, SYN_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
@@ -411,11 +411,10 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.analysis_page = AnalysisPage(self)
         self.blocks_panel.color_requested.connect(self.analysis_page.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
-        # What the fake recording contains: only with the simulated backend.
-        self.sim_page = SimPage(self) if self.cfg.backend == "simulated" else None
-        self.board_page = BreadboardPage(self) if self.cfg.backend == "simulated" else None
-        # Data Simulation always shows: with a real input device, a note on switching to the simulators
-        self.simoff_page = None if self.sim_page else SimOffPage(self)
+        # What the simulated backend records. Always editable; with a real input device a banner
+        # over each says so and offers to switch.
+        self.sim_page = SimPage(self)
+        self.board_page = BreadboardPage(self)
         # Ions crossing a membrane, Nernst and GHK: a teaching page, always available.
         self.membrane_page = MembranePage(self)
         # The membrane as an RC circuit, then the same charging done by ions.
@@ -435,18 +434,17 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("acq", "Record", central),
             ("stim", "Stimulus", self.stimulus_page),
             ("analysis", "Analysis", self.analysis_page),
-        ] + ([("sim", "Neural network simulator", self.sim_page)] if self.sim_page else [])
-          + ([("board", "Breadboard simulator", self.board_page)] if self.board_page else [])
-          + ([("simoff", "Simulators", self.simoff_page)] if self.simoff_page else [])
-          + [("membrane", "Membrane potential", self.membrane_page),
-             ("rc", "RC circuit", self.rc_page),
-             ("hh", "Hodgkin–Huxley", self.hh_page),
-             ("ap", "Action potential", self.ap_page),
-             ("syn", "Synapse", self.syn_page),
-             ("sum", "Summation", self.sum_page)], groups=[
+            ("sim", "Neural network simulator", with_banner(self, self.sim_page)),
+            ("board", "Breadboard simulator", with_banner(self, self.board_page)),
+            ("membrane", "Membrane potential", self.membrane_page),
+            ("rc", "RC circuit", self.rc_page),
+            ("hh", "Hodgkin–Huxley", self.hh_page),
+            ("ap", "Action potential", self.ap_page),
+            ("syn", "Synapse", self.syn_page),
+            ("sum", "Summation", self.sum_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim"]),
             ("analysis", "Analysis", ["analysis"]),
-            ("datasim", "Data Simulation", ["sim", "board", "simoff"]),   # data sources Acquisition can record
+            ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
             ("lessons", "Lessons", ["membrane", "rc", "hh", "ap", "syn", "sum"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
@@ -611,10 +609,11 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stim_page.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
-        if getattr(self, "sim_page", None):
-            self.sim_page.apply_theme(mode)
-        if getattr(self, "board_page", None):
-            self.board_page.apply_theme(mode)
+        for page in (getattr(self, "sim_page", None), getattr(self, "board_page", None)):
+            if page is not None:
+                page.apply_theme(mode)
+                if getattr(page, "sim_banner", None) is not None:
+                    page.sim_banner.apply_theme(mode)
         if getattr(self, "membrane_page", None):
             self.membrane_page.apply_theme(mode)
         if getattr(self, "rc_page", None):

@@ -271,14 +271,15 @@ def test_simulation_tab_shows_live_firing_rates(app, win):
     win.btn_run.setChecked(False)
 
 
-def test_hardware_has_no_simulation_tab(app, tmp_path):
+def test_hardware_shows_simulators_with_banner(app, tmp_path):
     from pyqtgraph.Qt import QtCore
     from neusci_daq.gui import MainWindow
     cfg = make_cfg(tmp_path)
     cfg.backend = "multichannelio"
     st = QtCore.QSettings(str(tmp_path / "s.ini"), QtCore.QSettings.Format.IniFormat)
     w = MainWindow(cfg, settings=st, config_path=tmp_path / "config.toml")
-    assert w.sim_page is None
+    assert w.sim_page is not None and w.board_page is not None
+    assert w.sim_page.sim_banner is not None and w.board_page.sim_banner is not None
     w.close()
 
 

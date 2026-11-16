@@ -1,5 +1,5 @@
-"""The Breadboard simulator page, under Data Simulation (only with --backend
-simulated): parts placed on a breadboard, and probes on it that Acquisition records
+"""The Breadboard simulator page, under Data Simulation (recorded with the
+simulated backend; editable and previewed with any): parts placed on a breadboard, and probes on it that Acquisition records
 like any input. See breadboard.py for the board and how the circuit is solved.
 
 Drag a part from the strip onto the board, or pick it and click two holes (one for

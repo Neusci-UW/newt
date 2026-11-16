@@ -1089,10 +1089,12 @@ class BreadboardPage(QtWidgets.QWidget):
         warnings = []
         s = getattr(self.main, "stimulus", None)
         if s is not None and any(p.kind == "vin" and p.source == "stim" for p in self.board.parts):
-            length = {"pulse": s.width_ms, "step": s.duration_ms}.get(s.shape)
+            part = next((q for q in s.parts if q.get("kind") in ("pulse", "step")), None) \
+                if s.shape == "segments" else None
+            length = float(part["dur"]) if part is not None else None
             if length is not None and length / 1000 < 5 * tau:
                 reach = 1 - math.exp(-length / 1000 / tau)
-                what = "pulse" if s.shape == "pulse" else "step"
+                what = part["kind"]
                 warnings.append(f"The Stimulator's {what} is {t(length / 1000)}, shorter than 5τ: the capacitor "
                                 f"only reaches about {reach:.0%} of the input.")
         window = self.main.window_box.value()

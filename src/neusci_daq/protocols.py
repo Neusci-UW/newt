@@ -41,14 +41,30 @@ SETTINGS = {
     "custom": [("scale", "Scale (× the whole shape)", "×"), ("delay_ms", "Delay", "ms")],
     "file": [("scale", "Scale (× the whole shape)", "×"), ("delay_ms", "Delay", "ms")],
 }
-TIME_SETTINGS = {"width_ms", "interval_ms", "delay_ms", "duration_ms"}   # rounded to output samples
+TIME_SETTINGS = {"width_ms", "interval_ms", "delay_ms", "duration_ms", "dur", "interval"}   # rounded to output samples
 # A starting range (from, to, step) when a setting is picked.
 DEFAULT_RANGES = {
     "amplitude_v": (0.5, 3.0, 0.5), "start_v": (0.0, 2.0, 0.5), "end_v": (0.5, 3.0, 0.5),
     "offset_v": (0.0, 1.0, 0.25), "width_ms": (0.2, 1.0, 0.2), "interval_ms": (10, 100, 30),
     "delay_ms": (0, 20, 5), "duration_ms": (10, 50, 10), "count": (1, 5, 1),
     "freq_hz": (5, 20, 5), "scale": (0.5, 2.0, 0.5),
+    # a segment's fields (keys "seg:<part>:<field>"), and the trial number
+    "level": (0.5, 3.0, 0.5), "dur": (1, 5, 1), "start": (0.0, 2.0, 0.5), "interval": (10, 100, 30),
+    "freq": (5, 20, 5), "offset": (0.0, 1.0, 0.25), "trial": (1, 5, 1),
 }
+# A segment's fields that can be stepped, per kind: (field, label, unit). "V" levels are
+# shown in the stimulator's units; a file's level is a scale.
+SEG_FIELDS = {
+    "base": [("dur", "duration", "ms")],
+    "step": [("level", "level", "V"), ("dur", "duration", "ms")],
+    "ramp": [("level", "end level", "V"), ("start", "start level", "V"), ("dur", "duration", "ms")],
+    "pulse": [("level", "height", "V"), ("dur", "width", "ms"), ("count", "pulses", ""),
+              ("interval", "interval", "ms")],
+    "sine": [("level", "amplitude", "V"), ("freq", "frequency", "Hz"), ("offset", "offset", "V"),
+             ("dur", "duration", "ms")],
+    "file": [("level", "scale", "×")],
+}
+TRIAL = ("trial", "Trial", "")          # a: the trial number, which each segment's per-trial change follows
 ORDERS = {"blocked": "Blocked", "interleaved": "Interleaved", "random": "Random"}
 MEASURES = {"p2p": "Peak-to-peak", "max": "Maximum", "min": "Minimum", "latency": "Time of peak"}
 MAX_VALUES = 200          # per variable
@@ -67,21 +83,48 @@ Shape = "str | tuple[str, str, str, str]"
 def split_key(key: str) -> tuple[str, str]:
     """('ao1', 'amplitude_v') for the second output's setting; ('', key) for the first's."""
     out, sep, base = key.partition(":")
-    return (out, base) if sep else ("", key)
+    return (out, base) if sep and out in stimmod.AO_CHANNELS else ("", key)
+
+
+def field_of(key: str) -> str:
+    """The setting's own name, without its output or segment: 'seg:1:level' -> 'level'."""
+    return split_key(key)[1].split(":")[-1]
+
+
+def seg_key(i: int, fld: str) -> str:
+    return f"seg:{i}:{fld}"
+
+
+def _seg_settings(s: Stimulus) -> list[tuple[str, str, str]]:
+    out = [TRIAL]
+    for i, p in enumerate(s.parts):
+        kind = p.get("kind", "")
+        name = f"{stimmod.letter(i)} · {stimmod.SEG_KINDS.get(kind, kind)}"
+        out += [(seg_key(i, f), f"{name} {label}", u) for f, label, u in SEG_FIELDS.get(kind, [])]
+    return out
+
+
+def _settings_one(shape) -> list[tuple[str, str, str]]:
+    if isinstance(shape, Stimulus):
+        return _seg_settings(shape) if shape.shape == "segments" else SETTINGS.get(shape.shape, [])
+    return SETTINGS.get(shape, [])
 
 
 def settings_of(shape) -> list[tuple[str, str, str]]:
-    """The settings that can be stepped: (key, label, unit). With two outputs, both
-    outputs' settings, each label saying which output, e.g. 'ao1 · Level'."""
-    if isinstance(shape, str):
-        return SETTINGS.get(shape, [])
+    """The settings that can be stepped: (key, label, unit). `shape` is a shape's name or
+    a Stimulus (segments have their own); with two outputs, (first, second, first output,
+    second output) and both outputs' settings, each label saying which output, e.g.
+    'ao1 · Level'. The trial number is shared."""
+    if not isinstance(shape, tuple):
+        return _settings_one(shape)
     s1, s2, o1, o2 = shape
-    return ([(k, f"{o1} · {label}", u) for k, label, u in SETTINGS.get(s1, [])]
-            + [(f"{o2}:{k}", f"{o2} · {label}", u) for k, label, u in SETTINGS.get(s2, [])])
+    return ([(k, label if k == "trial" else f"{o1} · {label}", u) for k, label, u in _settings_one(s1)]
+            + [(f"{o2}:{k}", f"{o2} · {label}", u) for k, label, u in _settings_one(s2) if k != "trial"])
 
 
 def default_range(key: str) -> tuple[float, float, float]:
-    return DEFAULT_RANGES.get(split_key(key)[1], (1, 5, 1))
+    base = split_key(key)[1]
+    return DEFAULT_RANGES.get(base, DEFAULT_RANGES.get(field_of(key), (1, 5, 1)))
 
 
 def setting_info(shape, key: str) -> tuple[str, str]:
@@ -223,6 +266,16 @@ def sequence(p: Protocol, a_vals: list[float], b_vals: list[float] | None,
 
 def apply(s: Stimulus, key: str, value: float) -> tuple[Stimulus, float]:
     """The stimulus with `key` set to `value`, and the scale for the whole waveform."""
+    if key.startswith("seg:"):
+        _, i, fld = key.split(":")
+        i = int(i)
+        if s.shape != "segments" or i >= len(s.parts):
+            raise ValueError(f"There's no segment {stimmod.letter(i)} to step.")
+        if fld == "count" and abs(value - round(value)) > 1e-9:
+            raise ValueError(f"Number of pulses must be a whole number, not {value:g}.")
+        parts = [dict(p) for p in s.parts]
+        parts[i][fld] = int(round(value)) if fld == "count" else float(value)
+        return replace(s, parts=parts), 1.0
     if key == "scale":
         return s, float(value)
     if key == "count":
@@ -250,8 +303,14 @@ def applied(s: Stimulus, p: Protocol, a: float, b: float | None, s2: Stimulus | 
     """(first output's stimulus, its scale, second's, its scale) with a and b applied, each
     to whichever output's setting it steps. Raises ValueError."""
     k1 = k2 = 1.0
-    for var, v in ((p.a, a), (p.b, b)):
-        if var is None or v is None:
+    steps = [(var, v) for var, v in ((p.a, a), (p.b, b)) if var is not None and v is not None]
+    steps.sort(key=lambda x: x[0].key == "trial")      # a segment's value first, then the trial's change to it
+    for var, v in steps:
+        if var.key == "trial":
+            if v < 1 or abs(v - round(v)) > 1e-9:
+                raise ValueError(f"Trials are numbered 1, 2, 3…, not {v:g}.")
+            s = s.at_trial(int(round(v)) - 1)
+            s2 = s2.at_trial(int(round(v)) - 1) if s2 is not None else None
             continue
         out, base = split_key(var.key)
         if out:
@@ -276,7 +335,7 @@ def make_trial(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float,
     if s2 is not None:
         waves[outs[1]] = s2.waveform(rate) * k2
     chans, wave = stimmod.combine(waves)
-    return TrialWave(chans, wave, first, stimmod.samples(s.delay_ms, rate) * 1000.0 / rate, s, s2)
+    return TrialWave(chans, wave, first, s.onset_samples(rate) * 1000.0 / rate, s, s2)
 
 
 def output_wave(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float,
@@ -294,9 +353,10 @@ def make_wave(s: Stimulus, p: Protocol, a: float, b: float | None, rate: float) 
 
 
 def describe(p: Protocol, shape, a: float, b: float | None) -> str:
-    """'a = 1.5 V, b = 0.4 ms' for comments and the chip."""
+    """'a = 1.5 V, b = 0.4 ms' for comments and the chip ('trial 3, b = 0.4 ms' when a is
+    the trial number)."""
     la, ua = setting_info(shape, p.a.key)
-    out = f"a = {fmt(a, ua)}"
+    out = f"trial {a:g}" if p.a.key == "trial" else f"a = {fmt(a, ua)}"
     if p.b is not None and b is not None:
         out += f", b = {fmt(b, setting_info(shape, p.b.key)[1])}"
     return out
@@ -323,7 +383,7 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float, s2: Stimulus | No
     """Everything that would stop a protocol, found before it starts. `s2`: the second
     output's stimulus, on outs[1]."""
     c = Check()
-    shape = s.shape if s2 is None else (s.shape, s2.shape, *outs)
+    shape = s if s2 is None else (s, s2, *outs)
     keys = {k for k, _, _ in settings_of(shape)}
     for name, var in (("a", p.a), ("b", p.b)):
         if var is None:
@@ -347,7 +407,7 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float, s2: Stimulus | No
             c.a_vals = vals
         else:
             c.b_vals = vals
-        if split_key(var.key)[1] in TIME_SETTINGS:      # values the output can't tell apart
+        if field_of(var.key) in TIME_SETTINGS:          # values the output can't tell apart
             got: dict[int, float] = {}
             for v in vals:
                 k = stimmod.samples(v, rate)
@@ -416,6 +476,58 @@ def check(p: Protocol, s: Stimulus, rate: float, max_v: float, s2: Stimulus | No
         c.warnings.append(f"This takes about {c.duration_s / 60:.0f} minutes. Long protocols can "
                           "outlast the preparation; consider fewer values or repeats.")
     return c
+
+
+def trials_variable(n: int) -> Variable:
+    """a, when it's the trial number: 1 to n."""
+    return Variable("trial", "range", 1, max(1, int(n)), 1)
+
+
+def upgrade(p: Protocol, s: Stimulus, s2: Stimulus | None = None) -> tuple[Protocol, Stimulus, Stimulus | None]:
+    """A protocol saved before segments, whose a steps a setting of an older shape: a
+    becomes the trial number and that setting's values a per-trial list on its segment;
+    b steps the same setting of its segment. Anything already in the new form is returned
+    as it is."""
+    def where(var: Variable):
+        out, base = split_key(var.key)
+        st = s2 if out else s
+        if base == "trial" or base.startswith("seg:") or st is None:
+            return None
+        got = stimmod.old_key_to_segment(st, base)
+        return (out, got) if got else ("missing", None)
+
+    a_at = where(p.a)
+    b = p.b
+    if p.b is not None:
+        b_at = where(p.b)
+        if b_at == ("missing", None):
+            b = None
+        elif b_at is not None:
+            out, (i, fld) = b_at
+            b = replace(p.b, key=(f"{out}:" if out else "") + seg_key(i, fld))
+    if a_at is None:
+        return replace(p, b=b), s, s2
+    n = 1
+    if a_at != ("missing", None):
+        out, (i, fld) = a_at
+        try:
+            vals = p.a.values()
+        except ValueError:
+            vals = []
+        if fld in ("level", "dur") and vals:
+            st = s2 if out else s
+            parts = [dict(q) for q in st.parts]
+            parts[i]["d_" + fld] = stimmod.format_per_trial(("list", vals))
+            st = replace(st, parts=parts)
+            if out:
+                s2 = st
+            else:
+                s = st
+            n = len(vals)
+        elif vals:                                     # pulses, interval…: b steps it instead
+            if b is None:
+                b = replace(p.a, key=(f"{out}:" if out else "") + seg_key(i, fld))
+    return replace(p, a=trials_variable(n), b=b), s, s2
 
 
 # ---------------------------------------------------------------------------- finding the stimulus

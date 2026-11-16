@@ -59,6 +59,7 @@ from .membranepage import AP_PAGE, HH_PAGE, RC_PAGE, SUM_PAGE, SYN_PAGE, Membran
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
+from .ministim import MiniStimulator
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
 from . import colors
 from .channelsetup import ChannelSetupMixin
@@ -337,6 +338,11 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         bb.addWidget(self.btn_overlay_ch)
         bb.addSpacing(6)
         bb.addWidget(self.btn_comments)
+        bb.addSpacing(6)
+        self.btn_mini_stim = QtWidgets.QPushButton("Stimulator", checkable=True)
+        self.btn_mini_stim.setToolTip("A small stimulator over the plots: run, fire, stop and the level")
+        self.btn_mini_stim.setVisible(self.stim_out is not None)
+        bb.addWidget(self.btn_mini_stim)
         # Time scale, at the bottom right like LabChart's: newest data, all the data,
         # zoom out, Window (the toolbar's, mirrored) and zoom in.
         self.time_bar = QtWidgets.QWidget()
@@ -408,6 +414,12 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stim_page = StimPage(self)
         self.trials_page = ProtocolsPage(self)
         self.stimulus_page = StimulusPage(self, self.stim_page, self.trials_page)   # the two, as one page
+        # A small stimulator floating over the Record page's plots.
+        self.mini_stim = MiniStimulator(self, self.plot_area)
+        self.mini_stim.hide()
+        self.btn_mini_stim.toggled.connect(self.set_mini_stim)
+        if self.stim_out is not None and self.settings.value("mini_stim", False, type=bool):
+            self.btn_mini_stim.setChecked(True)
         self.analysis_page = AnalysisPage(self)
         self.blocks_panel.color_requested.connect(self.analysis_page.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
@@ -607,6 +619,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         style.restyle(mode)
         self.comments_panel.link_color = style.tokens(mode)["link"]
         self.stim_page.apply_theme(mode)
+        if hasattr(self, "mini_stim"):
+            self.mini_stim.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
         for page in (getattr(self, "sim_page", None), getattr(self, "board_page", None)):
@@ -693,6 +707,13 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self._update_stim_chip()
         self._fit_toolbar()
 
+    def set_mini_stim(self, on: bool) -> None:
+        """Show or hide the small stimulator over the Record page's plots."""
+        self.settings.setValue("mini_stim", bool(on))
+        if self.btn_mini_stim.isChecked() != on:
+            self.btn_mini_stim.setChecked(on)
+        self.mini_stim.setVisible(on)
+
     def _update_stim_chip(self):
         busy = self.stim_out is not None and self.stim_out.busy
         protocol = hasattr(self, "trials_page") and self.trials_page.running
@@ -733,8 +754,9 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # pyqtgraph plot can be freed while Qt still has a layout pass queued for
         # it, which crashes Qt (seen when windows are opened and closed repeatedly).
         self._clear_plot_area()
-        self.stim_page.preview.setParent(None)
-        self.stim_page.preview.deleteLater()
+        for pw in (self.stim_page.preview, self.stim_page.preview2):
+            pw.setParent(None)
+            pw.deleteLater()
         super().closeEvent(ev)
 
 

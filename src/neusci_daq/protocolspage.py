@@ -384,7 +384,7 @@ class ProtocolsPage(QtWidgets.QWidget):
 
         v.addStretch(1)
         # Pinned below the settings, so Run is always on screen.
-        foot = QtWidgets.QWidget()
+        self.foot = foot = QtWidgets.QWidget()
         foot.setObjectName("trialsFoot")
         fv = QtWidgets.QVBoxLayout(foot)
         fv.setContentsMargins(14, 8, 14, 10)
@@ -597,12 +597,16 @@ class ProtocolsPage(QtWidgets.QWidget):
                 return T.Protocol.loads(text)
             except ValueError:
                 pass
-        keys = [k for k, _, _ in T.settings_of(self._shapes())]
-        key = keys[0] if keys else "amplitude_v"
-        f, t, s = T.default_range(key)
-        return T.Protocol(name="Protocol", a=T.Variable(key=key, start=f, stop=t, step=s))
+        return T.Protocol(name="Protocol", a=T.trials_variable(1))
 
     def _load_protocol_into_widgets(self, p: T.Protocol) -> None:
+        # A protocol from before segments: its a becomes per-trial values on the stimulus.
+        m = self.main
+        p, s, s2 = T.upgrade(p, m.stimulus, m.stimulus2)
+        if s2 is not m.stimulus2:
+            m.set_stimulus2(s2)
+        if s is not m.stimulus:
+            m.set_stimulus(s)
         self._loading = True
         shape = self._shapes()
         self.name.setText(p.name)
@@ -644,7 +648,7 @@ class ProtocolsPage(QtWidgets.QWidget):
         self._has_b = on
         self.row_b.setVisible(on)
         self.btn_add_b.setVisible(not on)
-        self.rep_note.setText("of each a × b combination" if on else "of each value")
+        self.rep_note.setText("of each trial × b" if on else "of each trial")
 
     def _set_b(self, on: bool) -> None:
         if on:
@@ -665,8 +669,8 @@ class ProtocolsPage(QtWidgets.QWidget):
         output, second output): what trials.settings_of and setting_info take."""
         m = self.main
         if m.stimulus2 is None:
-            return m.stimulus.shape
-        return (m.stimulus.shape, m.stimulus2.shape, m.cfg.stim_output, m.second_output)
+            return m.stimulus
+        return (m.stimulus, m.stimulus2, m.cfg.stim_output, m.second_output)
 
     def _shape_picked(self, *_):
         key = self.shape.currentData()
@@ -808,11 +812,13 @@ class ProtocolsPage(QtWidgets.QWidget):
         ua = T.setting_info(shape, p.a.key)[1]
         nb = len(c.b_vals) if c.b_vals else 1
         self.plan_title.setText(
-            f"{len(c.a_vals)} a" + (f" × {nb} b" if c.b_vals else "") + f" × {p.repeats} repeats = "
+            (f"{len(c.a_vals)} trials" if p.a.key == "trial" else f"{len(c.a_vals)} a")
+            + (f" × {nb} b" if c.b_vals else "") + f" × {p.repeats} repeats = "
             f"{len(self.plan)} trials" + (" (one random order; each run shuffles anew)" if p.order == "random" else ""))
         self.grid.setColumnCount(len(c.a_vals))
         self.grid.setRowCount(nb)
-        self.grid.setHorizontalHeaderLabels([f"a = {T.fmt(a, ua)}" for a in c.a_vals])
+        self.grid.setHorizontalHeaderLabels([f"Trial {a:g}" if p.a.key == "trial" else f"a = {T.fmt(a, ua)}"
+                                             for a in c.a_vals])
         ub = T.setting_info(shape, p.b.key)[1] if p.b else ""
         self.grid.setVerticalHeaderLabels([f"b = {T.fmt(b, ub)}" for b in c.b_vals] if c.b_vals else ["Stimuli"])
         where: dict[tuple[int, int], list[int]] = {}

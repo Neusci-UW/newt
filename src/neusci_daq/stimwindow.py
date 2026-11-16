@@ -6,7 +6,6 @@ be written to the output.
 """
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -16,10 +15,11 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import style
 from .plotzoom import plot_widget
 from .unitbox import UnitSpinBox
-from .units import _converter, _same_kind, parse_quantity
+from .units import _converter
 
 from . import stim as stimmod
 from .stim import Stimulus
+from .segmenteditor import SegmentEditor
 
 
 def _spin(lo, hi, decimals=4, unit="", step=1.0):
@@ -61,108 +61,40 @@ class StimPage(QtWidgets.QWidget):
         left = QtWidgets.QVBoxLayout(self.fields_panel)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(10)
-        self.editing = 0                   # 0: the first output's stimulus, 1: the second's
-        outs = QtWidgets.QHBoxLayout()
-        outs.setSpacing(8)
-        self.out_tabs = QtWidgets.QTabBar()
-        self.out_tabs.setDrawBase(False)
-        self.out_tabs.setExpanding(False)
-        self.out_tabs.setToolTip("Each output has its own stimulus; Fire sends them together")
+        self.editing = 0                   # kept for older callers: both outputs show at once now
+        self.editors: list[SegmentEditor] = []
+        self.out_heads: list[QtWidgets.QWidget] = []
+        self.out_dots: list[QtWidgets.QLabel] = []
+        for i in range(2):
+            head = QtWidgets.QWidget()
+            hl = QtWidgets.QHBoxLayout(head)
+            hl.setContentsMargins(0, 4 if i else 0, 0, 0)
+            hl.setSpacing(6)
+            dot = QtWidgets.QLabel()
+            name = QtWidgets.QLabel()
+            name.setObjectName("outName")
+            hl.addWidget(dot)
+            hl.addWidget(name)
+            if i == 1:
+                rm = QtWidgets.QToolButton(text="✕", autoRaise=True)
+                rm.setToolTip("Stop using the second output")
+                rm.setAccessibleName("Remove the second output")
+                rm.clicked.connect(lambda: QtCore.QTimer.singleShot(0, lambda: self.main.set_stimulus2(None)))
+                hl.addWidget(rm)
+                self.btn_remove_out = rm
+            hl.addStretch(1)
+            ed = SegmentEditor(self._unit_info)
+            ed.edited.connect(self._changed)
+            ed.problem.connect(self._show_problem)
+            left.addWidget(head)
+            left.addWidget(ed)
+            self.out_heads.append(head)
+            self.out_dots.append(dot)
+            self.editors.append(ed)
         self.btn_add_out = QtWidgets.QPushButton("+ Add second output")
-        self.btn_add_out.setToolTip("Send a second stimulus on the other analog output, from the same start")
-        self.btn_remove_out = None         # the ✕ on the second tab: made with the tab (Qt deletes it with it)
-        outs.addWidget(self.out_tabs)
-        outs.addWidget(self.btn_add_out)
-        outs.addStretch(1)
-        left.addLayout(outs)
-        top = QtWidgets.QFormLayout()
-        self.shape = QtWidgets.QComboBox()
-        self.shape.setToolTip("The kind of stimulus: its settings are shown below")
-        for key, label in stimmod.SHAPES.items():
-            self.shape.addItem(label, key)
-        self.delay = _spin(0, 60000, unit="ms")
-        self.delay.setToolTip("0 V for this long before the stimulus starts")
-        top.addRow("Shape", self.shape)
-        top.addRow("Delay", self.delay)
-        left.addLayout(top)
-
-        self.pages = QtWidgets.QStackedWidget()
-        # pulse
-        pw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(pw); f.setContentsMargins(0, 0, 0, 0)
-        self.p_amp = _spin(-10, 10, unit="V", step=0.1)
-        self.p_amp.setToolTip("Height of each pulse")
-        self.p_width = _spin(0, 60000, unit="ms", step=0.2)
-        self.p_width.setToolTip("How long each pulse lasts")
-        self.p_count = QtWidgets.QSpinBox(minimum=1, maximum=10000)
-        self.p_count.setToolTip("How many pulses in the train")
-        self.p_interval = _spin(0, 60000, unit="ms", step=10)
-        self.p_interval.setToolTip("From the start of one pulse to the start of the next")
-        self.p_bi = QtWidgets.QCheckBox("Biphasic (+ then −)")
-        self.p_bi.setToolTip("Each pulse goes up, then down by the same amount, so it adds up to no net charge")
-        f.addRow("Amplitude", self.p_amp); f.addRow("Width", self.p_width)
-        f.addRow("Pulses", self.p_count); f.addRow("Interval", self.p_interval); f.addRow("", self.p_bi)
-        self.pages.addWidget(pw)
-        # step
-        sw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(sw); f.setContentsMargins(0, 0, 0, 0)
-        self.s_amp = _spin(-10, 10, unit="V", step=0.1)
-        self.s_amp.setToolTip("The voltage held during the step")
-        self.s_dur = _spin(0, 60000, unit="ms", step=10)
-        self.s_dur.setToolTip("How long the step lasts")
-        f.addRow("Level", self.s_amp); f.addRow("Duration", self.s_dur)
-        self.pages.addWidget(sw)
-        # ramp
-        rw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(rw); f.setContentsMargins(0, 0, 0, 0)
-        self.r_start = _spin(-10, 10, unit="V", step=0.1)
-        self.r_start.setToolTip("The voltage the ramp starts at")
-        self.r_end = _spin(-10, 10, unit="V", step=0.1)
-        self.r_end.setToolTip("The voltage the ramp ends at")
-        self.r_dur = _spin(0, 60000, unit="ms", step=10)
-        self.r_dur.setToolTip("How long the ramp lasts")
-        f.addRow("From", self.r_start); f.addRow("To", self.r_end); f.addRow("Duration", self.r_dur)
-        self.pages.addWidget(rw)
-        # sine
-        nw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(nw); f.setContentsMargins(0, 0, 0, 0)
-        self.n_amp = _spin(0, 10, unit="V", step=0.1)
-        self.n_amp.setToolTip("Height of the sine wave above and below its offset")
-        self.n_off = _spin(-10, 10, unit="V", step=0.1)
-        self.n_off.setToolTip("The voltage the sine wave swings around")
-        self.n_freq = _spin(0.01, 2500, unit="Hz", step=1)
-        self.n_freq.setToolTip("Cycles per second")
-        self.n_dur = _spin(0, 60000, unit="ms", step=10)
-        self.n_dur.setToolTip("How long the sine wave lasts")
-        f.addRow("Amplitude", self.n_amp); f.addRow("Offset", self.n_off)
-        f.addRow("Frequency", self.n_freq); f.addRow("Duration", self.n_dur)
-        self.pages.addWidget(nw)
-        # custom
-        cw = QtWidgets.QWidget(); v = QtWidgets.QVBoxLayout(cw); v.setContentsMargins(0, 0, 0, 0)
-        self.table = QtWidgets.QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Duration (ms)", "Start (V)", "End (V)"])
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setToolTip("Each row is a straight line from Start to End. Same Start and End = a flat level. "
-                              "Cells take units too, e.g. 0.5 s or 200 mV.")
-        rowbtns = QtWidgets.QHBoxLayout()
-        self.btn_add_seg = QtWidgets.QPushButton("Add segment")
-        self.btn_del_seg = QtWidgets.QPushButton("Remove segment")
-        rowbtns.addWidget(self.btn_add_seg); rowbtns.addWidget(self.btn_del_seg); rowbtns.addStretch(1)
-        v.addWidget(self.table, 1); v.addLayout(rowbtns)
-        self.pages.addWidget(cw)
-        # file
-        fw = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(fw); f.setContentsMargins(0, 0, 0, 0)
-        frow = QtWidgets.QHBoxLayout()
-        self.f_path = QtWidgets.QLineEdit(placeholderText="CSV or text file")
-        self.f_path.setToolTip("The file of voltages to send: one column, or time and voltage")
-        self.btn_browse = QtWidgets.QPushButton("Browse…")
-        frow.addWidget(self.f_path, 1); frow.addWidget(self.btn_browse)
-        self.f_rate = _spin(0, 1e6, decimals=2, unit="Hz", step=100)
-        self.f_rate.setSpecialValueText("same as output")
-        self.f_rate.setToolTip("Sample rate of a one-column file. Two-column files (time in s, volts) don't need it.")
-        f.addRow("File", frow); f.addRow("File's rate", self.f_rate)
-        self.f_hint = QtWidgets.QLabel()
-        self.f_hint.setWordWrap(True)
-        f.addRow("", self.f_hint)
-        self.pages.addWidget(fw)
-        left.addWidget(self.pages, 1)
+        self.btn_add_out.setToolTip("Send a second stimulus on the other analog output, on the same timeline")
+        left.addWidget(self.btn_add_out, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+        left.addStretch(1)
 
         self.output_panel = QtWidgets.QWidget()
         ov = QtWidgets.QVBoxLayout(self.output_panel)
@@ -224,14 +156,35 @@ class StimPage(QtWidgets.QWidget):
         self.preview_panel = QtWidgets.QWidget()
         right = QtWidgets.QVBoxLayout(self.preview_panel)
         right.setContentsMargins(0, 0, 0, 0)
+        trial_row = QtWidgets.QHBoxLayout()
+        self.preview_title = QtWidgets.QLabel("<b>Preview</b>")
+        trial_row.addWidget(self.preview_title)
+        trial_row.addStretch(1)
+        self.trial_label = QtWidgets.QLabel()
+        self.trial_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, minimum=1, maximum=1)
+        self.trial_slider.setFixedWidth(160)
+        self.trial_slider.setToolTip("Which trial is drawn bold; the others are faded")
+        self.trial_slider.valueChanged.connect(lambda *_: self._update_preview())
+        trial_row.addWidget(self.trial_label)
+        trial_row.addWidget(self.trial_slider)
+        right.addLayout(trial_row)
+        # One plot per output, on the same time axis.
         self.preview = plot_widget()
-        p = self.preview.getPlotItem()
-        p.setLabel("left", "Output", units="V")
-        p.setLabel("bottom", "time", units="s")
-        p.showGrid(x=True, y=True, alpha=0.25)
-        self.curve = p.plot(stepMode=None)
-        self.curve2 = p.plot(stepMode=None)             # the second output's stimulus
+        self.preview2 = plot_widget()
+        for i, pw in enumerate((self.preview, self.preview2)):
+            p = pw.getPlotItem()
+            p.setLabel("left", "Output", units="V")
+            p.showGrid(x=True, y=True, alpha=0.25)
+        self.preview.getPlotItem().getAxis("bottom").setStyle(showValues=False)
+        self.preview2.getPlotItem().setLabel("bottom", "time", units="s")
+        self.preview2.setXLink(self.preview)
+        self.curve = self.preview.getPlotItem().plot()        # kept for older callers
+        self.curve2 = self.preview2.getPlotItem().plot()
+        # Trials to draw: f() -> (protocol, a values, b value) or None for just the stimulus
+        # (the Stimulus page sets it).
+        self.trials_fn = None
         right.addWidget(self.preview, 1)
+        right.addWidget(self.preview2, 1)
         self.info = QtWidgets.QLabel()
         self.info.setWordWrap(True)
         self.message = QtWidgets.QLabel()
@@ -247,18 +200,6 @@ class StimPage(QtWidgets.QWidget):
         self.on_start.setCurrentIndex(max(0, self.on_start.findData(main.stim_on_start)))
         self.on_start.currentIndexChanged.connect(
             lambda *_: self.main.set_stim_on_start(self.on_start.currentData()))
-        self.shape.currentIndexChanged.connect(self._shape_changed)
-        for w in (self.delay, self.p_amp, self.p_width, self.p_interval, self.s_amp, self.s_dur,
-                  self.r_start, self.r_end, self.r_dur, self.n_amp, self.n_off, self.n_freq, self.n_dur,
-                  self.f_rate):
-            w.valueChanged.connect(self._changed)
-        self.p_count.valueChanged.connect(self._changed)
-        self.p_bi.toggled.connect(self._changed)
-        self.f_path.editingFinished.connect(self._changed)
-        self.table.itemChanged.connect(self._changed)
-        self.btn_add_seg.clicked.connect(self._add_segment)
-        self.btn_del_seg.clicked.connect(self._remove_segment)
-        self.btn_browse.clicked.connect(self._browse)
         self.repeat.valueChanged.connect(lambda v: setattr(self.main, "stim_repeat_s", float(v)))
         self.btn_fire.clicked.connect(lambda: self.main.fire_stimulus())
         self.btn_repeat.toggled.connect(self.main.set_repeat)
@@ -269,7 +210,6 @@ class StimPage(QtWidgets.QWidget):
         self.apply_theme(style.LIGHT)
         self.btn_save.clicked.connect(self._save)
         self.btn_load.clicked.connect(self._load)
-        self.out_tabs.currentChanged.connect(self._output_picked)
         self.btn_add_out.clicked.connect(self._add_output)
         self.outputs_changed()
 
@@ -279,132 +219,71 @@ class StimPage(QtWidgets.QWidget):
         return self.main.stimulus2 if self.editing == 1 and self.main.stimulus2 is not None else self.main.stimulus
 
     def outputs_changed(self) -> None:
-        """Show a tab per output in use, and the add / remove buttons to match."""
+        """Show a segment table per output in use, and the add button to match."""
         main = self.main
         two = main.stimulus2 is not None
-        if not two:
-            self.editing = 0
-        labels = [main.cfg.stim_output] + ([main.second_output] if two else [])
-        self.out_tabs.blockSignals(True)
-        while self.out_tabs.count():
-            self.out_tabs.removeTab(0)
-        for name, color in zip(labels, (self._colors[0], self._colors[1])):
-            self.out_tabs.addTab(_dot(color), name)          # the colour of its line in the preview
-        self.btn_remove_out = None
-        if two:
-            btn = QtWidgets.QToolButton(text="✕")
-            btn.setAutoRaise(True)
-            btn.setToolTip("Stop using the second output")
-            btn.setAccessibleName("Remove the second output")
-            btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, lambda: self.main.set_stimulus2(None)))
-            self.out_tabs.setTabButton(1, QtWidgets.QTabBar.ButtonPosition.RightSide, btn)
-            self.btn_remove_out = btn
-        self._show_sim_note()
-        self.out_tabs.setCurrentIndex(self.editing)
-        self.out_tabs.blockSignals(False)
+        names = [main.cfg.stim_output, main.second_output]
+        for i, (head, dot, ed) in enumerate(zip(self.out_heads, self.out_dots, self.editors)):
+            on = i == 0 or two
+            head.setVisible(on)
+            ed.setVisible(on)
+            dot.setPixmap(_dot(self._colors[i]).pixmap(10, 10))
+            head.findChild(QtWidgets.QLabel, "outName").setText(f"<b>{names[i]}</b>")
         self.btn_add_out.setVisible(not two)
         self.btn_add_out.setText(f"+ Add second output ({main.second_output})")
         self.btn_fire.setText("Fire both" if two else "Fire")
-        self._load_fields(self._current())
-
-    def _output_picked(self, i: int) -> None:
-        if i < 0 or i == self.editing:
-            return
-        self.editing = i
-        self._load_fields(self._current())
+        self._show_sim_note()
+        self._load_fields()
 
     def _add_output(self) -> None:
-        self.editing = 1
-        self.main.set_stimulus2(Stimulus())       # calls outputs_changed
+        self.main.set_stimulus2(Stimulus(parts=[stimmod.new_part("base", dur=10.0),
+                                                stimmod.new_part("step"),
+                                                stimmod.new_part("base", dur=30.0)]))
 
     # -- widgets <-> Stimulus ------------------------------------------------
     def set_stimulus(self, s: Stimulus) -> None:
-        """The first output's stimulus changed elsewhere (a protocol, Load): show it if
-        that's the one being edited."""
-        if self.editing == 0 or self.main.stimulus2 is None:
-            self._load_fields(s)
-        else:
-            self._update_preview()
+        """The stimulus changed elsewhere (a protocol, Load): show it."""
+        self._load_fields()
 
-    def _load_fields(self, s: Stimulus) -> None:
+    def _load_fields(self, *_) -> None:
         self._loading = True
-        self.shape.setCurrentIndex(max(0, self.shape.findData(s.shape)))
-        self.pages.setCurrentIndex(self.shape.currentIndex())
-        self.delay.setValue(s.delay_ms)
-        k = self._scale
-        self.p_amp.setValue(s.amplitude_v * k); self.p_width.setValue(s.width_ms)
-        self.p_count.setValue(s.count); self.p_interval.setValue(s.interval_ms); self.p_bi.setChecked(s.biphasic)
-        self.s_amp.setValue(s.amplitude_v * k); self.s_dur.setValue(s.duration_ms)
-        self.r_start.setValue(s.start_v * k); self.r_end.setValue(s.end_v * k); self.r_dur.setValue(s.duration_ms)
-        self.n_amp.setValue(abs(s.amplitude_v) * k); self.n_off.setValue(s.offset_v * k)
-        self.n_freq.setValue(s.freq_hz); self.n_dur.setValue(s.duration_ms)
-        self.table.setRowCount(0)
-        for seg in s.segments:
-            self._append_row(seg["duration_ms"], seg["start_v"] * k, seg["end_v"] * k)
-        self.f_path.setText(s.file); self.f_rate.setValue(s.file_rate)
+        self.editors[0].set_stimulus(self.main.stimulus)
+        if self.main.stimulus2 is not None:
+            self.editors[1].set_stimulus(self.main.stimulus2)
         self._loading = False
         self._changed()          # the stimulus Fire sends and the preview both follow the fields
 
     def stimulus(self) -> Stimulus:
-        """The stimulus the fields describe. Raises ValueError for a bad table cell."""
-        shape = self.shape.currentData()
-        s = Stimulus(shape=shape, delay_ms=self.delay.value())
-        v = lambda box: box.value() / self._scale          # the fields show units; Stimulus keeps volts
-        if shape == "pulse":
-            s.amplitude_v, s.width_ms = v(self.p_amp), self.p_width.value()
-            s.count, s.interval_ms, s.biphasic = self.p_count.value(), self.p_interval.value(), self.p_bi.isChecked()
-        elif shape == "step":
-            s.amplitude_v, s.duration_ms = v(self.s_amp), self.s_dur.value()
-        elif shape == "ramp":
-            s.start_v, s.end_v, s.duration_ms = v(self.r_start), v(self.r_end), self.r_dur.value()
-        elif shape == "sine":
-            s.amplitude_v, s.offset_v = v(self.n_amp), v(self.n_off)
-            s.freq_hz, s.duration_ms = self.n_freq.value(), self.n_dur.value()
-        elif shape == "file":
-            s.file, s.file_rate = self.f_path.text().strip(), self.f_rate.value()
-        s.segments = self._segments() if shape == "custom" else self._current().segments
-        return s
+        return self.editors[0].stimulus()
 
-    def _segments(self) -> list[dict]:
-        out = []
-        for r in range(self.table.rowCount()):
-            vals = []
-            for c, name in enumerate(("duration", "start", "end")):
-                item = self.table.item(r, c)
-                # Cells take units like the boxes do: "0.5 s", "200 mV".
-                convert = _same_kind("ms") if c == 0 else self._level_factor
-                try:
-                    vals.append(parse_quantity(item.text() if item else "", convert)[0])
-                except ValueError:
-                    raise ValueError(f"Segment {r + 1}: {name} must be a number, optionally with "
-                                     f"a unit (e.g. {'0.5 s' if c == 0 else '200 mV'}).") from None
-            out.append({"duration_ms": vals[0], "start_v": vals[1] / self._scale,
-                        "end_v": vals[2] / self._scale})
-        return out
+    def set_locked(self, locked: bool) -> None:
+        for ed in self.editors:
+            ed.set_locked(locked)
+        self.btn_add_out.setEnabled(not locked)
+        if self.btn_remove_out is not None:
+            self.btn_remove_out.setEnabled(not locked)
+
+    def _unit_info(self):
+        """(units, volts → units scale, accepted units) for the level boxes."""
+        return self._unit_label, self._scale, self._level_families()
 
     # -- reacting to edits ---------------------------------------------------
-    def _shape_changed(self, i):
-        self.pages.setCurrentIndex(i)
-        self._changed()
-
     def _changed(self, *_):
         if self._loading:
             return
-        try:
-            s = self.stimulus()
-        except ValueError as e:
-            self._show_problem(str(e))
-            return
         # Loading fields from a stimulus gives the same stimulus back: only a real change is
-        # passed on (each one re-checks the whole protocol on the Protocols page).
-        if s != self._current():
-            if self.editing == 1 and self.main.stimulus2 is not None:
-                self.main._stimulus2_edited(s)
-            else:
-                self.main._stimulus_edited(s)
+        # passed on (each one re-checks the whole protocol).
+        s = self.editors[0].stimulus()
+        if s != self.main.stimulus:
+            self.main._stimulus_edited(s)
+        if self.main.stimulus2 is not None:
+            s2 = self.editors[1].stimulus()
+            if s2 != self.main.stimulus2:
+                self.main._stimulus2_edited(s2)
         self._update_preview()
 
     def _update_preview(self):
+        from . import protocols as T
         cfg, main = self.main.cfg, self.main
         units, k = self._unit_label, self._scale
         in_units = f" ({cfg.stim_max_v * k:g} {units})" if self._converted else ""
@@ -412,32 +291,60 @@ class StimPage(QtWidgets.QWidget):
         where = f"{cfg.stim_output} + {main.second_output} together" if two else f"Output {cfg.stim_output}"
         self.info.setText(f"{where} · {cfg.stim_rate:,.0f} samples/s{' each' if two else ''} · "
                           f"limit ±{cfg.stim_max_v:g} V{in_units} (set in the config)")
-        streams = [(cfg.stim_output, main.stimulus, self.curve)] + (
-            [(main.second_output, main.stimulus2, self.curve2)] if two else [])
-        if not two:
-            self.curve2.setData([], [])
-        lines, waves = [], []
-        for name, s, curve in streams:
+        self.preview2.setVisible(two)
+        self.preview.getPlotItem().getAxis("bottom").setStyle(showValues=not two)
+        self.preview.getPlotItem().setLabel("bottom", "" if two else "time", units="" if two else "s")
+        got = self.trials_fn() if self.trials_fn is not None else None
+        p, a_vals, b = got if got else (None, [None], None)
+        n = len(a_vals)
+        self.trial_slider.blockSignals(True)
+        self.trial_slider.setMaximum(max(1, n))
+        self.trial_slider.blockSignals(False)
+        self.trial_slider.setVisible(n > 1)
+        self.trial_label.setVisible(n > 1)
+        cur = min(self.trial_slider.value(), n) - 1
+        self.trial_label.setText(f"Trial {cur + 1} of {n}")
+        names = [cfg.stim_output, main.second_output]
+        plots = [self.preview.getPlotItem(), self.preview2.getPlotItem()]
+        for pi in plots:
+            pi.clear()
+        lines, err = [], ""
+        # every trial (at most 60 of them), faded, then the one picked, bold
+        order = [i for i in range(n) if i != cur][:59] + [cur]
+        longest = 0
+        for ia in order:
+            a = a_vals[ia]
             try:
-                wave = s.waveform(cfg.stim_rate)
-                stimmod.check_limit(wave, cfg.stim_max_v)
+                if p is None:
+                    s1, k1, s2, k2 = main.stimulus, 1.0, main.stimulus2, 1.0
+                else:
+                    s1, k1, s2, k2 = T.applied(main.stimulus, p, a, b, main.stimulus2)
+                streams = [(s1, k1)] + ([(s2, k2)] if two else [])
+                for lane, (st, kk) in enumerate(streams):
+                    wave = st.waveform(cfg.stim_rate) * kk
+                    stimmod.check_limit(wave, cfg.stim_max_v)
+                    t = np.arange(len(wave)) / cfg.stim_rate
+                    col = QtGui.QColor(self._colors[lane])
+                    bold = ia == cur
+                    if not bold:
+                        col.setAlpha(80)
+                    plots[lane].plot(np.repeat(t, 2)[1:], np.repeat(wave * k, 2)[:-1],
+                                     pen=pg.mkPen(col, width=2.4 if bold else 1))
+                    longest = max(longest, len(wave))
+                    if bold:
+                        label = f"{names[lane]}: " if two else ""
+                        lines.append(f"{label}{st.describe(units, k)}")
+                        lines += [f"{label}{x}" for x in st.rounding_notes(cfg.stim_rate)]
             except ValueError as e:
-                curve.setData([], [])
-                self._show_problem(f"{name}: {e}" if two else str(e))
-                return
-            t = np.arange(len(wave)) / cfg.stim_rate
-            # draw each sample as a flat step, which is what the output really does
-            curve.setData(np.repeat(t, 2)[1:], np.repeat(wave * k, 2)[:-1])
-            peak = float(np.max(np.abs(wave))) * k
-            label = f"{name}: " if two else ""
-            lines.append(f"{label}{s.describe(units, k)}" + ("" if two else
-                         f"\nPeak {peak:g} {units} · {len(wave) / cfg.stim_rate * 1000:g} ms · {len(wave):,} samples"))
-            lines += [f"{label}{n}" for n in s.rounding_notes(cfg.stim_rate)]
-            waves.append(wave)
-        self.preview.getPlotItem().enableAutoRange()      # a new stimulus can change the scale
-        if two:
-            n = max(len(w) for w in waves)
-            lines.append(f"Together {n / cfg.stim_rate * 1000:g} ms · {n:,} samples per output")
+                if ia == cur or not err:
+                    err = (f"Trial {ia + 1}: " if n > 1 else "") + str(e)
+        for pi in plots:
+            pi.enableAutoRange()                       # a new stimulus can change the scale
+        if err:
+            self._show_problem(err)
+            return
+        lines.append(f"{longest / cfg.stim_rate * 1000:g} ms · {longest:,} samples"
+                     + (" per output" if two else "") + (" (the longest trial)" if n > 1 else ""))
         self.show_message("\n".join(lines))
 
     def _show_problem(self, text: str):
@@ -454,7 +361,8 @@ class StimPage(QtWidgets.QWidget):
         cfg = self.main.cfg
         if self._units != (cfg.stim_units, cfg.stim_scale):
             self._apply_units()
-            self._load_fields(self._current())
+            for ed in self.editors:
+                ed.refresh_units()
         self.output.setCurrentText(cfg.stim_output)
         self.monitor.blockSignals(True)
         self.monitor.clear()
@@ -498,16 +406,16 @@ class StimPage(QtWidgets.QWidget):
         from . import theme
         self._mode = mode
         th = theme.THEMES[theme.DARK if mode == style.DARK else theme.LIGHT]
-        self.preview.setBackground(th.background)
-        for ax in ("left", "bottom"):
-            self.preview.getPlotItem().getAxis(ax).setPen(th.foreground)
-            self.preview.getPlotItem().getAxis(ax).setTextPen(th.foreground)
+        for pw in (self.preview, self.preview2):
+            pw.setBackground(th.background)
+            for ax in ("left", "bottom"):
+                pw.getPlotItem().getAxis(ax).setPen(th.foreground)
+                pw.getPlotItem().getAxis(ax).setTextPen(th.foreground)
         self._colors = OUTPUT_COLORS[mode == style.DARK]
-        self.curve.setPen(pg.mkPen(self._colors[0], width=2))
-        self.curve2.setPen(pg.mkPen(self._colors[1], width=2))
-        if hasattr(self, "out_tabs"):
-            for i in range(self.out_tabs.count()):
-                self.out_tabs.setTabIcon(i, _dot(self._colors[i]))
+        for i, dot in enumerate(getattr(self, "out_dots", [])):
+            dot.setPixmap(_dot(self._colors[i]).pixmap(10, 10))
+        for ed in getattr(self, "editors", []):
+            ed.apply_theme(mode)
         self._update_preview()
 
     # -- units ---------------------------------------------------------------
@@ -538,62 +446,16 @@ class StimPage(QtWidgets.QWidget):
         cfg = self.main.cfg
         self._units = (cfg.stim_units, cfg.stim_scale)
         units, k = self._units
-        # enough decimals to step 0.1 mV of output, e.g. 0.0001 V or 0.00001 mA at 0.1 mA/V
-        decimals = max(4, min(8, 4 - math.floor(math.log10(k))))
-        for box in (self.p_amp, self.s_amp, self.r_start, self.r_end, self.n_amp, self.n_off):
-            box.blockSignals(True)
-            box.setDecimals(decimals)
-            box.setRange(0 if box is self.n_amp else -10 * k, 10 * k)
-            box.setSingleStep(0.1 * k)
-            box.set_unit(units, self._level_families())
-            box.blockSignals(False)
-        self.table.setHorizontalHeaderLabels(["Duration (ms)", f"Start ({units})", f"End ({units})"])
-        self.f_hint.setText("One column: volts per sample. Two columns: time (s), volts."
-                            + (" Files are always in volts at the output." if self._converted else ""))
-        axis = self.preview.getPlotItem().getAxis("left")
-        if units == "V":
-            self.preview.getPlotItem().setLabel("left", "Output", units="V")
-        else:
-            # pyqtgraph would add a prefix to a unit that may already have one (µA -> kµA)
-            self.preview.getPlotItem().setLabel("left", f"Output ({units})")
-        axis.enableAutoSIPrefix(units == "V")
-
-    # -- custom segments -----------------------------------------------------
-    def _append_row(self, dur, start, end):
-        r = self.table.rowCount()
-        self.table.insertRow(r)
-        for c, v in enumerate((dur, start, end)):
-            self.table.setItem(r, c, QtWidgets.QTableWidgetItem(f"{float(v):g}"))
-
-    def _add_segment(self):
-        last = self.table.rowCount() - 1
-        end = self.table.item(last, 2).text() if last >= 0 and self.table.item(last, 2) else "0"
-        try:
-            end = parse_quantity(end, self._level_factor)[0]   # e.g. "200 mV" typed in that cell
-        except ValueError:
-            end = 0.0
-        self.table.blockSignals(True)
-        self._append_row(10, end, end)
-        self.table.blockSignals(False)
-        self._changed()
-
-    def _remove_segment(self):
-        rows = sorted({i.row() for i in self.table.selectedIndexes()} or {self.table.rowCount() - 1})
-        self.table.blockSignals(True)
-        for r in reversed(rows):
-            if r >= 0:
-                self.table.removeRow(r)
-        self.table.blockSignals(False)
-        self._changed()
+        for pw in (self.preview, self.preview2):
+            pi = pw.getPlotItem()
+            if units == "V":
+                pi.setLabel("left", "Output", units="V")
+            else:
+                # pyqtgraph would add a prefix to a unit that may already have one (µA -> kµA)
+                pi.setLabel("left", f"Output ({units})")
+            pi.getAxis("left").enableAutoSIPrefix(units == "V")
 
     # -- files -----------------------------------------------------------------
-    def _browse(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Waveform file", "",
-                                                        "Waveform (*.csv *.txt *.tsv);;All files (*)")
-        if path:
-            self.f_path.setText(path)
-            self._changed()
-
     def _save(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save stimulus", "stimulus.json",
                                                         "Stimulus (*.json)")
@@ -611,8 +473,8 @@ class StimPage(QtWidgets.QWidget):
             self.show_message(str(e), error=True)
             return
         self.editing = 0
-        self.main.set_stimulus(s)
         self.main.set_stimulus2(s2)
+        self.main.set_stimulus(s)
 
 
 StimWindow = StimPage   # older name

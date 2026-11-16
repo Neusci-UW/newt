@@ -415,9 +415,40 @@ class OverlayCurve(TraceCurve):
 def light_grid(p: pg.PlotItem) -> None:
     """Grid lines at the major and middle ticks only. pyqtgraph also draws one at every
     minor tick, and redrawing those see-through lines was most of a live screen
-    update's time (21 ms a frame at 20 kHz, 7.6 ms without them)."""
-    for ax in ("bottom", "left"):
-        p.getAxis(ax).setStyle(maxTickLevel=1)
+    update's time (21 ms a frame at 20 kHz, 7.6 ms without them).
+
+    The lines are also drawn solid, in the color the see-through line would have shown
+    over the background: blending see-through lines the height and width of every plot
+    was still most of the painting while acquiring (~75%), enough with a few channels
+    that zooming and buttons lagged. They look the same."""
+    for name in ("bottom", "left"):
+        ax = p.getAxis(name)
+        ax.setStyle(maxTickLevel=1)
+        ax.generateDrawSpecs = _solid_ticks(ax, ax.generateDrawSpecs)
+
+
+def _solid_ticks(ax: pg.AxisItem, generate):
+    def specs(painter):
+        out = generate(painter)
+        if out is None or ax.grid is False or ax.scene() is None or not ax.scene().views():
+            return out
+        axis_spec, tick_specs, text_specs = out
+        bg = ax.scene().views()[0].backgroundBrush().color()
+        solid = {}
+        ticks = []
+        for pen, p1, p2 in tick_specs:
+            c = pen.color()
+            key = c.rgba()
+            if key not in solid:
+                a = c.alphaF()
+                pen = QtGui.QPen(pen)
+                pen.setColor(QtGui.QColor.fromRgbF(c.redF() * a + bg.redF() * (1 - a),
+                                                   c.greenF() * a + bg.greenF() * (1 - a),
+                                                   c.blueF() * a + bg.blueF() * (1 - a)))
+                solid[key] = pen
+            ticks.append((solid[key], p1, p2))
+        return axis_spec, ticks, text_specs
+    return specs
 
 
 def fit_title(p: pg.PlotItem) -> None:

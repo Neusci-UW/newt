@@ -16,8 +16,11 @@ Parts sit between two holes (a probe in one):
 - wire: joins two holes (two strips become one net)
 - switch: `value` ohms when closed, no connection when open. `mode` "toggle": flipped
   by hand (`closed`). `mode` "mosfet": `a` is the drain, `b` the source and `gate` a
-  third hole; it closes while the gate is more than `vth` above the source ("n"
-  channel) or below it ("p"). No current flows into the gate.
+  third hole; it conducts while the gate is more than `vth` above the source ("n"
+  channel) or below it ("p"). No current flows into the gate. Fully on, it's `value`
+  ohms; when the drain is further from the source than the gate's overdrive
+  (|Vgs| - vth), it passes (|Vgs| - vth) / `value` amps instead, so with its source
+  driving a load (a follower) the source settles about vth from the gate.
 - probe: records the voltage of its hole's net on input `input` ("" = not recorded)
 - ground: one hole, tied to 0 V (like a wire to a - rail)
 - battery: a fixed `value` in V, + end at `a`
@@ -35,8 +38,8 @@ backward Euler (i = C (v - v_prev) / dt), which is stable at any step, so an RC
 charges with the right time constant at any sample rate; so do inductors, whose
 currents are unknowns of their own (v = L (i - i_prev) / dt). Every net also has a
 tiny conductance to ground, so a part left floating reads 0 V instead of making
-the circuit unsolvable. A MOSFET switch, diode or LED is checked once per sample, from the
-voltages of the sample before; each pattern of open and closed ones is solved once and kept.
+the circuit unsolvable. A MOSFET switch, diode or LED is checked each sample against the
+voltages it gives (re-solved until they agree); each pattern of open and closed ones is solved once and kept.
 """
 from __future__ import annotations
 
@@ -244,7 +247,8 @@ class BoardState:
         size = n + m + nl                        # node voltages, then source currents, then inductor currents
         a = np.zeros((size, size))
         gc = np.zeros((size, size))              # the history term: capacitors' voltages, inductors' currents
-        e = np.zeros((size, m + nd))             # how each source's voltage (and each diode's vf) enters
+        nm = sum(p.kind == "switch" and p.mode == "mosfet" for p in board.parts)
+        e = np.zeros((size, m + nd + nm))   # how each source's voltage (each diode's vf, each MOSFET's vth) enters
         for i in range(n):
             a[i, i] += G_MIN
 
@@ -261,10 +265,14 @@ class BoardState:
             stamp_ij(mat, self._idx(p.a), self._idx(p.b), g)
 
         self.switches = []                       # (part, index in board.parts, a, b, gate, source)
+        self._mos_col = {}                       # a MOSFET's board index -> its vth column in u
         for k, p in enumerate(board.parts):
             if p.kind in ("switch", "button"):
-                gate = self._idx(p.gate) if p.kind == "switch" and p.mode == "mosfet" else None
+                mos = p.kind == "switch" and p.mode == "mosfet"
+                gate = self._idx(p.gate) if mos else None
                 self.switches.append((p, k, self._idx(p.a), self._idx(p.b), gate, self._idx(p.b)))
+                if mos:
+                    self._mos_col[k] = len(self._mos_col)
         for p in board.parts:
             if p.kind == "resistor":
                 stamp(a, p, 1.0 / p.value)
@@ -306,14 +314,17 @@ class BoardState:
         self.p, self.q = self._solve(self.key)
 
     def _key(self, v: np.ndarray) -> tuple:
-        """Which switches are closed and which diodes conduct, given node voltages `v`."""
+        """Which switches are closed and which diodes conduct, given node voltages `v`.
+        A MOSFET is 0 (off), 1 (fully on) or 2 (on, passing a current set by its gate)."""
         out = []
-        for p, _k, _a, _b, g, s in self.switches:
+        at = lambda i: 0.0 if i is None else v[i]
+        for p, _k, d, _b, g, s in self.switches:
             if p.kind == "button" or p.mode == "toggle":
                 out.append(bool(p.closed))
             else:
-                vgs = (0.0 if g is None else v[g]) - (0.0 if s is None else v[s])
-                out.append(bool(vgs > p.vth if p.channel == "n" else vgs < -p.vth))
+                sign = 1.0 if p.channel == "n" else -1.0
+                over = sign * (at(g) - at(s)) - p.vth          # the gate's overdrive
+                out.append(0 if over <= 0 else 2 if sign * (at(d) - at(s)) > over else 1)
         for p, _k, i, j in self.diodes:          # conducting while the anode is more than vf above the cathode
             vab = (0.0 if i is None else v[i]) - (0.0 if j is None else v[j])
             out.append(bool(vab > p.vf))
@@ -324,8 +335,19 @@ class BoardState:
         if key not in self._mats:
             a, e = self._a.copy(), self._e.copy()
             ns = len(self.switches)
-            for (p, *_), on in zip(self.switches, key[:ns]):
-                if on:
+            for (p, _k, d, _b, g, s), on in zip(self.switches, key[:ns]):
+                if on == 2:                      # i (drain -> source) = (Vgs - vth) / value, n; mirrored for p
+                    gm, sign = 1.0 / p.value, (1.0 if p.channel == "n" else -1.0)
+                    col = self._m + len(self.diodes) + self._mos_col[_k]
+                    for row, w in ((d, 1.0), (s, -1.0)):
+                        if row is None:
+                            continue
+                        if g is not None:
+                            a[row, g] += w * gm
+                        if s is not None:
+                            a[row, s] -= w * gm
+                        e[row, col] += w * sign * gm
+                elif on:
                     self._stamp(a, p, 1.0 / p.value)
             for d, ((p, _k, i, j), on) in enumerate(zip(self.diodes, key[ns:])):
                 if on:                           # g (v_a - v_b - vf): a conductance, and vf as a source
@@ -355,7 +377,7 @@ class BoardState:
 
     def closed_now(self) -> dict[int, bool]:
         """Each switch's state after the last sample, by its index in board.parts."""
-        return {k: on for (_p, k, *_), on in zip(self.switches, self.key)}
+        return {k: bool(on) for (_p, k, *_), on in zip(self.switches, self.key)}
 
     def lit_now(self) -> dict[int, float]:
         """Each LED's current after the last sample, A, by its index in board.parts."""
@@ -374,22 +396,30 @@ class BoardState:
     def run(self, stim: np.ndarray, holes: list[str]) -> np.ndarray:
         """Step one sample per value of `stim` (the stimulator's output, V). Returns the
         voltage at each of `holes`, one row per hole."""
-        u = np.empty((len(stim), len(self.vins) + len(self.diodes)))
+        u = np.empty((len(stim), len(self.vins) + len(self.diodes) + len(self._mos_col)))
         for k, p in enumerate(self.vins):
             u[:, k] = stim if p.kind == "vin" and p.source == "stim" else p.value
         for d, (p, *_) in enumerate(self.diodes):
             u[:, len(self.vins) + d] = p.vf
+        for k, c in self._mos_col.items():
+            u[:, len(self.vins) + len(self.diodes) + c] = self.board.parts[k].vth
         cols = [self._known(h) for h in holes]
         out = np.zeros((len(holes), len(stim)))
         v, p, q, key = self.v, self.p, self.q, self.key
         gated = bool(self.diodes) or any(sw[0].kind == "switch" and sw[0].mode == "mosfet" for sw in self.switches)
         for s in range(len(stim)):
+            new = p @ v + q @ u[s]
             if gated:
-                k = self._key(v)
-                if k != key:
+                # The states must agree with the voltages they give, or a switch flips
+                # every sample (spikes and chatter): re-solve this sample until they do.
+                for _ in range(4):
+                    k = self._key(new)
+                    if k == key:
+                        break
                     key = k
                     p, q = self._solve(key)
-            v = p @ v + q @ u[s]
+                    new = p @ v + q @ u[s]
+            v = new
             for r, c in enumerate(cols):
                 if c is not None:
                     out[r, s] = v[c]

@@ -55,6 +55,22 @@ def samples(ms: float, rate: float) -> int:
     return int(math.floor(ms * rate / 1000.0 + 0.5 + 1e-9))
 
 
+def span(t0_ms: float, ms: float, rate: float) -> int:
+    """Samples from `t0_ms` to `t0_ms + ms`, each end rounded on its own, so rounding
+    never piles up from one segment or pulse to the next."""
+    return samples(t0_ms + ms, rate) - samples(t0_ms, rate)
+
+
+def _train(one: np.ndarray, count: int, interval_ms: float, t0_ms: float, rate: float) -> np.ndarray:
+    """`count` copies of `one`, each starting at t0 + i × interval on the sample grid."""
+    first = samples(t0_ms, rate)
+    starts = [samples(t0_ms + i * interval_ms, rate) - first for i in range(count)]
+    out = np.zeros(starts[-1] + len(one))
+    for s0 in starts:
+        out[s0:s0 + len(one)] = one
+    return out
+
+
 def new_part(kind: str, level: float | None = None, dur: float | None = None) -> dict:
     """A segment of `kind` with sensible starting values. Its level and duration mean:
     base 0 V for dur ms; step level V for dur ms; ramp from `start` to level V over dur ms;
@@ -202,13 +218,10 @@ class Stimulus:
             if self.biphasic:
                 one = np.concatenate([one, -one])
             gap = n(self.interval_ms) - len(one)
-            if self.count > 1 and gap < 0:
+            if self.count > 1 and (gap < 0 or self.interval_ms * rate / 1000.0 < len(one) - 1e-9):
                 raise ValueError(f"Interval {self.interval_ms:g} ms is shorter than one pulse "
                                  f"({len(one) * dt_ms:g} ms). Use a longer interval.")
-            for i in range(self.count):
-                parts.append(one)
-                if i < self.count - 1 and gap > 0:
-                    parts.append(np.zeros(gap))
+            parts.append(_train(one, self.count, self.interval_ms, self.delay_ms, rate))
         elif self.shape == "step":
             k = self._need(self.duration_ms, "Duration", dt_ms, rate)
             parts.append(np.full(k, float(self.amplitude_v)))
@@ -226,16 +239,21 @@ class Stimulus:
             parts_ = self.at_trial(0).parts
             if not parts_:
                 raise ValueError("Add at least one segment.")
+            t0 = self.delay_ms
             for i, p in enumerate(parts_):
                 try:
-                    parts.append(_part_wave(p, rate))
+                    w = _part_wave(p, rate, t0)
+                    parts.append(w)
+                    t0 += len(w) * 1000.0 / rate if p.get("kind") == "file" else _part_ms(p)
                 except ValueError as e:
                     raise ValueError(f"{letter(i)} ({SEG_KINDS.get(p.get('kind'), '?')}): {e}") from None
         elif self.shape == "custom":
             if not self.segments:
                 raise ValueError("Add at least one segment.")
+            t0 = self.delay_ms
             for i, seg in enumerate(self.segments, 1):
-                k = n(float(seg["duration_ms"]))
+                k = span(t0, float(seg["duration_ms"]), rate)
+                t0 += float(seg["duration_ms"])
                 if float(seg["duration_ms"]) * rate / 1000.0 < 1 - 1e-9:
                     raise ValueError(f"Segment {i} is shorter than one output sample ({dt_ms:g} ms).")
                 parts.append(np.linspace(float(seg["start_v"]), float(seg["end_v"]), k, endpoint=False)
@@ -296,12 +314,12 @@ class Stimulus:
         Time 0 of a protocol's trial is here."""
         if self.shape != "segments":
             return samples(self.delay_ms, rate)
-        n = 0
+        ms = 0.0
         for p in self.parts:
             if p.get("kind") != "base":
                 break
-            n += samples(float(p.get("dur", 0.0)), rate)
-        return n
+            ms += float(p.get("dur", 0.0))
+        return samples(self.delay_ms + ms, rate)
 
     def rounding_notes(self, rate: float) -> list[str]:
         """Times that don't fit the output's sample grid and will be rounded."""
@@ -406,8 +424,9 @@ def _part_ms(p: dict) -> float:
     return 0.0 if kind == "file" else dur
 
 
-def _part_wave(p: dict, rate: float) -> np.ndarray:
-    """One segment's samples. Raises ValueError."""
+def _part_wave(p: dict, rate: float, t0_ms: float = 0.0) -> np.ndarray:
+    """One segment's samples, for a segment starting `t0_ms` into the output (its
+    edges land on the sample nearest their true time). Raises ValueError."""
     kind = p.get("kind")
     dt_ms = 1000.0 / rate
     level, dur = float(p.get("level", 0.0)), float(p.get("dur", 0.0))
@@ -416,7 +435,7 @@ def _part_wave(p: dict, rate: float) -> np.ndarray:
             raise ValueError("its duration can't be negative.")
         if 0 < dur * rate / 1000.0 < 1 - 1e-9:
             raise ValueError(f"{dur:g} ms is shorter than one output sample ({dt_ms:g} ms at {rate:,.0f} S/s).")
-    k = samples(dur, rate)
+    k = span(t0_ms, dur, rate)
     if kind == "base":
         return np.zeros(k)
     if kind == "step":
@@ -430,6 +449,7 @@ def _part_wave(p: dict, rate: float) -> np.ndarray:
         t = np.arange(k) / rate
         return float(p.get("offset", 0.0)) + abs(level) * np.sin(2 * np.pi * freq * t)
     if kind == "pulse":
+        k = samples(dur, rate)                       # every pulse the same width
         if k == 0:
             raise ValueError("a pulse needs a width.")
         count = int(p.get("count", 1))
@@ -438,16 +458,13 @@ def _part_wave(p: dict, rate: float) -> np.ndarray:
         one = np.full(k, level)
         if p.get("biphasic"):
             one = np.concatenate([one, -one])
-        gap = samples(float(p.get("interval", 0.0)), rate) - len(one)
-        if count > 1 and gap < 0:
+        interval = float(p.get("interval", 0.0))
+        if count > 1 and interval * rate / 1000.0 < len(one) - 1e-9:
             raise ValueError(f"pulses {float(p.get('interval', 0.0)):g} ms apart are closer than one pulse "
                              f"({len(one) * dt_ms:g} ms).")
-        bits = []
-        for i in range(count):
-            bits.append(one)
-            if i < count - 1 and gap > 0:
-                bits.append(np.zeros(gap))
-        return np.concatenate(bits)
+        out = _train(one, count, interval, t0_ms, rate)
+        end = span(t0_ms, _part_ms(p), rate)            # end on the grid too
+        return np.concatenate([out, np.zeros(end - len(out))]) if end > len(out) else out[:end]
     if kind == "file":
         return load_wave_file(p.get("file", ""), rate, float(p.get("file_rate", 0.0)) or rate) * level
     raise ValueError(f"unknown kind of segment {kind!r}.")

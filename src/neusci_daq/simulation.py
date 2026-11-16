@@ -116,10 +116,12 @@ def resize(net: Network, n: int) -> None:
         r.cell = min(r.cell, n - 1)
 
 
+NO_CELL = -1   # an input that records no cell: just its noise and sine
+
+
 def default_recording(physical: str, n_cells: int) -> Recording:
-    """aiN records cell N+1 (wrapping round), intracellularly."""
-    k = int(physical[2:]) if physical[2:].isdigit() else 0
-    return Recording(physical, cell=k % max(1, n_cells))
+    """An input records no cell until one is assigned (intracellular once it is)."""
+    return Recording(physical, cell=NO_CELL)
 
 
 def recording_for(net: Network, physical: str) -> Recording:
@@ -293,7 +295,7 @@ def from_toml(sim: dict) -> Network:
     for raw in sim.get("inputs", []):
         r = default_recording(str(raw.get("physical", "ai0")).lower(), len(net.cells))
         if "cell" in raw:
-            r.cell = int(raw["cell"]) - 1                  # 1-based in the file, like the tab
+            r.cell = int(raw["cell"]) - 1                  # 1-based in the file, like the tab; 0 = none
         r.kind = str(raw.get("recording", r.kind)).lower()
         for attr, key in _REC_KEYS.items():
             if key in raw:
@@ -330,7 +332,7 @@ def validate(net: Network) -> None:
         if c.spike_depth_v < 0 or c.spike_width_ms <= 0:
             raise ValueError(f"[simulated] cell {n}: spike size can't be negative and width must be positive.")
     for r in net.recordings:
-        if not 0 <= r.cell < len(net.cells):
+        if not NO_CELL <= r.cell < len(net.cells):
             raise ValueError(f"[simulated] {r.physical}: there is no cell {r.cell + 1}.")
         if r.kind not in ("intracellular", "extracellular"):
             raise ValueError(f"[simulated] {r.physical}: recording must be intracellular or extracellular.")

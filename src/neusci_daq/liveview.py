@@ -74,6 +74,19 @@ class LiveMixin:
         self._style_plot(pw)
         return pw
 
+    def _fit_strips(self) -> None:
+        """Fold the channels' settings to their small form (they open on hover) when the
+        rows wouldn't all fit with them open, or when Acquisition shares the screen."""
+        if not hasattr(self, "tabs"):
+            return
+        rows = self.row_widgets
+        need = sum(rw.full_height for rw in rows) + self.plot_layout.spacing() * max(0, len(rows) - 1)
+        compact = self.tabs.shares_screen("acq") or need > self.plot_area.height()
+        if compact != self._compact_strips:
+            self._compact_strips = compact
+            for rw in rows:
+                rw.set_compact(compact)
+
     def _autoscale_view(self, vb) -> None:
         """Right-click › Autoscale: fit this plot's y axis to its data now. With View ›
         Auto-scale on it keeps fitting; off, it holds the new range."""
@@ -347,16 +360,17 @@ class LiveMixin:
                 content = QtWidgets.QLabel("off")
                 content.setStyleSheet("color: gray; padding-left: 8px")
             row_w = ChannelRowWidget(strip, content)
+            row_w.fit_strip = not r.ch.enabled
             row_w.set_compact(self._compact_strips)
             self.row_widgets.append(row_w)
             if r.ch.enabled:
                 self.plot_layout.addWidget(row_w, 1)
             else:
-                row_w.setFixedHeight(strip.sizeHint().height())
                 self.plot_layout.addWidget(row_w, 0)
         self._add_calc_rows([r.ch.name for r in self.rows if r.ch.enabled], self.cfg.sample_rate, live=True)
         self._recompute_calc_ring()
         self._finish_plots()
+        self._fit_strips()
         self.btn_add_ch.setEnabled(not locked)
         self.rate_box.setEnabled(not locked)
         if hasattr(self, "trials_page"):
@@ -609,59 +623,84 @@ class LiveMixin:
             self._axis_zero = 0.0
             self._block_on_screen = False
             self.btn_run.setText("Stop")
-            self.btn_rec.setEnabled(True)
             self.timer.start()
+            if self.btn_rec.isChecked():         # Record is on: Start records too
+                self._start_block()
             if self.stim_on_start == "once":
                 self.fire_stimulus()
             elif self.stim_on_start == "repeat":
                 self.set_repeat(True)
         else:
-            if self.btn_rec.isChecked():
-                self.btn_rec.setChecked(False)
+            if self.recorder.recording:          # ends the block; Record stays on for the next Start
+                self._stop_block()
             self.stop_stimulus()
             self.backend.stop()
             self.timer.stop()
             self.btn_run.setText("Start")
-            self.btn_rec.setEnabled(False)
+            self._show_rec_armed()
             self._fit_window()
 
     def _toggle_rec(self, on: bool):
-        if on:
-            if self.session_dir is None:
-                # Untitled until saved; recording still goes straight to disk.
-                self.session_dir = self._unsaved_dir() / datetime.now().strftime("session_%Y%m%d_%H%M%S")
-                self.session_dir.mkdir(parents=True, exist_ok=True)
-                self.session_saved = False
-            path = session.next_block_path(self.session_dir)
-            path = self.recorder.start(path)
-            if self.camera_panel.start_block(path, time.monotonic()):
-                self.statusBar().showMessage(f"Recording {path.name} with video", 5000)
-            # Time 0 = this block's first sample. Until it arrives, use the latest
-            # sample; _refresh corrects it (by at most one read) once it's known.
-            self._set_axis_zero(self.recorder.last_t)
-            self._block_on_screen = True
-            self.blocks.append(path)
-            self._update_title()
-            self.statusBar().showMessage(f"Recording {path.name} in {self.session_dir}")
-            self._set_rec_text(0.0)
-            self.btn_rec.setIcon(style.dot_icon("#ffffff", square=True))
-            self._lock_channels(True)
-            self._set_comment_box(True)
-            self._fill_recorded()
+        """Record is an on/off switch. Turned on while acquiring, a block starts now;
+        on while stopped, Start begins recording straight away. Off ends the block."""
+        if on and self.btn_run.isChecked() and not self.recorder.recording:
+            self._start_block()
+        elif not on and self.recorder.recording:
+            self._stop_block()
+        self._show_rec_armed()
+
+    def _show_rec_armed(self) -> None:
+        """Record's look while it isn't counting a block's time: on (armed) or off."""
+        if self.recorder.recording:
+            return
+        on = self.btn_rec.isChecked()
+        self.btn_rec.setText("Record: On" if on else "Record")
+        if not on:
+            self.btn_rec.setToolTip("Turn on to record: now while acquiring, or as soon as you press Start")
+        elif self.btn_run.isChecked():
+            self.btn_rec.setToolTip("Click to turn recording off")
         else:
-            self.recorder.stop()
-            self.camera_panel.stop_block()
-            self._lock_channels(False)
-            self.statusBar().showMessage(f"Saved {self.recorder.path.name}", 10000)
-            self.btn_rec.setText("Record")
-            self.btn_rec.setToolTip("")
-            self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
-            self._set_comment_box(False)
-            self.analysis_page.source_changed()          # a new block to analyze
+            self.btn_rec.setToolTip("Start will record too. Click to turn recording off.")
+        self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
+        self._fit_toolbar()
+
+    def _start_block(self) -> None:
+        if self.session_dir is None:
+            # Untitled until saved; recording still goes straight to disk.
+            self.session_dir = self._unsaved_dir() / datetime.now().strftime("session_%Y%m%d_%H%M%S")
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+            self.session_saved = False
+        path = session.next_block_path(self.session_dir)
+        path = self.recorder.start(path)
+        if self.camera_panel.start_block(path, time.monotonic()):
+            self.statusBar().showMessage(f"Recording {path.name} with video", 5000)
+        # Time 0 = this block's first sample. Until it arrives, use the latest
+        # sample; _refresh corrects it (by at most one read) once it's known.
+        self._set_axis_zero(self.recorder.last_t)
+        self._block_on_screen = True
+        self.blocks.append(path)
+        self._update_title()
+        self.statusBar().showMessage(f"Recording {path.name} in {self.session_dir}")
+        self._set_rec_text(0.0)
+        self.btn_rec.setIcon(style.dot_icon("#ffffff", square=True))
+        self._lock_channels(True)
+        self._set_comment_box(True)
+        self._block_changed(started=True)
+
+    def _stop_block(self) -> None:
+        self.recorder.stop()
+        self.camera_panel.stop_block()
+        self._lock_channels(False)
+        self.statusBar().showMessage(f"Saved {self.recorder.path.name}", 10000)
+        self._set_comment_box(False)
+        self.analysis_page.source_changed()          # a new block to analyze
+        self._block_changed(started=False)
+
+    def _block_changed(self, started: bool) -> None:
         self._fill_recorded()
         # Starting a block keeps the previous block's comment lines: its data is
         # still on screen (now at negative times), and they scroll off with it.
-        self.refresh_comments(redraw_markers=not on)
+        self.refresh_comments(redraw_markers=not started)
         self._fit_toolbar()
 
     def _set_rec_text(self, secs: float) -> None:
@@ -693,7 +732,7 @@ class LiveMixin:
         # Width with every wanted label shown and the full Record text.
         full = (sum(w.sizeHint().width() for w in others) + sum(lbl.sizeHint().width() for _, lbl in wanted)
                 + lay.spacing() * max(0, n - 1) + m.left() + m.right() + lm.left() + lm.right() + 12)
-        recording = self.btn_rec.isChecked()
+        recording = self.recorder.recording
         fm = self.btn_rec.fontMetrics()
         rec_saving = fm.horizontalAdvance("Stop recording · ") if recording else 0
         if self._short_rec:
@@ -775,12 +814,12 @@ class LiveMixin:
             return
         x = self.buf_t - self._axis_zero
         t_end = x[-1]
-        # the range first, so each TraceCurve groups its samples once for this frame; it starts
-        # no earlier than the oldest sample (the views' own limits are off while acquiring: they
-        # would lag a frame behind the newest data, and fight a held voltage range). Always a whole
-        # Window wide: the data fills it from the left, then the window moves along with the data.
+        # the range first, so each TraceCurve groups its samples once for this frame (the views'
+        # own limits are off while acquiring: they would lag a frame behind the newest data, and
+        # fight a held voltage range). Always a whole Window wide, with the newest sample at the
+        # right edge from the start: until the Window fills, the left of it is empty.
         win = self.window_box.value()
-        start = max(t_end - win, x[0])
+        start = t_end - win
         self.plots[0].setXRange(start, start + win, padding=0)
         for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
             curve.setData(x, ch.to_units(y))

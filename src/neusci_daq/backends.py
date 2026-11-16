@@ -94,7 +94,7 @@ class SimulatedBackend(Backend):
     input a probe is set to recording its node (breadboard.py). Settings changed while
     running apply from the next chunk."""
 
-    _pending = None    # (monitor input, waveform at the input rate) from SimulatedOutput
+    _pending = None    # (monitor input, waveform at the input rate, sample fired at) from SimulatedOutput
 
     def _setup(self):
         self._rng = np.random.default_rng(0)
@@ -114,7 +114,9 @@ class SimulatedBackend(Backend):
         t_in = np.arange(len(wave)) / rate
         t_ai = np.arange(0, len(wave) / rate, 1.0 / fs)
         w = np.interp(t_ai, t_in, wave) if len(wave) > 1 else np.asarray(wave, float)
-        self._pending = (monitor, w)
+        t0 = getattr(self, "_t0", None)        # the sample this call lands on, not the next chunk's start
+        at = int(round((time.perf_counter() - t0) * fs)) if t0 is not None else None
+        self._pending = (monitor, w, at)
 
     def rates(self, window_s: float = 10.0) -> list[float]:
         """Each cell's firing rate over the last `window_s` seconds (spikes/s)."""
@@ -184,14 +186,19 @@ class SimulatedBackend(Backend):
     def _loop(self):
         fs, cs = self.cfg.sample_rate, self.cfg.chunk_size
         idx, t0 = 0, time.perf_counter()
+        self._t0 = t0
         steps_done = 0
         while not self._stop.is_set():
             net_cfg = self.cfg.sim_network
             state = self._network()
             t = (idx + np.arange(cs)) / fs
             if self._pending is not None:
-                monitor, w = self._pending
+                monitor, w, at = self._pending
                 self._pending = None
+                # chunks are made one chunk ahead of real time: a fixed one-chunk delay puts
+                # the stimulus mid-chunk, at the sample it was fired, instead of snapping to a chunk
+                if at is not None and at + cs > idx:
+                    w = np.concatenate([np.zeros(min(at + cs - idx, cs)), w])
                 self._stim = (monitor, w, 0)
                 state.stim = []                    # a new stimulus (or Stop) replaces the one playing
                 state.stimulate(w, fs)
@@ -230,6 +237,11 @@ class SimulatedBackend(Backend):
                     data[i] = board_v[ch.physical] + probes[ch.physical].noise_v * self._rng.standard_normal(cs)
                     continue
                 rec = sim.recording_for(net_cfg, ch.physical)
+                if rec.cell < 0:                                          # no cell assigned
+                    data[i] = rec.noise_v * self._rng.standard_normal(cs)
+                    if rec.sine_v:
+                        data[i] += rec.sine_v * np.sin(2 * np.pi * rec.sine_hz * t)
+                    continue
                 c = min(rec.cell, len(net_cfg.cells) - 1)
                 v_mv = np.interp(t, t_net, v[:, c]) if len(v) else np.full(cs, state.v[c])
                 data[i] = self._record(rec, net_cfg.cells[c], v_mv, by_cell.get(c, []), t, fs)

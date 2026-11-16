@@ -34,6 +34,8 @@ class _TraceViewBox(WheelViewBox):
     Window and the main window, so every acquisition plot follows and live mode keeps
     the newest data at the right edge."""
 
+    y_room = 1.0              # zoom out in y to 3x the data's range, and always to 0
+
     def __init__(self, zoom_time, pan_time, zoom_to=None, autoscale=None, **kw):
         super().__init__(**kw)
         self.zoom_time, self.pan_time = zoom_time, pan_time
@@ -50,6 +52,17 @@ class _TraceViewBox(WheelViewBox):
             self._zoom_to(x0, x1)
         else:
             super().set_time_range(x0, x1)
+
+
+class PlotArea(QtWidgets.QWidget):
+    """Holds the channel rows; says when its height changes, so the rows' settings can
+    fold up when they don't all fit."""
+
+    resized = QtCore.Signal()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self.resized.emit()
 
 
 class _CommentEdit(QtWidgets.QLineEdit):

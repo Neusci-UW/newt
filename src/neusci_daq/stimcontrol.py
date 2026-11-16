@@ -97,7 +97,8 @@ class StimulatorMixin:
         if self.trials_page.running:
             self.stop_stimulus()
             return
-        if self.repeating or (self.stim_out is not None and self.stim_out.busy):
+        if self.repeating or getattr(getattr(self, "simple_page", None), "repeating", False) \
+                or (self.stim_out is not None and self.stim_out.busy):
             self.stop_stimulus()
             self._stim_message("Stimulus stopped")
 
@@ -107,7 +108,7 @@ class StimulatorMixin:
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
         if self.trials_page.running:
-            self._stim_message("A protocol is running (Acquisition › Stimulus); stop it first.", error=True)
+            self._stim_message("A protocol is running (Acquisition › Stimulus Design); stop it first.", error=True)
             return False
         try:
             chans, wave = self.stimulus_waves()
@@ -150,13 +151,15 @@ class StimulatorMixin:
         if hasattr(self, "trials_page") and self.trials_page.running:
             self.trials_page.stop_protocol("Protocol stopped")
         self.set_repeat(False)
+        if hasattr(self, "simple_page"):
+            self.simple_page.halt()
         if self.stim_out is not None:
             self.stim_out.stop()
         self._update_stim_chip()
 
     def set_repeat(self, on: bool) -> None:
         if on and hasattr(self, "trials_page") and self.trials_page.running:
-            self._stim_message("A protocol is running (Acquisition › Stimulus); stop it first.", error=True)
+            self._stim_message("A protocol is running (Acquisition › Stimulus Design); stop it first.", error=True)
             on = False
         if on and not self.repeating:
             self.repeating = True          # set first, so the chip shows "every N s"

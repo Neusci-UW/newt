@@ -1,0 +1,76 @@
+# A NEWT breadboard circuit: Breadboard › Open board… to use it
+
+[[simulated.breadboard]]
+part = "vin"
+a = "a9"
+b = "t-9"
+value = 1
+source = "stim"
+
+[[simulated.breadboard]]
+part = "battery"
+a = "a5"
+b = "t-5"
+value = 5
+
+[[simulated.breadboard]]
+part = "resistor"
+a = "b5"
+b = "b6"
+value = 10000
+
+[[simulated.breadboard]]
+part = "switch"
+a = "c6"
+b = "c12"
+value = 1
+mode = "mosfet"
+gate = "d9"
+vth = 2
+channel = "n"
+
+[[simulated.breadboard]]
+part = "probe"
+a = "e9"
+input = "ai0"
+noise_v = 0.002
+
+[[simulated.breadboard]]
+part = "probe"
+a = "e12"
+input = "ai1"
+noise_v = 0.002
+
+[[simulated.breadboard]]
+part = "resistor"
+a = "a12"
+b = "t-13"
+value = 10000
+
+[[simulated.breadboard]]
+part = "capacitor"
+a = "a12"
+b = "t-11"
+value = 1e-06
+
+[[simulated.breadboard]]
+part = "battery"
+a = "t-15"
+b = "a15"
+value = 5
+
+[[simulated.breadboard]]
+part = "resistor"
+a = "b15"
+b = "b12"
+value = 10000
+
+[[simulated.breadboard]]
+part = "probe"
+a = "d6"
+input = "ai2"
+noise_v = 0.002
+
+[[simulated.breadboard]]
+part = "ground"
+a = "t-17"

@@ -1,6 +1,6 @@
 """A small stimulator floating over the Record page's plots, like LabChart's Stimulator
 Panel: run or fire the stimulus, stop it, see a protocol's progress, and nudge the
-stimulus's main level, without going to Acquisition › Stimulus.
+stimulus's main level, without going to Acquisition › Stimulus Design.
 
 The main level is the first segment that isn't a baseline, on the first output; with
 per-trial changes it's trial 1's, and the others follow from it.
@@ -31,7 +31,7 @@ class MiniStimulator(QtWidgets.QFrame):
         head.setSpacing(6)
         title = QtWidgets.QLabel("<b>Stimulator</b>")
         self.btn_edit = QtWidgets.QPushButton("Edit…")
-        self.btn_edit.setToolTip("Open Acquisition › Stimulus")
+        self.btn_edit.setToolTip("Open Acquisition › Stimulus Design")
         self.btn_edit.setStyleSheet("QPushButton { padding: 1px 8px; }")
         self.btn_close = QtWidgets.QToolButton(text="✕", autoRaise=True)
         self.btn_close.setToolTip("Hide the stimulator (the Stimulator button below brings it back)")

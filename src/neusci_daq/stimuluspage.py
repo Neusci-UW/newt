@@ -1,4 +1,5 @@
-"""The Stimulus tab: the Stimulator and its protocols in one page, in three sections.
+"""Acquisition › Stimulus Design: the Stimulator and its protocols in one page, in three
+sections.
 
 1 Stimulus: each output's segments, left to right (segmenteditor.py). Any segment's level
   or duration can change per trial.
@@ -7,8 +8,10 @@
 3 Output: which output, and the input that records it.
 
 With one trial sent once it's the plain stimulator (Fire, Repeat). With more, it's a
-protocol: Run, and the Plan, Responses and Curve under the preview. The preview always
-shows every trial, faded, with the one picked in bold.
+protocol: Run, with its progress under the buttons. The preview always shows every
+trial, faded, with the one picked in bold. The protocol's Plan, Responses and Curve
+views aren't shown: responses are looked at on the Record and Analysis pages. For a
+quick pulse, pair or train there's Simple Stimulus (simplestim.py).
 
 The halves keep their own code (stimwindow.py, protocolspage.py): this page lays out
 their panels. A protocol's a is the trial number (protocols.trials_variable).
@@ -72,18 +75,24 @@ class StimulusPage(QtWidgets.QWidget):
         lv.addWidget(stim.output_panel)
         lv.addWidget(stim.buttons_panel)
         lv.addWidget(trials.foot)
+        # The protocol's progress and messages, here now its results views are hidden.
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(8)
+        self.progress_text = QtWidgets.QLabel()
+        for w in (self.progress, self.progress_text, trials.message):
+            w.setContentsMargins(14, 0, 14, 0)
+            lv.addWidget(w)
+        self.progress_timer = QtCore.QTimer(self, interval=250, timeout=self._show_progress)
+        self.progress_timer.start()
 
-        # ---- middle: the preview, and under it the protocol's Plan / Responses / Curve --
-        middle = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        middle.setChildrenCollapsible(False)
-        top = QtWidgets.QWidget()
-        tv = QtWidgets.QVBoxLayout(top)
+        # ---- middle: the preview. The protocol's Plan / Responses / Curve and its measuring
+        # panel stay in the page, hidden (the protocol still uses their widgets).
+        middle = QtWidgets.QWidget()
+        tv = QtWidgets.QVBoxLayout(middle)
         tv.setContentsMargins(10, 12, 10, 4)
         tv.addWidget(stim.preview_panel)
-        middle.addWidget(top)
-        middle.addWidget(trials.middle_panel)
-        middle.setStretchFactor(0, 1)
-        middle.setStretchFactor(1, 1)
+        tv.addWidget(trials.middle_panel)
 
         self.split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         self.split.setChildrenCollapsible(False)
@@ -184,8 +193,20 @@ class StimulusPage(QtWidgets.QWidget):
         tr, stim = self.trials, self.stim
         stim.buttons_panel.setVisible(not protocol)
         tr.foot.setVisible(protocol)
-        tr.middle_panel.setVisible(protocol)
-        tr.right_panel.setVisible(protocol)
+        tr.middle_panel.setVisible(False)
+        tr.right_panel.setVisible(False)
+        self._show_progress()
+
+    def _show_progress(self) -> None:
+        tr = self.trials
+        running = tr.running and self.isVisible()
+        self.progress.setVisible(running)
+        self.progress_text.setVisible(running)
+        if running:
+            n, total = min(tr.next_i, len(tr.trials)), max(1, len(tr.trials))
+            self.progress.setMaximum(total)
+            self.progress.setValue(n)
+            self.progress_text.setText(f"Stimulus {n} of {len(tr.trials)}" + (" · paused" if tr.paused else ""))
 
     # -- the output section ---------------------------------------------------------------
     def _show_output(self, on: bool) -> None:

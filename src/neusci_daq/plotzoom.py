@@ -27,6 +27,9 @@ class WheelViewBox(pg.ViewBox):
     # room in y (and in x, for plots of points whose markers would be cut in half).
     clamp_to_data = True
     limit_pad = (0.0, 0.02)
+    # Room to zoom out in y past the data, as a fraction of its range on each side, and
+    # always as far as 0 (None: stop at the data's edges).
+    y_room: float | None = None
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
@@ -51,6 +54,11 @@ class WheelViewBox(pg.ViewBox):
                     continue
                 b = self._data_limits(axis)
                 if b is None:
+                    continue
+                if axis == 1 and self.y_room is not None:
+                    lo, hi = min(b[0], 0.0), max(b[1], 0.0)
+                    pad = max(hi - lo, 1e-12) * self.y_room
+                    lim[key] = [lo - pad, hi + pad]
                     continue
                 pad = (b[1] - b[0]) * self.limit_pad[axis]
                 lim[key] = [b[0] - pad, b[1] + pad]

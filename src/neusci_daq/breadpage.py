@@ -12,6 +12,8 @@ board to the config's [simulated] section.
 from __future__ import annotations
 
 import math
+import tomllib
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
@@ -163,7 +165,7 @@ class BoardView(QtWidgets.QWidget):
         self.hover: str | None = None
         self.mouse = QtCore.QPointF()
         self.drag: dict | None = None         # a placed part (or one end of it) being moved
-        self.live: dict[int, bool] = {}       # MOSFET switches closed while recording, by part index
+        self.live: dict[int, bool] = {}       # MOSFET switches closed, by part index: while recording, else at rest
         self.lit: dict[int, float] = {}       # LED currents (A), by part index: while recording, else at rest
         self.held = -1                        # a push button held down
         self.setAcceptDrops(True)
@@ -193,6 +195,7 @@ class BoardView(QtWidgets.QWidget):
     # -- input
     def set_tool(self, tool: str) -> None:
         self.tool, self.pending = tool, None
+        self.page._show_key()
         self.setCursor(QtCore.Qt.CursorShape.ArrowCursor if tool == "select" else QtCore.Qt.CursorShape.CrossCursor)
         self.update()
 
@@ -606,6 +609,136 @@ class BoardView(QtWidgets.QWidget):
         q.restore()
 
 
+# ---------------------------------------------------------------- the key: what each leg of a part is
+# (leg, tag on the drawing, name, where it goes and what it does)
+_ENDS = [("a", "1", "end", "the first hole you click"), ("b", "2", "end", "the second hole; either way round works")]
+
+
+def key_legs(part: bb.Part) -> list[tuple[str, str, str, str]]:
+    k = part.kind
+    if k in ("vin", "battery"):
+        what = "the stimulator's output" if k == "vin" and part.source == "stim" else "the fixed voltage"
+        return [("a", "+", "+ end", f"first hole: held at {what} above the − end"),
+                ("b", "−", "− end", "second hole: usually ground (a − rail)")]
+    if k in ("led", "diode"):
+        return [("a", "+", "anode", "first hole: toward the higher voltage"),
+                ("b", "−", "cathode", "second hole: toward ground")]
+    if k == "switch" and part.mode == "mosfet":
+        return [("a", "D", "drain", "first hole"),
+                ("b", "S", "source", "second hole: the gate is measured against it"),
+                ("gate", "G", "gate", "placed beside the middle; draws no current")]
+    if k == "pot":
+        return [("a", "1", "end", "first hole"), ("b", "2", "end", "second hole"),
+                ("wiper", "W", "wiper", "placed beside the middle: taps the resistance part-way along")]
+    if k == "probe":
+        return [("a", "P", "probe", "one hole: records the voltage of its strip")]
+    if k == "ground":
+        return [("a", "0", "ground", "one hole: ties its strip to 0 V")]
+    return _ENDS
+
+
+def key_text(part: bb.Part) -> str:
+    k = part.kind
+    if k == "vin":
+        return ("Drives its + end to the stimulator's output, so whatever the Stimulus tab sends plays into the circuit."
+                if part.source == "stim" else "Holds its + end a fixed voltage above its − end.")
+    if k == "switch":
+        if part.mode == "mosfet":
+            side = "above" if part.channel == "n" else "below"
+            return f"Joins drain to source while the gate is more than V<sub>th</sub> {side} the source; otherwise connects nothing."
+        return "Joins its two ends while closed; double-click it, or use Close it, to flip it."
+    return {
+        "resistor": "Lets current through in proportion to the voltage across it (Ohm's law). Either way round.",
+        "capacitor": "Stores charge: current flows in while the voltage across it changes, then stops. Either way round.",
+        "wire": "Joins two strips into one, so they're at the same voltage.",
+        "probe": "Records its strip's voltage on the input you pick, for Acquisition.",
+        "ground": "The 0 V reference, the same as a wire to a − rail.",
+        "battery": "Holds its + end a fixed voltage above its − end.",
+        "led": "Lights when + is more than its forward voltage above −, brighter with more current. "
+               "Put a resistor in series to keep the current under its maximum.",
+        "diode": "Lets current flow from + to − only, once + is more than its forward voltage above −.",
+        "button": "Joins its two ends only while you hold the mouse down on it.",
+        "pot": "A resistor with a third leg: the wiper splits it in two, so the wiper's voltage is a set fraction "
+               "of the way between the ends (a divider).",
+        "inductor": "Resists changes in current: the voltage across it is L times how fast the current changes. Either way round.",
+    }.get(k, "")
+
+
+class KeyDrawing(QtWidgets.QWidget):
+    """A part drawn large, the way it looks on the board, with each leg tagged and named."""
+
+    _DEMO = {"a": "c3", "b": "c8", "gate": "e6", "wiper": "e6"}   # the part laid out flat, legs well apart
+
+    def __init__(self, page):
+        super().__init__()
+        self.page = page
+        self.part: bb.Part | None = None
+        self.setMinimumHeight(118)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+
+    def set_part(self, part: bb.Part | None) -> None:
+        if part is not None:
+            part = bb.copy_board(bb.Board([part])).parts[0]
+            part.a = self._DEMO["a"] if part.kind not in bb.ONE_HOLE else "c5"
+            part.b = "" if part.kind in bb.ONE_HOLE else self._DEMO["b"]
+            if part.gate:
+                part.gate = self._DEMO["gate"]
+            if part.wiper:
+                part.wiper = self._DEMO["wiper"]
+        self.part = part
+        self.update()
+
+    def paintEvent(self, e):
+        if self.part is None:
+            return
+        t = style.tokens(self.page._mode)
+        q = QtGui.QPainter(self)
+        q.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        legs = [(leg, tag, name) for leg, tag, name, _ in key_legs(self.part) if getattr(self.part, leg)]
+        pts = [hole_xy(getattr(self.part, leg)) for leg, _t, _n in legs]
+        x0, x1 = min(p.x() for p in pts), max(p.x() for p in pts)
+        y0, y1 = min(p.y() for p in pts), max(p.y() for p in pts)
+        s = min(2.2, (self.width() - 60) / max(x1 - x0, 1.0)) if x1 > x0 else 2.2
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2 + (6 if self.part.kind == "ground" else 0)
+        top = 34 if len(legs) > 1 else 40                 # room above for the names
+        to_px = lambda p: QtCore.QPointF(self.width() / 2 + (p.x() - cx) * s, top + 12 + (p.y() - y0) * s)
+        q.save()
+        o = to_px(QtCore.QPointF(cx, y0))
+        q.translate(o.x() - cx * s, o.y() - y0 * s)
+        q.scale(s, s)
+        on = self.part.closed if self.part.kind in ("switch", "button") else False
+        amps = self.part.value * 0.6 if self.part.kind == "led" else 0.0   # shown lit
+        self.page.view._draw_part(q, self.part, False, t, on, amps)
+        q.restore()
+        f = q.font()
+        for (leg, tag, name), p in zip(legs, pts):
+            c = to_px(p)
+            below = leg in ("a", "b")
+            # the tag: a small dark disc, right under (or beside) the leg
+            tc = c + (QtCore.QPointF(0, 20) if below else QtCore.QPointF(20, 4))
+            if self.part.kind in bb.ONE_HOLE:            # tag to the left, name to the right, clear of the symbol
+                tc = c + QtCore.QPointF(-28, 0)
+            q.setPen(QtCore.Qt.PenStyle.NoPen)
+            q.setBrush(QtGui.QColor(t["ink"]))
+            q.drawEllipse(tc, 9, 9)
+            f.setPointSizeF(9)
+            f.setBold(True)
+            q.setFont(f)
+            q.setPen(QtGui.QColor(t["panel"]))
+            q.drawText(QtCore.QRectF(tc.x() - 9, tc.y() - 9, 18, 18), QtCore.Qt.AlignmentFlag.AlignCenter, tag)
+            # the name, above the end legs, beside the middle one
+            f.setBold(False)
+            q.setFont(f)
+            q.setPen(QtGui.QColor(t["muted"]))
+            if self.part.kind in bb.ONE_HOLE:
+                q.drawText(QtCore.QPointF(c.x() + 26, c.y() + 4), name)
+            elif below:
+                q.drawText(QtCore.QRectF(c.x() - 40, c.y() - 30, 80, 16), QtCore.Qt.AlignmentFlag.AlignCenter, name)
+            else:
+                q.drawText(QtCore.QPointF(tc.x() + 14, tc.y() + 4), name)
+        q.end()
+
+
 class BreadboardPage(QtWidgets.QWidget):
     def __init__(self, main):
         super().__init__()
@@ -661,9 +794,22 @@ class BreadboardPage(QtWidgets.QWidget):
         self.btn_reset = QtWidgets.QPushButton("Reset board")
         self.btn_reset.setToolTip("Back to the example: the stimulator through 10 kΩ into 1 µF")
         self.btn_clear = QtWidgets.QPushButton("Clear board")
-        for b in (self.btn_delete, self.btn_reset, self.btn_clear):
-            tools.addWidget(b)
+        self.btn_save = QtWidgets.QPushButton("Save board…")
+        self.btn_save.setToolTip("Save this circuit to a file, to open again later or share")
+        self.btn_save.clicked.connect(self.save_board)
+        self.btn_open = QtWidgets.QPushButton("Open board…")
+        self.btn_open.setToolTip("Replace the board with a circuit saved before")
+        self.btn_open.clicked.connect(self.open_board)
         left.addLayout(tools)
+        # The board's own actions get a row of their own, so the parts row stays narrow
+        # enough for the side panel to fit beside it.
+        actions = QtWidgets.QHBoxLayout()
+        for b in (self.btn_save, self.btn_open):
+            actions.addWidget(b)
+        actions.addStretch(1)
+        for b in (self.btn_delete, self.btn_reset, self.btn_clear):
+            actions.addWidget(b)
+        left.addLayout(actions)
         self.view = BoardView(self)
         left.addWidget(self.view, 1)
         self.message = QtWidgets.QLabel()
@@ -744,6 +890,19 @@ class BreadboardPage(QtWidgets.QWidget):
         self.part_info.setWordWrap(True)
         form.addRow(self.part_info)
         right.addWidget(self.part_box)
+        self.key_box = QtWidgets.QGroupBox("Key")
+        kv = QtWidgets.QVBoxLayout(self.key_box)
+        self.key_draw = KeyDrawing(self)
+        kv.addWidget(self.key_draw)
+        self.key_legs = QtWidgets.QLabel()
+        self.key_legs.setWordWrap(True)
+        self.key_legs.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        kv.addWidget(self.key_legs)
+        self.key_what = QtWidgets.QLabel()
+        self.key_what.setWordWrap(True)
+        self.key_what.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        kv.addWidget(self.key_what)
+        right.addWidget(self.key_box)
         self.probe_box = QtWidgets.QGroupBox("Recording sites")
         pv = QtWidgets.QVBoxLayout(self.probe_box)
         self.probe_list = QtWidgets.QLabel()
@@ -769,6 +928,7 @@ class BreadboardPage(QtWidgets.QWidget):
         self.view.selected.connect(lambda _i: self._show_part())
         self.btn_delete.clicked.connect(self.delete_selected)
         self._rest_lit: dict[int, float] = {}
+        self._rest_live: dict[int, bool] = {}   # MOSFET switches closed at rest
         self.btn_reset.clicked.connect(lambda: self._apply(bb.default_board(), keep_sel=False))
         self.btn_clear.clicked.connect(lambda: self._apply(bb.Board(), keep_sel=False))
         self.source.currentIndexChanged.connect(self._part_edited)
@@ -798,6 +958,7 @@ class BreadboardPage(QtWidgets.QWidget):
     def load(self) -> None:
         self.view.board = self.board
         self.view.lit = self._lit_at_rest()
+        self.view.live = self._rest_live
         if self.view.sel >= len(self.board.parts):
             self.view.sel = -1
         self._show_part()
@@ -819,7 +980,7 @@ class BreadboardPage(QtWidgets.QWidget):
         """Show which MOSFET switches the recording has closed, and how bright its LEDs are."""
         state = getattr(getattr(self.main, "backend", None), "_board", None)
         recording = state is not None and getattr(state, "board", None) is self.board
-        live = state.closed_now() if recording else {}
+        live = state.closed_now() if recording else self._rest_live
         lit = state.lit_now() if recording else self._rest_lit
         if live != self.view.live or lit != self.view.lit:
             self.view.live, self.view.lit = live, lit
@@ -827,13 +988,15 @@ class BreadboardPage(QtWidgets.QWidget):
             self._show_part_info()
 
     def _lit_at_rest(self) -> dict[int, float]:
-        """Each LED's current with the stimulator at 0 V, once the circuit has settled."""
-        self._rest_lit = {}
-        if any(p.kind == "led" for p in self.board.parts):
+        """Each LED's current with the stimulator at 0 V, once the circuit has settled
+        (and, in `_rest_live`, which MOSFET switches that leaves closed)."""
+        self._rest_lit, self._rest_live = {}, {}
+        if any(p.kind == "led" or (p.kind == "switch" and p.mode == "mosfet") for p in self.board.parts):
             try:
                 state = bb.BoardState(self.board, 1e-4)
                 state.run(np.zeros(2000), [])
                 self._rest_lit = state.lit_now()
+                self._rest_live = state.closed_now()
             except ValueError:
                 pass
         return self._rest_lit
@@ -940,7 +1103,28 @@ class BreadboardPage(QtWidgets.QWidget):
             label.setVisible(key in shown)
             w.setVisible(key in shown)
         self.btn_delete.setEnabled(part is not None)
+        self._show_key()
         self._loading = False
+
+    def _show_key(self) -> None:
+        """The key: the selected part, or else the part about to be placed."""
+        i, tool = self.view.sel, self.view.tool
+        part = self.board.parts[i] if 0 <= i < len(self.board.parts) else None
+        placing = part is None and tool in bb.KINDS
+        if placing:
+            part = bb.new_part(tool, "c3", "c8")
+            if tool == "pot":
+                part.wiper = "e6"
+        self.key_box.setVisible(part is not None)
+        if part is None:
+            return
+        self.key_box.setTitle(f"Key: {bb.NAMES[part.kind]}" + (" (placing)" if placing else ""))
+        self.key_draw.set_part(part)
+        t = style.tokens(self._mode)
+        rows = [f"<tr><td style='padding:2px 6px 2px 0'><b>{tag}</b></td><td style='padding:2px 0'><b>{name.capitalize()}</b>: {what}</td></tr>"
+                for _leg, tag, name, what in key_legs(part)]
+        self.key_legs.setText("<table>" + "".join(rows) + "</table>")
+        self.key_what.setText(f"<span style='color:{t['muted']}'>{key_text(part)}</span>")
 
     def _show_probes(self) -> None:
         probes = self.board.probes()
@@ -1042,6 +1226,45 @@ class BreadboardPage(QtWidgets.QWidget):
         self.view.sel = -1
         self._apply(board)
 
+    # -- board files -------------------------------------------------------------------
+    _FILTER = "Breadboard (*.board.toml);;TOML (*.toml)"
+
+    def _board_folder(self) -> str:
+        return str(Path(self.main.settings.value("board_folder", self.main.cfg.data_dir or str(Path.home()))))
+
+    def save_board(self) -> None:
+        """Save the circuit as a .board.toml file (the same lines as in a config file)."""
+        start = str(Path(self._board_folder()) / "circuit.board.toml")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save board", start, self._FILTER)
+        if not path:
+            return
+        if not path.endswith(".toml"):
+            path += ".board.toml"
+        text = "# A NEWT breadboard circuit: Breadboard › Open board… to use it\n" + "\n".join(bb.to_toml_lines(self.board)) + "\n"
+        try:
+            Path(path).write_text(text)
+        except OSError as e:
+            self._show_message(f"Couldn't save the board: {e}", error=True)
+            return
+        self.main.settings.setValue("board_folder", str(Path(path).parent))
+        self._show_message(f"Saved {Path(path).name}")
+
+    def open_board(self) -> None:
+        """Replace the board with one saved by Save board… (or a config file's breadboard)."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open board", self._board_folder(), self._FILTER)
+        if not path:
+            return
+        try:
+            sim = tomllib.loads(Path(path).read_text()).get("simulated", {})
+            if "breadboard" not in sim:
+                raise ValueError("there's no breadboard circuit in it")
+            board = bb.from_toml(sim)
+        except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
+            self._show_message(f"Couldn't open {Path(path).name}: {e}", error=True)
+            return
+        self.main.settings.setValue("board_folder", str(Path(path).parent))
+        self._apply(board, keep_sel=False)
+
     def _apply(self, board: bb.Board, keep_sel: bool = True) -> None:
         """Check a changed board and, if it can be solved, make it the one recorded."""
         if not keep_sel:
@@ -1135,3 +1358,4 @@ class BreadboardPage(QtWidgets.QWidget):
         self._redraw_preview()
         self._show_timing()
         self.view.update()
+        self._show_key()

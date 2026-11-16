@@ -59,6 +59,8 @@ from .membranepage import AP_PAGE, HH_PAGE, RC_PAGE, SUM_PAGE, SYN_PAGE, Membran
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
+from .simplestim import SimpleStimPage
+from .dockstim import DockedStimulator
 from .ministim import MiniStimulator
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
 from . import colors
@@ -66,7 +68,7 @@ from .channelsetup import ChannelSetupMixin
 from .commentcontrol import CommentsMixin
 from .codeview import ShowTheCode
 from .liveview import LiveMixin
-from .mainparts import LIVE, REVIEW, WINDOW_MAX, WindowBox, _CommentEdit  # noqa: F401 (LIVE, REVIEW: for importers)
+from .mainparts import LIVE, REVIEW, WINDOW_MAX, PlotArea, WindowBox, _CommentEdit  # noqa: F401 (LIVE, REVIEW: for importers)
 from .mediacontrol import MediaMixin
 from .reviewview import ReviewMixin
 from .sessionfiles import SessionFilesMixin
@@ -139,6 +141,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stim_on_start = on_start if on_start in ("", "once", "repeat") else ""
         self.repeating = False
         self.stim_timer = QtCore.QTimer(self, timeout=self._repeat_fire)
+        self.stim_timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)   # coarse timers wander ±5%
         self._compact_strips = False     # True while Acquisition shares the screen (split view)
 
         mode = self.settings.value("plot_theme", theme.DARK)
@@ -172,7 +175,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_run = QtWidgets.QPushButton("Start", checkable=True)
         self.btn_run.setObjectName("start")
         self.btn_run.toggled.connect(self._toggle_run)
-        self.btn_rec = QtWidgets.QPushButton("Record", checkable=True, enabled=False)
+        self.btn_rec = QtWidgets.QPushButton("Record", checkable=True)   # on/off: Start records while on
         self.btn_rec.setObjectName("record")
         self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
         self.btn_rec.toggled.connect(self._toggle_rec)
@@ -292,7 +295,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         lay = QtWidgets.QVBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self.plot_area = QtWidgets.QWidget()
+        self.plot_area = PlotArea()
+        self.plot_area.resized.connect(self._fit_strips)
         self.plot_layout = QtWidgets.QVBoxLayout(self.plot_area)
         self.plot_layout.setContentsMargins(0, 0, 0, 0)
         self.plot_layout.setSpacing(2)
@@ -341,7 +345,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         bb.addSpacing(6)
         self.btn_mini_stim = QtWidgets.QPushButton("Stimulator", checkable=True)
         self.btn_mini_stim.setToolTip("A small stimulator over the plots: run, fire, stop and the level")
-        self.btn_mini_stim.setVisible(self.stim_out is not None)
+        self.btn_mini_stim.setVisible(False)      # replaced by the stimulator docked under Trials
         bb.addWidget(self.btn_mini_stim)
         # Time scale, at the bottom right like LabChart's: newest data, all the data,
         # zoom out, Window (the toolbar's, mirrored) and zoom in.
@@ -400,7 +404,12 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
-        row.addWidget(self.blocks_panel)
+        # Trials, and under it the stimulator (built once the Simple Stimulus page exists)
+        self.left_column = QtWidgets.QVBoxLayout()
+        self.left_column.setContentsMargins(0, 0, 0, 0)
+        self.left_column.setSpacing(0)
+        self.left_column.addWidget(self.blocks_panel, 1)
+        row.addLayout(self.left_column)
         row.addWidget(self.plot_area, 1)
         row.addWidget(self.comments_panel)
         from .video import CameraPanel
@@ -414,12 +423,14 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stim_page = StimPage(self)
         self.trials_page = ProtocolsPage(self)
         self.stimulus_page = StimulusPage(self, self.stim_page, self.trials_page)   # the two, as one page
+        self.simple_page = SimpleStimPage(self)       # a pulse, pair or train, for teaching labs
+        self.dock_stim = DockedStimulator(self, self.simple_page)    # its main controls, under Trials
+        self.dock_stim.setVisible(self.stim_out is not None)
+        self.left_column.addWidget(self.dock_stim)
         # A small stimulator floating over the Record page's plots.
         self.mini_stim = MiniStimulator(self, self.plot_area)
         self.mini_stim.hide()
         self.btn_mini_stim.toggled.connect(self.set_mini_stim)
-        if self.stim_out is not None and self.settings.value("mini_stim", False, type=bool):
-            self.btn_mini_stim.setChecked(True)
         self.analysis_page = AnalysisPage(self)
         self.blocks_panel.color_requested.connect(self.analysis_page.pick_color)
         self.blocks_panel.color_cleared.connect(lambda name: self.analysis_page.set_page_color(name, None))
@@ -444,7 +455,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # a split can show any page, two of Acquisition's included.
         self.tabs = TabArea([
             ("acq", "Record", central),
-            ("stim", "Stimulus", self.stimulus_page),
+            ("simple", "Simple Stimulus", self.simple_page),
+            ("stim", "Stimulus Design", self.stimulus_page),
             ("analysis", "Analysis", self.analysis_page),
             ("sim", "Neural network simulator", with_banner(self, self.sim_page)),
             ("board", "Breadboard simulator", with_banner(self, self.board_page)),
@@ -454,7 +466,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("ap", "Action potential", self.ap_page),
             ("syn", "Synapse", self.syn_page),
             ("sum", "Summation", self.sum_page)], groups=[
-            ("acquisition", "Acquisition", ["acq", "stim"]),
+            ("acquisition", "Acquisition", ["acq", "simple", "stim"]),
             ("analysis", "Analysis", ["analysis"]),
             ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
             ("lessons", "Lessons", ["membrane", "rc", "hh", "ap", "syn", "sum"]),
@@ -621,6 +633,10 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stim_page.apply_theme(mode)
         if hasattr(self, "mini_stim"):
             self.mini_stim.apply_theme(mode)
+        if hasattr(self, "simple_page"):
+            self.simple_page.apply_theme(mode)
+        if hasattr(self, "dock_stim"):
+            self.dock_stim.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
         for page in (getattr(self, "sim_page", None), getattr(self, "board_page", None)):
@@ -683,11 +699,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
     def _tabs_changed(self):
         for mode, b in self.split_buttons.items():
             b.setChecked(mode == self.tabs.layout_mode)
-        compact = self.tabs.shares_screen("acq")
-        if compact != self._compact_strips:
-            self._compact_strips = compact
-            for rw in self.row_widgets:
-                rw.set_compact(compact)
+        self._fit_strips()
         self._update_toolbar()
 
     def _update_toolbar(self):
@@ -720,7 +732,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         on = self.repeating or busy or protocol
         if protocol:
             self.stim_chip_text.setText(self.trials_page.chip_text())
-            self.stim_chip.setToolTip("A protocol is running (Acquisition › Stimulus). Stop ends it.")
+            self.stim_chip.setToolTip("A protocol is running (Acquisition › Stimulus Design). Stop ends it.")
         elif on:
             self.stim_chip_text.setText("Stimulating")      # the interval is in the tooltip
             self.stim_chip.setToolTip(f"Repeating every {self.stim_repeat_s:g} s" if self.repeating

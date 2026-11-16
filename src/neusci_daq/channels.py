@@ -373,9 +373,13 @@ class ChannelRowWidget(QtWidgets.QWidget):
         content.setParent(self)
         strip.raise_()
         strip.hover_changed.connect(lambda _: self._relayout())
+        self.full_height = strip.sizeHint().height()    # with all its settings showing
+        self.fit_strip = False                          # an "off" row: just as tall as its strip
 
     def set_compact(self, compact: bool) -> None:
         self.strip.set_compact(compact)
+        if self.fit_strip:
+            self.setFixedHeight(self.strip.sizeHint().height())
         self._relayout()
 
     def sizeHint(self):
@@ -383,7 +387,9 @@ class ChannelRowWidget(QtWidgets.QWidget):
         return QtCore.QSize(STRIP_WIDTH + s.width(), max(s.height(), self.strip.sizeHint().height()))
 
     def minimumSizeHint(self):
-        return QtCore.QSize(COMPACT_WIDTH + 50, self.strip.minimumSizeHint().height())
+        # Not the strip's full height: when the rows don't fit, their strips fold up
+        # (MainWindow._fit_strips) instead of pushing the window past the screen.
+        return QtCore.QSize(COMPACT_WIDTH + 50, 40)
 
     def resizeEvent(self, ev):
         self._relayout()

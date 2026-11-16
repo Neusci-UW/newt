@@ -1,0 +1,60 @@
+# A NEWT breadboard circuit: Breadboard › Open board… to use it
+#
+# The RC lesson's membrane: the inside of the cell is column 15, the outside is ground
+# (the - rails). Two branches, each a battery in series with a resistor, and the
+# membrane capacitor across them:
+#   Na branch: +60 mV battery, 1.4 kΩ, and a switch (open = channels closed)
+#   K branch:  -86 mV battery (its + end on ground), 2.0 kΩ
+#   C: 1 µF
+# With the switch open the membrane sits at E_K (-86 mV). Flip the switch closed and it
+# charges toward (E_Na/R_Na + E_K/R_K) / (1/R_Na + 1/R_K), about 0 mV, with
+# τ = (R_Na ∥ R_K) · C ≈ 0.82 ms; open it and it relaxes back with τ = R_K · C = 2 ms.
+# (The lesson's per-cm² values, read as a 1 cm² patch.)
+
+# membrane capacitor: inside to outside
+[[simulated.breadboard]]
+part = "capacitor"
+a = "a15"
+b = "t-15"
+value = 1e-06
+
+# Na branch: inside -> R_Na -> (+) E_Na (-) -> switch -> outside
+[[simulated.breadboard]]
+part = "resistor"
+a = "b15"
+b = "b9"
+value = 1400
+
+[[simulated.breadboard]]
+part = "battery"
+a = "c9"
+b = "c6"
+value = 0.06
+
+[[simulated.breadboard]]
+part = "switch"
+a = "d6"
+b = "t-6"
+value = 1
+mode = "toggle"
+closed = false
+
+# K branch: inside -> R_K -> (-) E_K (+) -> outside
+[[simulated.breadboard]]
+part = "resistor"
+a = "c15"
+b = "c21"
+value = 2000
+
+[[simulated.breadboard]]
+part = "battery"
+a = "t-21"
+b = "a21"
+value = 0.086
+
+# the voltmeter: membrane potential on ai0
+[[simulated.breadboard]]
+part = "probe"
+a = "e15"
+input = "ai0"
+noise_v = 0.0002

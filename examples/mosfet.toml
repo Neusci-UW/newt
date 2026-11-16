@@ -1,0 +1,89 @@
+# A MOSFET used as a switch, run in the simulator.
+# Open it with:  python -m neusci_daq --config examples/mosfet.toml
+#
+# The stimulator drives the gate. A 5 V battery feeds the drain through a 1 kΩ resistor (the load),
+# and the source goes to ground. Ch1 records the gate and Ch2 the drain.
+# On the Stimulus tab, set the pulse to 5 V: anything over the 2 V threshold turns the MOSFET on.
+# The drain then drops from 5 V to about 0 V for as long as the pulse lasts.
+
+[device]
+backend = "simulated"
+sample_rate = 20000
+
+[display]
+window_s = 2
+
+[recording]
+directory = "data"
+
+[simulated]
+
+# The stimulator's output: + end on strip 3, − end on the ground rail
+[[simulated.breadboard]]
+part = "vin"
+a = "a3"
+b = "t-3"
+value = 1
+source = "stim"
+
+# The 5 V battery: + end on the + rail, − end on the ground rail
+[[simulated.breadboard]]
+part = "battery"
+a = "t+5"
+b = "t-5"
+value = 5
+
+# The load: 1 kΩ from the + rail to the drain (strip 12)
+[[simulated.breadboard]]
+part = "resistor"
+a = "t+12"
+b = "a12"
+value = 1000
+
+# The MOSFET: drain on strip 12, source on strip 18, gate on strip 15
+[[simulated.breadboard]]
+part = "switch"
+a = "c12"
+b = "c18"
+value = 1
+mode = "mosfet"
+gate = "d15"
+vth = 2
+channel = "n"
+
+# A wire from the stimulator's strip to the gate's strip
+[[simulated.breadboard]]
+part = "wire"
+a = "b3"
+b = "a15"
+
+# The source to ground
+[[simulated.breadboard]]
+part = "wire"
+a = "a18"
+b = "t-18"
+
+# Probes: the gate on Ch1, the drain on Ch2
+[[simulated.breadboard]]
+part = "probe"
+a = "e3"
+input = "ai0"
+noise_v = 0.002
+
+[[simulated.breadboard]]
+part = "probe"
+a = "e12"
+input = "ai1"
+noise_v = 0.002
+
+[[channels]]
+physical = "ai0"
+name = "Gate"
+units = "V"
+scale = 1.0
+
+[[channels]]
+physical = "ai1"
+name = "Drain"
+units = "V"
+scale = 1.0

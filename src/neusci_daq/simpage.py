@@ -237,9 +237,9 @@ class SimPage(QtWidgets.QWidget):
             rec = sim.recording_for(self.net, ch.physical)
             monitor = ch.physical == cfg.stim_monitor
             cell = QtWidgets.QComboBox()
-            cell.addItems([f"Cell {i + 1}" for i in range(n)])
-            cell.setToolTip("The cell this input records")
-            cell.setCurrentIndex(min(rec.cell, n - 1))
+            cell.addItems(["None"] + [f"Cell {i + 1}" for i in range(n)])
+            cell.setToolTip("The cell this input records (None: just noise until you pick one)")
+            cell.setCurrentIndex(min(rec.cell, n - 1) + 1)
             kind = QtWidgets.QComboBox()
             kind.setToolTip("How this input records the cell")
             for label, key in _KINDS:
@@ -256,7 +256,7 @@ class SimPage(QtWidgets.QWidget):
                     item = _readonly("")
                 self.recs.setItem(r, col, item)
             if monitor:
-                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Stimulus › Output › Record on): "
+                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Stimulus Design › Output › Record on): "
                                                       "it records the stimulus")
                 self.recs.item(r, 2).setText("records the stimulus")
 
@@ -356,7 +356,7 @@ class SimPage(QtWidgets.QWidget):
         for r, ch in enumerate(cfg.channels):
             if ch.physical == cfg.stim_monitor or self.recs.cellWidget(r, 0) is None:
                 continue
-            rec = sim.Recording(ch.physical, self.recs.cellWidget(r, 0).currentIndex(),
+            rec = sim.Recording(ch.physical, self.recs.cellWidget(r, 0).currentIndex() - 1,
                                 self.recs.cellWidget(r, 1).currentData())
             for col, (attr, unit, name) in enumerate((("gain", "", "gain"), ("noise_v", "V", "noise"),
                                                       ("sine_v", "V", "sine"), ("sine_hz", "Hz", "sine freq.")), 2):
@@ -473,6 +473,8 @@ class SimPage(QtWidgets.QWidget):
         for ch in self.main.cfg.channels:
             if ch.physical != self.main.cfg.stim_monitor:
                 rec = sim.recording_for(net, ch.physical)
+                if rec.cell < 0:
+                    continue
                 recorded.setdefault(min(rec.cell, n - 1), []).append(
                     ch.physical + (" (in)" if rec.kind == "intracellular" else " (ex)"))
         stim_at = np.array([-1.45, 1.35])

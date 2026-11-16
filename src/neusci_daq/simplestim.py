@@ -19,11 +19,21 @@ from . import style
 from .mainparts import LIVE
 from .stim import Stimulus
 
-MODES = (("single", "Single pulse"), ("pair", "Pulse pair"), ("train", "Train"))
+MODES = (("single", "Single pulse"), ("pair", "Pulse pair"), ("train", "Train"),
+         ("sine", "Sine wave"), ("triangle", "Triangle wave"))
+WAVES = ("sine", "triangle")
+FIELDS = {"single": ("level", "width"), "pair": ("level", "width", "interval"),
+          "train": ("level", "width", "rate", "count"), "sine": ("level", "freq", "dur"),
+          "triangle": ("level", "freq", "dur")}
+MARKED = {"single": ("level", "width"), "pair": ("level", "interval"), "train": ("level", "rate", "count"),
+          "sine": ("level", "freq", "dur"), "triangle": ("level", "freq", "dur")}
+NAMES = {"level": "Amplitude", "width": "Width", "interval": "Interval", "rate": "Rate", "count": "Pulses",
+         "freq": "Frequency", "dur": "Duration"}
+MAX_CYCLES = 500               # a triangle wave is made of ramps: 3 per cycle
 DELAY_MS = 2.0                 # 0 V before the first pulse, so the recorded stimulus has a clear start
 DIM = {style.LIGHT: "#d9822b", style.DARK: "#f0a35a"}
 DEFAULTS = dict(mode="single", level=2.0, width=0.2, interval=20.0, rate=20.0, count=5,
-                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0)
+                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0)
 
 
 class _Spin(QtWidgets.QDoubleSpinBox):
@@ -31,6 +41,18 @@ class _Spin(QtWidgets.QDoubleSpinBox):
 
     def textFromValue(self, v: float) -> str:
         return f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".") or "0"
+
+
+def triangle_parts(amp_v: float, freq_hz: float, dur_ms: float) -> list[dict]:
+    """A triangle wave around 0 V as ramp segments: up to +amp, down to −amp, back to 0,
+    for as many whole cycles as fit in `dur_ms` (at least one)."""
+    period = 1000.0 / freq_hz
+    cycles = max(1, min(MAX_CYCLES, round(dur_ms / period)))
+    ramp = lambda a, b, ms: {"kind": "ramp", "start": a, "level": b, "dur": ms, "d_level": "", "d_dur": ""}
+    parts = [{"kind": "base", "level": 0.0, "dur": DELAY_MS, "d_level": "", "d_dur": ""}]
+    for _ in range(cycles):
+        parts += [ramp(0.0, amp_v, period / 4), ramp(amp_v, -amp_v, period / 2), ramp(-amp_v, 0.0, period / 4)]
+    return parts
 
 
 def _spin(lo, hi, decimals, suffix, tip):
@@ -66,6 +88,10 @@ class PulseDiagram(QtWidgets.QWidget):
         w, h = self.width(), self.height()
         base, top = h - 42, 34
         lab = self.labels
+        if self.mode in WAVES:
+            self._paint_wave(p, w, top, base, wave, dim, axis)
+            p.end()
+            return
         p.setPen(QtGui.QPen(axis, 1))
         p.drawLine(16, base, w - 16, base)
         # where the pulses are, as (x0, x1) in pixels
@@ -133,6 +159,71 @@ class PulseDiagram(QtWidgets.QWidget):
         p.end()
 
 
+def _arrow(p, dim, x0, y0, x1, y1):
+    p.setPen(QtGui.QPen(dim, 2))
+    p.drawLine(QtCore.QPointF(x0, y0), QtCore.QPointF(x1, y1))
+    line = QtCore.QLineF(x0, y0, x1, y1)
+    for a, b in ((line.p1(), line.p2()), (line.p2(), line.p1())):
+        v = QtCore.QLineF(a, b).unitVector()
+        d = QtCore.QPointF(v.dx() * 7, v.dy() * 7)
+        n = QtCore.QPointF(-d.y() * 0.5, d.x() * 0.5)
+        p.setBrush(dim)
+        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.drawPolygon(QtGui.QPolygonF([a, a + d + n, a + d - n]))
+
+
+def _paint_wave(self, p, w, top, base, wave, dim, axis):
+    """A sine or triangle wave: 3 cycles drawn, amplitude from the middle line to a peak,
+    the frequency over one cycle, the duration under the whole wave."""
+    import math
+    mid = (top + base) / 2
+    X = lambda f: self.pad + f * (w - self.pad)
+    x0, x1 = X(0.18), X(0.88)
+    cyc = (x1 - x0) / 3
+    p.setPen(QtGui.QPen(axis, 1))
+    p.drawLine(QtCore.QPointF(16, mid), QtCore.QPointF(w - 16, mid))
+    amp = mid - top
+    path = QtGui.QPainterPath(QtCore.QPointF(16, mid))
+    path.lineTo(x0, mid)
+    for i in range(121):
+        ph = i / 120 * 3                       # cycles
+        if self.mode == "sine":
+            y = math.sin(2 * math.pi * ph)
+        else:
+            f = ph % 1
+            y = 4 * f if f < 0.25 else (2 - 4 * f if f < 0.75 else 4 * f - 4)
+        path.lineTo(x0 + ph * cyc, mid - y * amp)
+    path.lineTo(w - 16, mid)
+    p.setPen(QtGui.QPen(wave, 3))
+    p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+    p.drawPath(path)
+    bold = QtGui.QFont(self.font())
+    bold.setBold(True)
+    p.setFont(bold)
+    lab = self.labels
+    ax = x0 + cyc / 4                          # the first peak
+    _arrow(p, dim, ax, top, ax, mid)
+    p.setPen(dim)
+    p.drawText(QtCore.QRectF(x0 - 410, (top + mid) / 2 - 10, 400, 20),
+               QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, lab.get("amp", ""))
+    # one cycle, peak to peak, above the wave
+    y = top - 10
+    p.setPen(QtGui.QPen(dim, 2))
+    a, b = x0 + cyc * 1.25, x0 + cyc * 2.25
+    p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(a, y + 5), QtCore.QPointF(a, y),
+                                    QtCore.QPointF(b, y), QtCore.QPointF(b, y + 5)]))
+    p.setPen(dim)
+    p.drawText(QtCore.QRectF((a + b) / 2 - 200, y - 22, 400, 18), QtCore.Qt.AlignmentFlag.AlignHCenter,
+               lab.get("freq", ""))
+    _arrow(p, dim, x0, base + 16, x1, base + 16)
+    p.setPen(dim)
+    p.drawText(QtCore.QRectF((x0 + x1) / 2 - 200, base + 21, 400, 20), QtCore.Qt.AlignmentFlag.AlignHCenter,
+               lab.get("dur", ""))
+
+
+PulseDiagram._paint_wave = _paint_wave
+
+
 class SimpleStimPage(QtWidgets.QWidget):
     changed = QtCore.Signal()        # a setting changed (the Record page's docked stimulator follows)
     state_changed = QtCore.Signal()  # sent one, or started or stopped repeating
@@ -179,6 +270,8 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.width = _spin(0.01, 10000, 3, "ms", "How long each pulse lasts")
         self.interval = _spin(0.1, 100000, 2, "ms", "From the start of the first pulse to the start of the second")
         self.rate = _spin(0.01, 5000, 2, "Hz", "Pulses per second in the train")
+        self.freq = _spin(0.01, 2500, 2, "Hz", "Cycles per second")
+        self.dur = _spin(1, 600000, 1, "ms", "How long the wave lasts")
         self.count = QtWidgets.QSpinBox(minimum=2, maximum=1000)
         self.count.setKeyboardTracking(False)
         self.count.setMinimumWidth(110)
@@ -190,12 +283,13 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.field_labels = {}
         for col, (key, name, w) in enumerate((("level", "Amplitude", self.level), ("width", "Width", self.width),
                                                ("interval", "Interval", self.interval), ("rate", "Rate", self.rate),
-                                               ("count", "Pulses", self.count))):
+                                               ("count", "Pulses", self.count), ("freq", "Frequency", self.freq),
+                                               ("dur", "Duration", self.dur))):
             lab = QtWidgets.QLabel(name)
             self.field_labels[key] = lab
             grid.addWidget(lab, 0, col)
             grid.addWidget(w, 1, col)
-        grid.setColumnStretch(5, 1)
+        grid.setColumnStretch(7, 1)
         lv.addLayout(grid)
 
         send = QtWidgets.QHBoxLayout()
@@ -295,7 +389,8 @@ class SimpleStimPage(QtWidgets.QWidget):
         self._set_values(saved)
         self._fill_presets()
         self.mode_group.buttonClicked.connect(lambda *_: self._changed())
-        for w in (self.level, self.width, self.interval, self.rate, self.every, self.ramp_by, self.ramp_to):
+        for w in (self.level, self.width, self.interval, self.rate, self.every, self.ramp_by, self.ramp_to,
+                  self.freq, self.dur):
             w.valueChanged.connect(self._changed)
         self.count.valueChanged.connect(self._changed)
         self.ramp.toggled.connect(self._changed)
@@ -325,12 +420,12 @@ class SimpleStimPage(QtWidgets.QWidget):
         return dict(mode=self.mode(), level=self.level.value(), width=self.width.value(),
                     interval=self.interval.value(), rate=self.rate.value(), count=self.count.value(),
                     every=self.every.value(), ramp=self.ramp.isChecked(), ramp_by=self.ramp_by.value(),
-                    ramp_to=self.ramp_to.value())
+                    ramp_to=self.ramp_to.value(), freq=self.freq.value(), dur=self.dur.value())
 
     def _set_values(self, d: dict) -> None:
         d = {**DEFAULTS, **d}
         widgets = (self.level, self.width, self.interval, self.rate, self.count, self.every,
-                   self.ramp_by, self.ramp_to, self.ramp)
+                   self.ramp_by, self.ramp_to, self.ramp, self.freq, self.dur)
         for w in widgets:
             w.blockSignals(True)
         self.mode_buttons.get(d["mode"], self.mode_buttons["single"]).setChecked(True)
@@ -343,6 +438,8 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.ramp.setChecked(bool(d["ramp"]))
         self.ramp_by.setValue(float(d["ramp_by"]))
         self.ramp_to.setValue(float(d["ramp_to"]))
+        self.freq.setValue(float(d["freq"]))
+        self.dur.setValue(float(d["dur"]))
         for w in widgets:
             w.blockSignals(False)
 
@@ -354,6 +451,11 @@ class SimpleStimPage(QtWidgets.QWidget):
         """What Stimulate sends: a pulse, two, or a train, in volts at the output."""
         cfg, mode = self.main.cfg, self.mode()
         scale = cfg.stim_scale or 1.0
+        amp, freq, dur = self.level.value() / scale, self.freq.value(), self.dur.value()
+        if mode == "sine":
+            return Stimulus(shape="sine", delay_ms=DELAY_MS, amplitude_v=amp, freq_hz=freq, duration_ms=dur)
+        if mode == "triangle":
+            return Stimulus(shape="segments", parts=triangle_parts(amp, freq, dur))
         count = {"single": 1, "pair": 2}.get(mode, self.count.value())
         interval = {"single": 100.0, "pair": self.interval.value()}.get(mode, 1000.0 / self.rate.value())
         return Stimulus(shape="pulse", delay_ms=DELAY_MS, amplitude_v=self.level.value() / scale,
@@ -361,6 +463,9 @@ class SimpleStimPage(QtWidgets.QWidget):
 
     def describe(self) -> str:
         units, mode = self.main.cfg.stim_units or "V", self.mode()
+        if mode in WAVES:
+            return (f"{'Sine' if mode == 'sine' else 'Triangle'} {self.level.value():g} {units} · "
+                    f"{self.freq.value():g} Hz · {self.dur.value():g} ms")
         s = f"{self.level.value():g} {units} · {self.width.value():g} ms"
         if mode == "pair":
             s += f" · pair {self.interval.value():g} ms apart"
@@ -370,10 +475,11 @@ class SimpleStimPage(QtWidgets.QWidget):
 
     def _changed(self, *_):
         mode = self.mode()
-        for key, w in (("interval", self.interval), ("rate", self.rate), ("count", self.count)):
-            show = (key == "interval" and mode == "pair") or (key != "interval" and mode == "train")
-            w.setVisible(show)
-            self.field_labels[key].setVisible(show)
+        widgets = {"level": self.level, "width": self.width, "interval": self.interval, "rate": self.rate,
+                   "count": self.count, "freq": self.freq, "dur": self.dur}
+        for key, w in widgets.items():
+            w.setVisible(key in FIELDS[mode])
+            self.field_labels[key].setVisible(key in FIELDS[mode])
         for w in (self.ramp_by, self.ramp_to):
             w.setEnabled(self.ramp.isChecked())
         self.main.settings.setValue("simple_stim", json.dumps(self.values()))
@@ -393,15 +499,14 @@ class SimpleStimPage(QtWidgets.QWidget):
         elif mode == "train":
             labels["gap"] = f"{1000 / self.rate.value():.4g} ms → {self.rate.value():g} Hz"
             labels["count"] = f"{self.count.value()} pulses"
+        elif mode in WAVES:
+            labels.update(freq=f"{self.freq.value():g} Hz", dur=f"Duration {self.dur.value():g} ms")
         t = style.tokens(self._mode)
         self.diagram.show_values(mode, labels, (t["focus"], DIM[self._mode], t["subtle"], t["field_border"]))
         # the boxes whose values are labeled in orange on the picture get an orange mark
-        marked = {"single": ("level", "width"), "pair": ("level", "interval"),
-                  "train": ("level", "rate", "count")}[mode]
-        names = {"level": "Amplitude", "width": "Width", "interval": "Interval", "rate": "Rate", "count": "Pulses"}
         for key, lab in self.field_labels.items():
-            lab.setText(f"<span style='color:{DIM[self._mode]}'>■</span> {names[key]}" if key in marked
-                        else names[key])
+            lab.setText(f"<span style='color:{DIM[self._mode]}'>■</span> {NAMES[key]}" if key in MARKED[mode]
+                        else NAMES[key])
 
     # -- sending -------------------------------------------------------------------------
     def fire(self) -> bool:

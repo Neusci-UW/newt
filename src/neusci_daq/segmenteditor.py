@@ -125,7 +125,7 @@ class SegmentEditor(QtWidgets.QWidget):
                 box = UnitSpinBox(-10 * k, 10 * k, units, fams, decimals=self._decimals(k), step=0.1 * k)
                 box.setValue(float(p.get("level", 0.0)) * k)
                 box.setMinimumWidth(FIELD_WIDTH)
-                box.setToolTip(f"{LEVEL_NAME[kind]} of {stimmod.letter(i)}")
+                box.setToolTip(f"{LEVEL_NAME.get(kind, "Level")} of {stimmod.letter(i)}")
                 box.valueChanged.connect(lambda v, i=i: self._set(i, "level", float(v) / k))
                 self.grid.addWidget(box, 1, c)
             if kind not in ("base",):
@@ -136,7 +136,7 @@ class SegmentEditor(QtWidgets.QWidget):
                 dur = UnitSpinBox(0, 60000, "ms", decimals=4, step=1.0 if kind == "pulse" else 10.0)
                 dur.setValue(float(p.get("dur", 0.0)))
                 dur.setMinimumWidth(FIELD_WIDTH)
-                dur.setToolTip(f"{DUR_NAME[kind]} of {stimmod.letter(i)}"
+                dur.setToolTip(f"{DUR_NAME.get(kind, "Duration")} of {stimmod.letter(i)}"
                                + (" (each pulse)" if kind == "pulse" else ""))
                 dur.valueChanged.connect(lambda v, i=i: self._set(i, "dur", float(v)))
                 self.grid.addWidget(dur, 3, c)

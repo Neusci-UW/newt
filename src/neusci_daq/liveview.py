@@ -664,12 +664,17 @@ class LiveMixin:
         self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
         self._fit_toolbar()
 
-    def _start_block(self) -> None:
+    def _ensure_session_dir(self) -> Path:
+        """The live session's folder, made now if it has none yet."""
         if self.session_dir is None:
             # Untitled until saved; recording still goes straight to disk.
             self.session_dir = self._unsaved_dir() / datetime.now().strftime("session_%Y%m%d_%H%M%S")
             self.session_dir.mkdir(parents=True, exist_ok=True)
             self.session_saved = False
+        return self.session_dir
+
+    def _start_block(self) -> None:
+        self._ensure_session_dir()
         path = session.next_block_path(self.session_dir)
         path = self.recorder.start(path)
         if self.camera_panel.start_block(path, time.monotonic()):
@@ -697,6 +702,7 @@ class LiveMixin:
         self._block_changed(started=False)
 
     def _block_changed(self, started: bool) -> None:
+        self._update_menu_state()           # so Cmd+S / Export match without opening File first
         self._fill_recorded()
         # Starting a block keeps the previous block's comment lines: its data is
         # still on screen (now at negative times), and they scroll off with it.

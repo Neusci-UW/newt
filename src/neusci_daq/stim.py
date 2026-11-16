@@ -47,7 +47,8 @@ SHAPES = {
 
 # A segment's kinds, in the order the Stimulator offers them.
 SEG_KINDS = {"base": "Baseline", "step": "Step", "ramp": "Ramp", "pulse": "Pulse", "sine": "Sine",
-             "file": "From file"}
+             "triangle": "Triangle", "square": "Square", "chirp": "Chirp", "noise": "Noise",
+             "exp": "Exponential", "alpha": "Alpha", "points": "Custom points", "file": "From file"}
 
 
 def samples(ms: float, rate: float) -> int:
@@ -75,12 +76,26 @@ def new_part(kind: str, level: float | None = None, dur: float | None = None) ->
     """A segment of `kind` with sensible starting values. Its level and duration mean:
     base 0 V for dur ms; step level V for dur ms; ramp from `start` to level V over dur ms;
     pulse level V, dur ms wide, `count` of them every `interval` ms; sine level V
-    amplitude around `offset` at `freq` Hz for dur ms; file the file's volts × level."""
+    amplitude around `offset` at `freq` Hz for dur ms; triangle and square level V at `freq`
+    Hz (square is on for the first half of each cycle); chirp level V amplitude sweeping from
+    `freq` to `freq2` Hz (`log` for a logarithmic sweep); noise Gaussian with level V standard
+    deviation (`seed` 0: new noise every time, else the same noise each time); exp a jump to
+    level V decaying with `tau` ms; alpha a rise and fall peaking at level V at `tau` ms
+    (an EPSC's shape); points straight lines (or steps, `join`) through [ms, V] `points`,
+    each V × level; file the file's volts × level."""
     p = {"kind": kind, "level": 0.0, "dur": 10.0, "d_level": "", "d_dur": ""}
     p.update({"step": {"level": 1.0, "dur": 10.0},
               "ramp": {"level": 1.0, "dur": 20.0, "start": 0.0},
               "pulse": {"level": 1.0, "dur": 1.0, "count": 1, "interval": 100.0, "biphasic": False},
               "sine": {"level": 1.0, "dur": 100.0, "freq": 10.0, "offset": 0.0},
+              "triangle": {"level": 1.0, "dur": 100.0, "freq": 10.0},
+              "square": {"level": 1.0, "dur": 100.0, "freq": 10.0},
+              "chirp": {"level": 1.0, "dur": 200.0, "freq": 5.0, "freq2": 50.0, "log": False},
+              "noise": {"level": 0.2, "dur": 100.0, "seed": 0},
+              "exp": {"level": 1.0, "dur": 50.0, "tau": 10.0},
+              "alpha": {"level": 1.0, "dur": 50.0, "tau": 5.0},
+              "points": {"level": 1.0, "dur": 40.0, "points": [[0.0, 0.0], [10.0, 1.0], [20.0, -0.5], [40.0, 0.0]],
+                         "join": "line"},
               "file": {"level": 1.0, "dur": 0.0, "file": "", "file_rate": 0.0}}.get(kind, {}))
     if level is not None:
         p["level"] = float(level)
@@ -467,6 +482,48 @@ def _part_wave(p: dict, rate: float, t0_ms: float = 0.0) -> np.ndarray:
         return np.concatenate([out, np.zeros(end - len(out))]) if end > len(out) else out[:end]
     if kind == "file":
         return load_wave_file(p.get("file", ""), rate, float(p.get("file_rate", 0.0)) or rate) * level
+    t = np.arange(k) / rate                                      # s, from the segment's start
+    if kind in ("triangle", "square"):
+        freq = float(p.get("freq", 0.0))
+        if freq <= 0 or freq > rate / 2:
+            raise ValueError(f"the frequency must be between 0 and {rate / 2:,.0f} Hz (half the output rate).")
+        f = (freq * t) % 1.0
+        if kind == "square":
+            return np.where(f < 0.5, level, 0.0)
+        return level * np.where(f < 0.25, 4 * f, np.where(f < 0.75, 2 - 4 * f, 4 * f - 4))
+    if kind == "chirp":
+        f0, f1, T = float(p.get("freq", 0.0)), float(p.get("freq2", 0.0)), dur / 1000.0
+        if min(f0, f1) <= 0 or max(f0, f1) > rate / 2:
+            raise ValueError(f"both frequencies must be between 0 and {rate / 2:,.0f} Hz (half the output rate).")
+        if T <= 0:
+            return np.zeros(k)
+        if p.get("log") and f0 != f1:
+            r = f1 / f0
+            phase = 2 * np.pi * f0 * T / np.log(r) * (r ** (t / T) - 1)
+        else:
+            phase = 2 * np.pi * (f0 * t + (f1 - f0) * t ** 2 / (2 * T))
+        return level * np.sin(phase)
+    if kind == "noise":
+        seed = int(p.get("seed", 0))
+        rng = np.random.default_rng(seed if seed else None)
+        return abs(level) * rng.standard_normal(k)
+    if kind in ("exp", "alpha"):
+        tau = float(p.get("tau", 0.0)) / 1000.0
+        if tau <= 0:
+            raise ValueError("τ must be more than 0.")
+        if kind == "exp":
+            return level * np.exp(-t / tau)
+        return level * (t / tau) * np.exp(1 - t / tau)
+    if kind == "points":
+        pts = sorted((float(a), float(b)) for a, b in (p.get("points") or []))
+        if len(pts) < 2:
+            raise ValueError("custom points need at least two points.")
+        tp = np.array([a for a, _ in pts]) / 1000.0
+        vp = np.array([b for _, b in pts]) * level
+        if p.get("join") == "step":
+            idx = np.clip(np.searchsorted(tp, t, side="right") - 1, 0, len(vp) - 1)
+            return vp[idx]
+        return np.interp(t, tp, vp)
     raise ValueError(f"unknown kind of segment {kind!r}.")
 
 
@@ -485,6 +542,19 @@ def _describe_part(p: dict, units: str, scale: float) -> str:
             s += f" ×{int(p['count'])} every {float(p['interval']):g} ms"
     elif kind == "sine":
         s = f"Sine {lv(abs(float(p['level'])))} {units}, {float(p.get('freq', 0)):g} Hz for {dur:g} ms"
+    elif kind in ("triangle", "square"):
+        s = f"{SEG_KINDS[kind]} {lv(p['level'])} {units}, {float(p.get('freq', 0)):g} Hz for {dur:g} ms"
+    elif kind == "chirp":
+        s = (f"Chirp {lv(p['level'])} {units}, {float(p.get('freq', 0)):g}→{float(p.get('freq2', 0)):g} Hz"
+             f"{' (log)' if p.get('log') else ''} over {dur:g} ms")
+    elif kind == "noise":
+        s = f"Noise SD {lv(abs(float(p['level'])))} {units} for {dur:g} ms" + (" (same each time)" if int(p.get("seed", 0)) else "")
+    elif kind == "exp":
+        s = f"Exponential {lv(p['level'])} {units}, τ {float(p.get('tau', 0)):g} ms, for {dur:g} ms"
+    elif kind == "alpha":
+        s = f"Alpha {lv(p['level'])} {units}, peak at {float(p.get('tau', 0)):g} ms, for {dur:g} ms"
+    elif kind == "points":
+        s = f"Custom {len(p.get('points') or [])} points, {dur:g} ms"
     elif kind == "file":
         s = f"File {Path(p.get('file', '')).name or '(none)'}" + (
             f" ×{float(p['level']):g}" if float(p.get("level", 1)) != 1 else "")

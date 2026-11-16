@@ -94,9 +94,7 @@ def save(path: str | Path, folder: str | Path, state: dict) -> dict:
     """Pack a session folder and the app's state into `path`. Returns the manifest's files,
     for telling later whether anything has changed since."""
     path, folder = Path(path), Path(folder)
-    now = files_of(folder)
-    if not any(r.startswith("block_") for r in now):
-        raise NewtError("Nothing recorded yet: there's nothing to save.")
+    now = files_of(folder)                           # no block_ files: a design file, still saved
     old = read_manifest(path) if path.exists() else None
     if old is not None and old.get("version") == VERSION and old.get("wasted", 0) <= path.stat().st_size / 2:
         changed = [r for r, v in now.items() if old["files"].get(r) != v]

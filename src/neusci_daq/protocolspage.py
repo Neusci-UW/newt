@@ -742,7 +742,7 @@ class ProtocolsPage(QtWidgets.QWidget):
         c, cfg = self.chk, self.main.cfg
         problems = list(c.errors) if c else []
         if not cfg.stim_monitor:
-            problems.append("Record the stimulus on a spare input first (Line up on › Choose…), "
+            problems.append("Record the stimulus on a spare input first (Output › Record on), "
                             "so each stimulus can be lined up on when the stimulus really started.")
         if problems:
             self.summary.setStyleSheet(f"color: {t['error']}")

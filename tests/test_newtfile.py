@@ -64,9 +64,12 @@ def test_a_file_mostly_old_copies_is_written_again(tmp_path):
         assert [i.filename for i in z.infolist()].count("session/block_001.h5") <= 2
 
 
-def test_bad_files_say_so(tmp_path):
-    with pytest.raises(NewtError):
-        newtfile.save(tmp_path / "x.newt", tmp_path, {})        # nothing recorded
+def test_design_file_and_bad_files(tmp_path):
+    d = tmp_path / "design"
+    d.mkdir()
+    newtfile.save(tmp_path / "x.newt", d, {"k": 1})            # no trials: a design file
+    _, state, files = newtfile.open_file(tmp_path / "x.newt", tmp_path / "open")
+    assert state == {"k": 1} and files == {}
     (tmp_path / "bad.newt").write_text("not a zip")
     with pytest.raises(NewtError):
         newtfile.open_file(tmp_path / "bad.newt", tmp_path)

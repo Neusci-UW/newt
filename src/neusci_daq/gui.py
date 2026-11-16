@@ -639,6 +639,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.dock_stim.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
+        if hasattr(self, "stimulus_page"):
+            self.stimulus_page.apply_theme(mode)
         for page in (getattr(self, "sim_page", None), getattr(self, "board_page", None)):
             if page is not None:
                 page.apply_theme(mode)

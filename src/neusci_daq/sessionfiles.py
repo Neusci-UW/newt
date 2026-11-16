@@ -74,9 +74,9 @@ class SessionFilesMixin:
         recording = self.recorder.recording
         for a in (self.act_new, self.act_open, self.act_open_folder, self.act_open_mat, self.act_append):
             a.setEnabled(not recording)
-        self.act_save.setEnabled(bool(self._export_blocks()) and not recording)
+        self.act_save.setEnabled(not recording)        # with no trials it's a design file
+        self.act_save_as.setEnabled(not recording)
         self.act_save_folder.setEnabled(bool(self._export_blocks()) and not recording)
-        self.act_save_as.setEnabled(bool(self._export_blocks()) and not recording)
         self.act_export.setEnabled(bool(self._export_blocks()) and not recording)
 
     def _unsaved_dir(self) -> Path:
@@ -400,9 +400,8 @@ class SessionFilesMixin:
         if self.recorder.recording:
             QtWidgets.QMessageBox.information(self, "Recording in progress", "Stop recording before saving.")
             return False
-        if not self._export_blocks():
-            QtWidgets.QMessageBox.information(self, "Nothing to save", "Record a trial first.")
-            return False
+        if self.mode == LIVE:
+            self._ensure_session_dir()      # no trials yet: saved as a design (setup, stimulus, simulation)
         src = self._export_folder()
         name = self._newt().stem if self._newt() is not None else \
             src.name if (self.session_saved or self.mode == REVIEW) else datetime.now().strftime("session_%Y%m%d_%H%M%S")
@@ -440,9 +439,11 @@ class SessionFilesMixin:
         them (analysis included), and what's on screen. Later saves add only what changed."""
         if self.recorder.recording:
             raise session.SessionError("Stop recording before saving.")
+        if self.mode == LIVE:
+            self._ensure_session_dir()
         folder = self._export_folder()
-        if folder is None or not self._export_blocks():
-            raise newtfile.NewtError("Nothing recorded yet: there's nothing to save.")
+        if folder is None:
+            raise newtfile.NewtError("There's no session to save.")
         path = Path(path).resolve()
         self.save_session_files()
         self._newt_files = newtfile.save(path, folder, self.app_state())
@@ -464,7 +465,11 @@ class SessionFilesMixin:
         """Open a .newt file: its session in review, and NEWT as it was when saved."""
         path = Path(path).resolve()
         folder, state, files = newtfile.open_file(path, self.cfg.data_dir)
-        self.open_session(folder, remember=False)
+        if session.list_blocks(folder):
+            self.open_session(folder, remember=False)
+        else:                               # a design file, no trials yet: open live, recording into it
+            self.back_to_live()
+            self.session_dir, self.session_saved = folder, True
         self.newt_path, self._newt_folder, self._newt_files = path, folder, files
         self.restore_app_state(state)
         self._remember(path)

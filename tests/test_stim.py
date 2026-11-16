@@ -448,33 +448,19 @@ def test_typed_units_with_converted_stimulator_units(win):
     assert win.stimulus.segments[1]["start_v"] == pytest.approx(0.3)
 
 
-def test_stimulus_can_start_with_acquisition(app, win, tmp_path):
-    from neusci_daq.gui import MainWindow
-    win.stim_repeat_s = 0.15
-    win.set_stimulus(Stimulus(amplitude_v=1, width_ms=1))
-    page = win.stim_page
-    assert page.on_start.currentData() == ""                 # off by default
+def test_start_runs_the_run_bar_stimulus(app, win):
+    win.set_record_stim("none")                              # None: Start sends nothing
     win.btn_run.setChecked(True)
     pump(app, 0.2)
     assert win.stim_out.fired == 0
     win.btn_run.setChecked(False)
 
-    page.on_start.setCurrentIndex(page.on_start.findData("once"))
+    win.set_record_stim("simple")                            # Simple: repeats Simple Stimulus's
     win.btn_run.setChecked(True)
-    pump(app, 0.4)
-    assert win.stim_out.fired == 1 and not win.repeating
-    win.btn_run.setChecked(False)
-
-    page.on_start.setCurrentIndex(page.on_start.findData("repeat"))
-    fired = win.stim_out.fired
-    win.btn_run.setChecked(True)
-    pump(app, 0.4)
-    assert win.repeating and page.btn_repeat.isChecked() and win.stim_out.fired >= fired + 2
-    win.btn_run.setChecked(False)                            # Stop stops it, as before
-    assert not win.repeating
-    w2 = MainWindow(make_cfg(tmp_path), settings=win.settings)   # remembered
-    assert w2.stim_on_start == "repeat" and w2.stim_page.on_start.currentData() == "repeat"
-    w2.close()
+    pump(app, 0.2)
+    assert win.simple_page.repeating and win.stim_out.fired >= 1
+    win.btn_run.setChecked(False)                            # Stop stops it
+    assert not win.simple_page.repeating
 
 
 def test_fields_show_numbers_under_1000_with_a_prefix(win):

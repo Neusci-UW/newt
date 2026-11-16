@@ -3,6 +3,8 @@
   wheel                      zoom the time (x) axis around the mouse
   Cmd+wheel (Ctrl off a Mac) zoom the voltage (y) axis; so does the wheel over the left axis
   Shift+wheel, or sideways   move back and forward in time, a tenth of the view per notch
+  Ctrl/Cmd+drag              zoom to a box (with the zoom box tool on, a plain drag does);
+                             Ctrl/Cmd+click goes back a zoom
 
 Acquisition plots zoom by changing Window instead (see gui._TraceViewBox).
 """
@@ -39,6 +41,8 @@ class WheelViewBox(pg.ViewBox):
         self._drawn: list = []
         self.bounds = [None, None]              # (lo, hi) per axis, to use instead of the data's edges
         self.y_free = False                     # y set by hand (Max/Min, the scale buttons): may go past the data
+        self.box_tool = False                   # the zoom box tool: a plain left-drag draws the zoom box
+        self.on_fit = None                      # f(): double-click with the zoom box tool on
 
     def _refresh_limits(self) -> None:
         lim = self.state["limits"]
@@ -107,7 +111,19 @@ class WheelViewBox(pg.ViewBox):
         return (self.clamp_to_data and self.bounds[axis] is None and self.linkedView(axis) is None
                 and self._data_limits(axis) is None)
 
+    def set_box_tool(self, on: bool) -> None:
+        """The zoom box tool: plain left-drag draws a box and zooms to it (crosshair cursor)."""
+        self.box_tool = on
+        if on:
+            self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        else:
+            self.unsetCursor()
+
     def mouseDragEvent(self, ev, axis=None):
+        if (axis is None and self.box_tool and ev.button() == QtCore.Qt.MouseButton.LeftButton
+                and not ev.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier):
+            self._box_drag(ev)
+            return
         if (axis is None and self.on_draw is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
                 and not ev.modifiers() & (ZOOM_MODS | QtCore.Qt.KeyboardModifier.ShiftModifier)):
             ev.accept()                         # draw around points (Measure, on the 2-D charts)
@@ -126,34 +142,49 @@ class WheelViewBox(pg.ViewBox):
             self.on_drag_select(min(x0, x1), max(x0, x1), ev.isFinish())
             return
         if axis is None and ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
-            ev.accept()
-            if ev.isFinish():
-                self.rbScaleBox.hide()
-                r = QtCore.QRectF(pg.Point(ev.buttonDownPos(ev.button())), pg.Point(ev.pos())).normalized()
-                r = self.childGroup.mapRectFromParent(r).normalized()
-                if r.width() > 0 and r.height() > 0:
-                    self.zoom_box(r.left(), r.right(), r.top(), r.bottom())
-            else:
-                self.updateScaleBox(ev.buttonDownPos(), ev.pos())
+            self._box_drag(ev)
             return
         if axis is None:
             ev.ignore()                         # no dragging the plot about: the wheel and the axes do that
             return
         super().mouseDragEvent(ev, axis)
 
+    def _box_drag(self, ev) -> None:
+        """Draw the zoom box; on release zoom to it. A flat box (a few pixels tall)
+        zooms time only and leaves the y axis where it is."""
+        ev.accept()
+        if not ev.isFinish():
+            self.updateScaleBox(ev.buttonDownPos(), ev.pos())
+            return
+        self.rbScaleBox.hide()
+        px = QtCore.QRectF(pg.Point(ev.buttonDownPos(ev.button())), pg.Point(ev.pos())).normalized()
+        if px.width() < 4:
+            return                              # a click, not a box
+        r = self.childGroup.mapRectFromParent(px).normalized()
+        if px.height() < 6:
+            self.zoom_box(r.left(), r.right(), None, None)
+        elif r.width() > 0 and r.height() > 0:
+            self.zoom_box(r.left(), r.right(), r.top(), r.bottom())
+
     def mouseClickEvent(self, ev):
+        if (self.box_tool and self.on_fit is not None and ev.double()
+                and ev.button() == QtCore.Qt.MouseButton.LeftButton):
+            ev.accept()
+            self.on_fit()
+            return
         if ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
             ev.accept()
             self.zoom_back()
             return
         super().mouseClickEvent(ev)
 
-    def zoom_box(self, x0: float, x1: float, y0: float, y1: float) -> None:
-        """Show just this box (data coordinates); Ctrl+click goes back."""
+    def zoom_box(self, x0: float, x1: float, y0: float | None, y1: float | None) -> None:
+        """Show just this box (data coordinates; y0 None: time only); Ctrl+click goes back."""
         self._zoom_history.append((self.viewRange(), bool(self.state["autoRange"][1])))
         self.set_time_range(x0, x1)
-        self.enableAutoRange(axis="y", enable=False)
-        self.setYRange(y0, y1, padding=0)
+        if y0 is not None:
+            self.enableAutoRange(axis="y", enable=False)
+            self.setYRange(y0, y1, padding=0)
         self.sigRangeChangedManually.emit([True, True])     # overlaid axes follow (MultiAxis)
 
     def zoom_back(self) -> None:

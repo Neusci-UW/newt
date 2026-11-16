@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field, replace
 import numpy as np
 
 from . import stim as stimmod
+from .ringbuffer import RingBuffer
 from .stim import Stimulus
 
 # Settings that can be stepped, per shape: (key, label, unit). "scale" multiplies
@@ -652,8 +653,10 @@ class Capture:
         self.monitor_row = monitor_row
         self.to_units = to_units              # (channels, n) volts -> display units
         self.keep_s = keep_s
-        self.t = np.zeros(0)
-        self.data: np.ndarray | None = None
+        # The newest keep_s of every channel, in a ring: adding a chunk writes only its
+        # samples (concatenating the whole window every chunk copied ~150 MB 20×/s on a
+        # long protocol and froze the computer). t and data are views of it.
+        self._ring: RingBuffer | None = None
         self.pending: list[_Pending] = []
         self.last_fire: float | None = None    # stream time of the last stimulus sent
         self.last_dur = 0.0
@@ -662,15 +665,19 @@ class Capture:
     def latest(self) -> float:
         return float(self.t[-1]) if self.t.size else 0.0
 
+    @property
+    def t(self) -> np.ndarray:
+        return self._ring.t if self._ring is not None else np.zeros(0)
+
+    @property
+    def data(self) -> np.ndarray | None:
+        return self._ring.y if self._ring is not None else None
+
     def add(self, t: np.ndarray, data: np.ndarray) -> None:
-        if self.data is None or self.data.shape[0] != data.shape[0]:
-            self.t, self.data = np.asarray(t, float), np.asarray(data, float)
-        else:
-            self.t = np.concatenate([self.t, t])
-            self.data = np.concatenate([self.data, data], axis=1)
-        keep = int(self.keep_s * self.rate)
-        if self.t.size > keep:
-            self.t, self.data = self.t[-keep:], self.data[:, -keep:]
+        data = np.asarray(data, float)
+        if self._ring is None or self._ring.n != data.shape[0]:
+            self._ring = RingBuffer(data.shape[0], int(self.keep_s * self.rate))
+        self._ring.append(t, data)
 
     def sent(self, trial: Trial, wave: np.ndarray, out_rate: float, delay_ms: float) -> None:
         tpl, pad = template(wave, out_rate, self.rate)

@@ -108,13 +108,8 @@ class StimPage(QtWidgets.QWidget):
                                 "This adds a channel named Stim with exact timing.")
         self.repeat = _spin(0.05, 3600, unit="s", step=0.5)
         self.repeat.setToolTip("Repeat fires the stimulus this often")
-        self.on_start = QtWidgets.QComboBox()
-        for label, key in (("Do nothing", ""), ("Fire once", "once"), ("Start repeating", "repeat")):
-            self.on_start.addItem(label, key)
-        self.on_start.setToolTip("What the stimulator does when you press Start on the toolbar")
         bottom.addRow("Output", self.output)
         bottom.addRow("Record on", self.monitor)
-        bottom.addRow("When Start is pressed", self.on_start)
         ov.addLayout(bottom)
         self.sim_note = QtWidgets.QLabel()            # simulated backend: where the stimulus goes
         self.sim_note.setWordWrap(True)
@@ -197,9 +192,6 @@ class StimPage(QtWidgets.QWidget):
         self._apply_units()
         self.set_stimulus(main.stimulus)
         self.repeat.setValue(main.stim_repeat_s)
-        self.on_start.setCurrentIndex(max(0, self.on_start.findData(main.stim_on_start)))
-        self.on_start.currentIndexChanged.connect(
-            lambda *_: self.main.set_stim_on_start(self.on_start.currentData()))
         self.repeat.valueChanged.connect(lambda v: setattr(self.main, "stim_repeat_s", float(v)))
         self.btn_fire.clicked.connect(lambda: self.main.fire_stimulus())
         self.btn_repeat.toggled.connect(self.main.set_repeat)

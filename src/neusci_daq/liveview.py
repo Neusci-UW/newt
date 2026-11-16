@@ -44,7 +44,11 @@ class LiveMixin:
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
         pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time, self._zoom_to,
                                                       autoscale=self._autoscale_view))
-        pw.getPlotItem().vb.clamp_to_data = not self.btn_run.isChecked()
+        vb = pw.getPlotItem().vb
+        vb.clamp_to_data = not self.btn_run.isChecked()
+        vb.set_box_tool(getattr(self, "btn_box_zoom", None) is not None and self.btn_box_zoom.isChecked())
+        vb.on_fit = lambda vb=vb: self._fit_view(vb)
+        vb.on_zoomed = lambda vb: self._zoom_stack.append(vb)
         p = pw.getPlotItem()
         self.plot_widgets.append(pw)
         if unit in _SI_BASE:
@@ -85,7 +89,7 @@ class LiveMixin:
         if compact != self._compact_strips:
             self._compact_strips = compact
             for rw in rows:
-                rw.set_compact(compact)
+                rw.set_compact(compact or getattr(rw, "overlaid", False))    # overlaid rows stay folded
 
     def _autoscale_view(self, vb) -> None:
         """Right-click › Autoscale: fit this plot's y axis to its data now. With View ›
@@ -97,6 +101,26 @@ class LiveMixin:
         vb.enableAutoRange(axis="y", enable=self.auto_scale_y)
         if self._multi is not None and self.plots and vb is self.plots[0].vb:
             self._multi.fit()                            # the overlaid traces too
+
+    def set_box_tool(self, on: bool) -> None:
+        """Time bar › Zoom box: a plain drag on any plot draws a box and zooms to it."""
+        for p in self.plots:
+            p.vb.set_box_tool(on)
+
+    def _zoom_back(self) -> None:
+        """Time bar › Back: undo the last box zoom, on whichever plot it was drawn."""
+        live = {p.vb for p in self.plots}
+        while self._zoom_stack:
+            vb = self._zoom_stack.pop()
+            if vb in live and vb._zoom_history:
+                vb.zoom_back()
+                return
+
+    def _fit_view(self, vb) -> None:
+        """Double-click with the zoom box tool: all the data in time, and this plot's
+        y axis fitted to it."""
+        self._time_fit_all()
+        self._autoscale_view(vb)
 
     def set_auto_scale_y(self, on: bool) -> None:
         """View › Auto-scale voltage. Turning it off holds every plot's current range."""
@@ -156,27 +180,33 @@ class LiveMixin:
             self._show_review_block(self.block_combo.currentIndex())
 
     def _apply_channel_overlay(self) -> None:
-        """With Overlay channels on, put a copy of each other channel's curve in the first
-        plot (in its color) and hide the other plots: live, their rows shrink to just the
-        channel's controls; in review, their rows go."""
+        """With Overlay channels on, put a copy of each overlaid channel's curve in the
+        first overlaid one's plot (in its color) and hide their plots: live, their rows
+        shrink to just the channel's controls; in review, their rows go. Channels taken
+        out of the overlay (the tool's menu) keep their own plots."""
         self._mirrors = []
         self._multi = None
-        if not self.btn_overlay_ch.isChecked() or len(self.plots) < 2:
+        names = self._plot_names
+        name_of = lambda k: names[k] if k < len(names) else f"Channel {k + 1}"
+        inside = [k for k in range(len(self.plots)) if name_of(k) not in self.overlay_out]
+        if not self.btn_overlay_ch.isChecked() or len(inside) < 2:
             return
-        first = self.plots[0]
+        host = inside[0]
+        first = self.plots[host]
         legend = first.addLegend(offset=(10, 10))
         legend.clear()
-        names = self._plot_names
         separate = self.act_separate_y.isChecked()
         multi = MultiAxis(first, separate=separate)
         multi.set_auto(self.auto_scale_y)
         for k, (pw, curve) in enumerate(zip(self.plot_widgets, self.curves)):
-            name = names[k] if k < len(names) else f"Channel {k + 1}"
+            if k not in inside:
+                continue
+            name = name_of(k)
             ax = pw.getPlotItem().getAxis("left")
             unit = getattr(ax, "labelUnits", "") or ""
             color = curve.opts["pen"].color() if hasattr(curve.opts["pen"], "color") else None
-            if k == 0:
-                multi.add(curve, name, unit, color)       # already in the first plot
+            if k == host:
+                multi.add(curve, name, unit, color)       # already in the host plot
                 legend.addItem(curve, name)
                 continue
             mirror = TraceCurve()
@@ -186,8 +216,9 @@ class LiveMixin:
             self._mirrors.append((k, mirror))
             row = pw.parentWidget()
             if self.mode == LIVE and isinstance(row, ChannelRowWidget):
-                pw.hide()                                # keep the channel's controls, like an "off" row
-                row.setFixedHeight(row.strip.sizeHint().height())
+                pw.hide()                                # keep the channel's controls, folded (they open on hover)
+                row.fit_strip = row.overlaid = True     # so the overlay plot gets the height
+                row.set_compact(True)
             elif row is not None:
                 row.hide()
         if not separate:
@@ -195,8 +226,46 @@ class LiveMixin:
             first.getAxis("left").enableAutoSIPrefix(False)
         self._multi = multi
         self._multi_unfitted = not self.auto_scale_y
-        first.getAxis("bottom").setStyle(showValues=True)      # the one plot showing: its time axis
-        first.setLabel("bottom", "time", units="s")
+        # Time numbers on the lowest plot still showing.
+        showing = [k for k in range(len(self.plots)) if k not in inside[1:]]
+        for k in showing:
+            self.plots[k].getAxis("bottom").setStyle(showValues=k == showing[-1])
+        self.plots[showing[-1]].setLabel("bottom", "time", units="s")
+        # The overlay's right-hand axes make its plot narrower: give the plots still
+        # showing the same room on the right, so their times line up.
+        others = [self.plots[k] for k in showing if k != host]
+
+        def align(*_):
+            for p in others:
+                l, t, r, b = p.layout.getContentsMargins()
+                r = max(0.0, r + p.vb.width() - first.vb.width())
+                if abs(r - p.layout.getContentsMargins()[2]) > 0.5:
+                    p.layout.setContentsMargins(l, t, r, b)
+        if others:
+            first.vb.sigResized.connect(align)
+            for p in others:
+                p.vb.sigResized.connect(align)
+            align()
+
+    def overlay_menu(self, menu: QtWidgets.QMenu) -> None:
+        """The overlay tool's menu: a check for each channel, ticked if it's overlaid."""
+        menu.clear()
+        names = self._plot_names[:len(self.plots)] or [c.name for c in self.cfg.channels]
+        for name in names:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(name not in self.overlay_out)
+            act.toggled.connect(lambda on, name=name: self.set_overlaid(name, on))
+
+    def set_overlaid(self, name: str, on: bool) -> None:
+        """Put a channel in the overlay or take it out (back to its own plot). Ticking one
+        turns the overlay on."""
+        (self.overlay_out.discard if on else self.overlay_out.add)(name)
+        self.settings.setValue("overlay_excluded", "\n".join(sorted(self.overlay_out)))
+        if on and not self.btn_overlay_ch.isChecked():
+            self.btn_overlay_ch.setChecked(True)              # rebuilds the plots
+        elif self.btn_overlay_ch.isChecked():
+            self.set_channel_overlay(True)
 
     def _fit_new_plots(self) -> None:
         """With auto-scale off, give a plot that has just got its first data a range
@@ -626,10 +695,7 @@ class LiveMixin:
             self.timer.start()
             if self.btn_rec.isChecked():         # Record is on: Start records too
                 self._start_block()
-            if self.stim_on_start == "once":
-                self.fire_stimulus()
-            elif self.stim_on_start == "repeat":
-                self.set_repeat(True)
+            self._stim_on_start()
         else:
             if self.recorder.recording:          # ends the block; Record stays on for the next Start
                 self._stop_block()
@@ -639,6 +705,17 @@ class LiveMixin:
             self.btn_run.setText("Start")
             self._show_rec_armed()
             self._fit_window()
+
+    def _stim_on_start(self) -> None:
+        """Start runs the stimulus picked on the run bar: None sends nothing, Simple
+        repeats Simple Stimulus's stimulus, Complex runs Complex Stimulus's trials."""
+        if self.stim_out is None:
+            return
+        mode = self.settings.value("record_stim", "simple")
+        if mode == "simple" and hasattr(self, "simple_page"):
+            self.simple_page.start_repeat()
+        elif mode == "complex" and hasattr(self, "dock_design"):
+            self.dock_design._run()
 
     def _toggle_rec(self, on: bool):
         """Record is an on/off switch. Turned on while acquiring, a block starts now;

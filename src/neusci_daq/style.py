@@ -7,6 +7,7 @@ the plot colors).
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
@@ -96,6 +97,8 @@ QPushButton#start:disabled, QPushButton#record:disabled {{ background: {t['disab
 QToolButton {{ background: transparent; border: none; border-radius: 6px; padding: 4px; color: {t['ink']}; }}
 QToolButton:hover {{ background: {t['button']}; }}
 QToolButton:checked {{ background: {t['button_down']}; }}
+QToolButton#tool:checked {{ background: {t['focus']}; }}
+QToolButton#tool:checked:hover {{ background: {t['focus']}; }}
 QToolButton#remove {{ background: {t['button']}; color: {t['muted']}; }}
 QToolButton#remove:hover {{ background: {t['button_hover']}; }}
 QToolButton#remove:disabled {{ background: {t['disabled']}; color: {t['disabled_ink']}; }}
@@ -241,7 +244,8 @@ def dot_icon(color: str, square: bool = False, size: int = 10) -> QtGui.QIcon:
 
 def scale_icon(kind: str, ink: str | None = None, size: int = 16) -> QtGui.QIcon:
     """The plot scale buttons: "in" and "out" (a magnifier with + or −), "fit_x" (|↔|,
-    all the data), "fit_y" (↕, autoscale) and "end" (→|, the newest data)."""
+    all the data), "fit_y" (↕, autoscale), "end" (→|, the newest data), "box" (the zoom box tool),
+    "back" (undo a box zoom) and "overlay" (Overlay channels)."""
     if ink is None:
         ink = tokens(_applied["mode"] or LIGHT)["ink"]
     scale = 2.0
@@ -285,5 +289,26 @@ def scale_icon(kind: str, ink: str | None = None, size: int = 16) -> QtGui.QIcon
     elif kind == "end":
         arrow(P(1.5, m), P(s - 4.5, m))
         p.drawLine(P(s - 2, 3), P(s - 2, s - 3))
+    elif kind == "box":                         # a dashed box with a magnifier on its corner
+        dash = QtGui.QPen(pen)
+        dash.setDashPattern([2, 1.6])
+        p.setPen(dash)
+        p.drawRect(QtCore.QRectF(1.5, 1.5, s - 6, s - 6))
+        p.setPen(pen)
+        c, r = P(s - 5, s - 5), 2.6
+        p.drawEllipse(c, r, r)
+        p.drawLine(P(c.x() + r * 0.72, c.y() + r * 0.72), P(s - 1, s - 1))
+    elif kind == "overlay":                     # two traces drawn on top of each other
+        for y0, amp, ph in ((m - 1.5, 3.2, 0.0), (m + 1.5, 3.2, 2.2)):
+            path = QtGui.QPainterPath(P(1.5, y0))
+            for i in range(1, 25):
+                x = 1.5 + (s - 3) * i / 24
+                path.lineTo(P(x, y0 - amp * math.sin(i / 24 * 2 * math.pi * 1.5 + ph) * 0.8))
+            p.drawPath(path)
+    elif kind == "back":                        # an arrow curling back to the left
+        path = QtGui.QPainterPath(P(s - 2, s - 2.5))
+        path.cubicTo(P(s - 2, 4.5), P(s - 4, 4.5), P(5, 4.5))
+        p.drawPath(path)
+        arrow(P(6, 4.5), P(2, 4.5))
     p.end()
     return QtGui.QIcon(pix)

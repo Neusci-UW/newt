@@ -47,6 +47,13 @@ class _TraceViewBox(WheelViewBox):
             self.menu.insertAction(first, act)
             self.menu.insertSeparator(first)
 
+    on_zoomed = None          # f(vb): a box zoom happened here (the time bar's Back undoes it)
+
+    def zoom_box(self, x0, x1, y0, y1) -> None:
+        super().zoom_box(x0, x1, y0, y1)
+        if self.on_zoomed is not None:
+            self.on_zoomed(self)
+
     def set_time_range(self, x0: float, x1: float) -> None:
         if self._zoom_to is not None:
             self._zoom_to(x0, x1)

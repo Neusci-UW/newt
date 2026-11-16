@@ -372,9 +372,16 @@ class ChannelRowWidget(QtWidgets.QWidget):
         strip.setParent(self)
         content.setParent(self)
         strip.raise_()
-        strip.hover_changed.connect(lambda _: self._relayout())
+        strip.hover_changed.connect(lambda _: self._strip_resized())
         self.full_height = strip.sizeHint().height()    # with all its settings showing
         self.fit_strip = False                          # an "off" row: just as tall as its strip
+        self.overlaid = False                           # its trace is in the overlay plot: stays folded
+
+    def _strip_resized(self) -> None:
+        """A row that's just its strip grows while the strip is open, so nothing is cut off."""
+        if self.fit_strip:
+            self.setFixedHeight(self.strip.sizeHint().height())
+        self._relayout()
 
     def set_compact(self, compact: bool) -> None:
         self.strip.set_compact(compact)

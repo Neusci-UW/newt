@@ -136,9 +136,6 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stimulus = self._saved_stimulus()
         self.stimulus2: Stimulus | None = self._saved_stimulus("stimulus2")   # on the other output
         self.stim_repeat_s = float(self.settings.value("stim_repeat_s", 1.0))
-        # What pressing Start does to the stimulator: "" nothing, "once", or "repeat".
-        on_start = self.settings.value("stim_on_start", "")
-        self.stim_on_start = on_start if on_start in ("", "once", "repeat") else ""
         self.repeating = False
         self.stim_timer = QtCore.QTimer(self, timeout=self._repeat_fire)
         self.stim_timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)   # coarse timers wander ±5%
@@ -334,12 +331,21 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_calc.setMenu(menu)
         bb.addWidget(self.btn_calc)
         bb.addSpacing(6)
-        self.btn_overlay_ch = QtWidgets.QPushButton("Overlay channels", checkable=True)
-        self.btn_overlay_ch.setToolTip("Draw every channel in one plot, on the same time and voltage axes")
+        # Overlay channels: a tool on the time bar, beside the zoom box.
+        self.btn_overlay_ch = QtWidgets.QToolButton(checkable=True)
+        self.btn_overlay_ch.setObjectName("tool")               # accent blue while on
+        self.btn_overlay_ch.setToolTip("Overlay channels: draw the channels in one plot, each scaled to "
+                                       "fill its height. The arrow picks which channels are overlaid")
+        self.btn_overlay_ch.setAccessibleName("Overlay channels")
+        self.btn_overlay_ch.setFixedSize(42, 26)                 # room for the menu arrow
         self.btn_overlay_ch.setChecked(self.settings.value("overlay_channels", False, type=bool))
         self.btn_overlay_ch.toggled.connect(self.set_channel_overlay)
-        bb.addWidget(self.btn_overlay_ch)
-        bb.addSpacing(6)
+        # Its arrow: which channels are in the overlay (the others keep their own plots).
+        self.overlay_out = {n for n in self.settings.value("overlay_excluded", "", type=str).split("\n") if n}
+        menu = QtWidgets.QMenu(self.btn_overlay_ch)
+        menu.aboutToShow.connect(lambda: self.overlay_menu(menu))
+        self.btn_overlay_ch.setMenu(menu)
+        self.btn_overlay_ch.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         bb.addWidget(self.btn_comments)
         bb.addSpacing(6)
         self.btn_mini_stim = QtWidgets.QPushButton("Stimulator", checkable=True)
@@ -363,6 +369,26 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             b.setFixedSize(30, 26)
             b.clicked.connect(slot)
             self._time_buttons[kind] = b
+        # The zoom box tool (LabChart's magnifier): a plain drag draws the box.
+        self._zoom_stack = []                    # plots box-zoomed, newest last, for Back
+        self.btn_box_zoom = QtWidgets.QToolButton(checkable=True)
+        self.btn_box_zoom.setToolTip("Zoom box: drag a box on a plot to zoom to it (every channel "
+                                     "follows in time); double-click shows all the data. "
+                                     "Without it, Cmd+drag does the same")
+        self.btn_box_zoom.setAccessibleName("Zoom box")
+        self.btn_box_zoom.setObjectName("tool")               # accent blue while on
+        self.btn_box_zoom.setFixedSize(30, 26)
+        self.btn_box_zoom.setChecked(self.settings.value("box_zoom", False, type=bool))
+        self.btn_box_zoom.toggled.connect(lambda on: (self.settings.setValue("box_zoom", on),
+                                                      self.set_box_tool(on)))
+        self._time_buttons["box"] = self.btn_box_zoom
+        self._time_buttons["overlay"] = self.btn_overlay_ch
+        b = QtWidgets.QToolButton()
+        b.setToolTip("Back: undo the last box zoom (or Cmd+click on the plot)")
+        b.setAccessibleName("Back a zoom")
+        b.setFixedSize(30, 26)
+        b.clicked.connect(self._zoom_back)
+        self._time_buttons["back"] = b
         self.window_readout = WindowBox(minimum=0.01, maximum=WINDOW_MAX, value=self.cfg.window_s,
                                         suffix=" s", decimals=4)
         # No arrows: zoom out/in are beside it. (NoButtons collapses the text to nothing
@@ -378,7 +404,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             lambda v: v != self.window_box.value() and self.window_box.setValue(v))
         self.window_box.valueChanged.connect(lambda *_: self._sync_time_bar())
         tb_ = self._time_buttons
-        for w in (tb_["end"], tb_["fit_x"], None, tb_["out"], self.window_readout, tb_["in"]):
+        for w in (tb_["box"], tb_["back"], tb_["overlay"], None, tb_["end"], tb_["fit_x"], None,
+                  tb_["out"], self.window_readout, tb_["in"]):
             tl.addSpacing(6) if w is None else tl.addWidget(w)
         bb.addWidget(self.time_bar)
         self._update_theme_button()                 # the time bar's icons
@@ -619,7 +646,11 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         for mode, b in getattr(self, "split_buttons", {}).items():
             b.setIcon(layout_icon(mode, ink))
         for kind, b in getattr(self, "_time_buttons", {}).items():
-            b.setIcon(style.scale_icon(kind, ink))
+            icon = style.scale_icon(kind, ink)
+            if kind in ("box", "overlay"):          # white on the accent blue while on
+                on = style.scale_icon(kind, "#ffffff").pixmap(QtCore.QSize(16, 16), 2.0)
+                icon.addPixmap(on, QtGui.QIcon.Mode.Normal, QtGui.QIcon.State.On)
+            b.setIcon(icon)
         for strip in getattr(self, "strips", []):
             if hasattr(strip, "set_ink"):
                 strip.set_ink(ink)

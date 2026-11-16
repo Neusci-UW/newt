@@ -191,11 +191,6 @@ class StimulatorMixin:
         elif self.stim_timer.interval() != int(self.stim_repeat_s * 1000):
             self.stim_timer.setInterval(int(self.stim_repeat_s * 1000))
 
-    def set_stim_on_start(self, what: str) -> None:
-        """Stimulator tab > When Start is pressed: "" nothing, "once", or "repeat"."""
-        self.stim_on_start = what if what in ("", "once", "repeat") else ""
-        self.settings.setValue("stim_on_start", self.stim_on_start)
-
     def set_stim_output(self, ch: str) -> None:
         """The first stimulus's output. A second stimulus moves to the other one."""
         if self.stim_out is not None and self.stim_out.busy:

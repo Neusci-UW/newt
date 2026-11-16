@@ -36,7 +36,8 @@ class _Cell(QtWidgets.QWidget):
         self.row = QtWidgets.QHBoxLayout(self)
         self.row.setContentsMargins(0, 0, 0, 0)
         self.row.setSpacing(6)
-        self.row.addWidget(field, 1)
+        # The field goes in once the cell has taken its place in the form (StimulusPage._wrap):
+        # adding it here first takes it out of the form, so the cell would have nowhere to go.
         self.toggle = QtWidgets.QToolButton(text="↕", checkable=True, autoRaise=True)
         self.toggle.setFixedWidth(26)
         self.toggle.setToolTip(f"Vary {label.lower()}: step it through values, sending the stimulus once for each")

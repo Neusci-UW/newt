@@ -4,7 +4,7 @@ like any input. See breadboard.py for the board and how the circuit is solved.
 
 Drag a part from the strip onto the board, or pick it and click two holes (one for
 a probe). Click a part to select it and set its value; drag it, or one of its ends,
-to move it. Delete removes it, Esc cancels a placement. Changes
+to move it; double-click a hand switch to flip it. Delete removes it, Esc cancels a placement. Changes
 apply straight away, while recording too, and Setup › Save channel setup writes the
 board to the config's [simulated] section.
 """
@@ -30,9 +30,11 @@ _TOOLS = (("select", "Select", "Click a part to select it and change its value; 
                                    "or click its + end, then its - end"),
           ("resistor", "Resistor", "Drag it onto the board, or click its two ends"),
           ("capacitor", "Capacitor", "Drag it onto the board, or click its two ends"),
+          ("switch", "Switch", "Flipped by hand, or by a gate voltage like a MOSFET (set it in Selected part): "
+                               "drag it onto the board, or click its two ends"),
           ("wire", "Wire", "Joins two holes: drag it onto the board, or click its two ends"),
           ("probe", "Probe", "A recording site: drag it onto a hole, or click one; then pick the input it records on"))
-_PART_COLOR = {"vin": "#7c4dff", "resistor": "#b87a1e", "capacitor": "#1e88a8", "wire": "#2e7d32"}   # all read on light and dark boards
+_PART_COLOR = {"vin": "#7c4dff", "resistor": "#b87a1e", "capacitor": "#1e88a8", "switch": "#c2185b", "wire": "#2e7d32"}   # all read on light and dark boards
 _PROBE_FREE = "#8a8f98"
 _WARN = {style.LIGHT: "#8a5a00", style.DARK: "#f2c14e"}
 
@@ -70,6 +72,22 @@ def dropped_part(kind: str, hole: str) -> bb.Part:
         return bb.Part("probe", hole)
     end = shifted(hole, 0, _SPAN) or shifted(hole, 0, -_SPAN)
     return bb.Part(kind, hole, end, bb.DEFAULT_VALUE[kind], source="stim")
+
+
+def gate_hole(a: str, b: str) -> str | None:
+    """A free hole beside the middle of a part from `a` to `b`, for a MOSFET's gate leg."""
+    pa, pb = hole_xy(a), hole_xy(b)
+    mid = (pa + pb) / 2
+    dx, dy = pb.x() - pa.x(), pb.y() - pa.y()
+    n = math.hypot(dx, dy) or 1.0
+    for d in (PITCH, -PITCH, 2 * PITCH, -2 * PITCH):
+        p = mid + QtCore.QPointF(-dy / n * d, dx / n * d)
+        col = min(max(round((p.x() - _X0) / PITCH) + 1, 1), bb.COLS)    # snap to a column, then a row
+        row = min(_ROW_Y, key=lambda r: abs(_ROW_Y[r] - p.y()))
+        h = f"{row}{col}"
+        if abs(_ROW_Y[row] - p.y()) < PITCH and h not in (a, b):
+            return h
+    return None
 
 
 class PartButton(QtWidgets.QPushButton):
@@ -119,6 +137,7 @@ class BoardView(QtWidgets.QWidget):
         self.hover: str | None = None
         self.mouse = QtCore.QPointF()
         self.drag: dict | None = None         # a placed part (or one end of it) being moved
+        self.live: dict[int, bool] = {}       # MOSFET switches closed while recording, by part index
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -157,13 +176,15 @@ class BoardView(QtWidgets.QWidget):
             dr = _ROWS.index(bb.parse_hole(self.hover)[0]) - _ROWS.index(bb.parse_hole(d["from"])[0])
             dc = bb.parse_hole(self.hover)[1] - bb.parse_hole(d["from"])[1]
             part = d["board"].parts[d["i"]]
-            ends = {"a": part.a, "b": part.b} if d["end"] is None else {d["end"]: getattr(part, d["end"])}
+            legs = {k: h for k, h in zip(("a", "b", "gate"), (part.a, part.b, part.gate)) if h in part.holes()}
+            ends = legs if d["end"] is None else {d["end"]: legs[d["end"]]}
             moved = {k: shifted(h, dr, dc) for k, h in ends.items() if h}
             if all(moved.values()):
                 board = bb.copy_board(d["board"])
                 for k, h in moved.items():
                     setattr(board.parts[d["i"]], k, h)
-                if board.parts[d["i"]].a != board.parts[d["i"]].b:
+                legs = board.parts[d["i"]].holes()
+                if len(set(legs)) == len(legs):
                     self.board = board                   # shown while dragging; applied on release
                     d["moved"] = (dr, dc) != (0, 0)
         self.update()
@@ -213,7 +234,7 @@ class BoardView(QtWidgets.QWidget):
             self.select(i)
             if i >= 0:                                  # grab it: an end moves that end, the body the whole part
                 part = self.board.parts[i]
-                end = next((k for k in ("a", "b") if getattr(part, k) and part.kind != "probe" and
+                end = next((k for k in ("a", "b", "gate") if getattr(part, k) in part.holes() and part.kind != "probe" and
                             math.hypot(p.x() - hole_xy(getattr(part, k)).x(), p.y() - hole_xy(getattr(part, k)).y()) < 6),
                            None)
                 start = getattr(part, end) if end else (nearest_hole(p) or part.a)
@@ -232,6 +253,16 @@ class BoardView(QtWidgets.QWidget):
                               source="stim"))
             self.pending = None
         self.update()
+
+    def mouseDoubleClickEvent(self, e):
+        if self.tool != "select" or e.button() != QtCore.Qt.MouseButton.LeftButton:
+            return
+        i = self._part_at(self._to_board(e.position()))
+        if i >= 0 and self.board.parts[i].kind == "switch" and self.board.parts[i].mode == "toggle":
+            board = bb.copy_board(self.board)
+            board.parts[i].closed = not board.parts[i].closed
+            self.drag = None
+            self.edited.emit(board)
 
     def keyPressEvent(self, e):
         if e.key() == QtCore.Qt.Key.Key_Escape:
@@ -253,6 +284,8 @@ class BoardView(QtWidgets.QWidget):
         for i, part in enumerate(self.board.parts):
             a = hole_xy(part.a)
             d = math.hypot(p.x() - a.x(), p.y() - a.y()) if part.kind == "probe" else _seg_dist(p, a, hole_xy(part.b))
+            if part.gate in part.holes():
+                d = min(d, _seg_dist(p, (a + hole_xy(part.b)) / 2, hole_xy(part.gate)))
             if d < best:
                 best, idx = d, i
         return idx
@@ -295,7 +328,8 @@ class BoardView(QtWidgets.QWidget):
             for c in range(bb.COLS):
                 q.drawRect(QtCore.QRectF(_X0 + c * PITCH - 2.2, y - 2.2, 4.4, 4.4))
         for i, part in enumerate(self.board.parts):
-            self._draw_part(q, part, i == self.sel, t)
+            on = part.closed if part.mode == "toggle" else self.live.get(i, False)
+            self._draw_part(q, part, i == self.sel, t, on)
         if self.pending:                                  # a part being placed: from its first hole to the mouse
             a = hole_xy(self.pending)
             q.setPen(QtGui.QPen(QtGui.QColor(t["focus"]), 2, QtCore.Qt.PenStyle.DashLine))
@@ -308,7 +342,7 @@ class BoardView(QtWidgets.QWidget):
             q.drawEllipse(hole_xy(self.hover), 6, 6)
         q.end()
 
-    def _draw_part(self, q: QtGui.QPainter, part: bb.Part, selected: bool, t: dict) -> None:
+    def _draw_part(self, q: QtGui.QPainter, part: bb.Part, selected: bool, t: dict, on: bool = False) -> None:
         if part.kind == "probe":
             c = QtGui.QColor(self.page.probe_color(part))
             p = hole_xy(part.a)
@@ -339,9 +373,16 @@ class BoardView(QtWidgets.QWidget):
         q.drawEllipse(b, 3, 3)
         length = math.hypot(b.x() - a.x(), b.y() - a.y())
         body = min(34.0, length * 0.7) if part.kind != "wire" else 0.0
+        ang = math.atan2(b.y() - a.y(), b.x() - a.x())
+        gate = None
+        if part.gate in part.holes():                    # the gate leg, in the part's own frame
+            g = hole_xy(part.gate)
+            q.drawEllipse(g, 3, 3)
+            gx, gy = g.x() - a.x(), g.y() - a.y()
+            gate = (math.cos(ang) * gx + math.sin(ang) * gy, -math.sin(ang) * gx + math.cos(ang) * gy)
         q.save()
         q.translate(a)
-        q.rotate(math.degrees(math.atan2(b.y() - a.y(), b.x() - a.x())))
+        q.rotate(math.degrees(ang))
         pen = QtGui.QPen(color, 2.2 if part.kind != "wire" else 2.6)
         pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
         q.setPen(pen)
@@ -365,6 +406,36 @@ class BoardView(QtWidgets.QWidget):
             q.setPen(QtGui.QPen(color, 3))
             q.drawLine(QtCore.QPointF(mid - 3, -8), QtCore.QPointF(mid - 3, 8))
             q.drawLine(QtCore.QPointF(mid + 3, -8), QtCore.QPointF(mid + 3, 8))
+        elif part.kind == "switch" and gate is None:     # a hand switch: a lever, down when closed
+            q.setBrush(color)
+            q.drawEllipse(QtCore.QPointF(s0, 0), 2.5, 2.5)
+            q.drawEllipse(QtCore.QPointF(s1, 0), 2.5, 2.5)
+            if on:
+                self._glow(q, QtCore.QPointF(s0, 0), QtCore.QPointF(s1, 0))
+            q.drawLine(QtCore.QPointF(s0, 0), QtCore.QPointF(s1, 0) if on else QtCore.QPointF(s1 - 2, -body * 0.4))
+        elif part.kind == "switch":                      # a MOSFET: drain at a, source at b, gate to one side
+            mid, side = (s0 + s1) / 2, (1 if gate[1] >= 0 else -1)
+            ch, pl = side * 6, side * 11
+            q.drawLine(QtCore.QPointF(s0, 0), QtCore.QPointF(s0, ch))
+            q.drawLine(QtCore.QPointF(s1, 0), QtCore.QPointF(s1, ch))
+            q.drawLine(QtCore.QPointF(mid, 0), QtCore.QPointF(mid, ch))          # body, tied to the source
+            q.drawLine(QtCore.QPointF(mid, 0), QtCore.QPointF(s1, 0))
+            if on:
+                self._glow(q, QtCore.QPointF(s0, ch), QtCore.QPointF(s1, ch))
+            q.setPen(QtGui.QPen(color, 3))
+            if on:
+                q.drawLine(QtCore.QPointF(s0, ch), QtCore.QPointF(s1, ch))
+            else:                                        # broken channel: off
+                w = (s1 - s0) / 3
+                for k in range(3):
+                    q.drawLine(QtCore.QPointF(s0 + k * w + 1.5, ch), QtCore.QPointF(s0 + (k + 1) * w - 1.5, ch))
+            q.setPen(pen)
+            q.drawLine(QtCore.QPointF(s0 + 2, pl), QtCore.QPointF(s1 - 2, pl))
+            q.drawLine(QtCore.QPointF(mid, pl), QtCore.QPointF(*gate))
+            tip, base = (side * 5, side * 1) if part.channel == "n" else (side * 1, side * 5)   # n points into the channel
+            q.setBrush(color)
+            q.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(mid, tip), QtCore.QPointF(mid - 3, base),
+                                           QtCore.QPointF(mid + 3, base)]))
         elif part.kind == "vin":
             mid, r = (s0 + s1) / 2, min(10.0, body / 2)
             q.setBrush(QtGui.QColor(t["panel"]))
@@ -381,6 +452,18 @@ class BoardView(QtWidgets.QWidget):
                 q.drawLine(QtCore.QPointF(mid + 2, -3), QtCore.QPointF(mid + 2, 3))
             q.setPen(QtGui.QColor(t["muted"]))
             q.drawText(QtCore.QPointF(s0 - 10, -6), "+")
+        q.restore()
+
+
+    @staticmethod
+    def _glow(q: QtGui.QPainter, a: QtCore.QPointF, b: QtCore.QPointF) -> None:
+        """A green halo along a closed switch's path."""
+        glow = QtGui.QPen(QtGui.QColor("#2e7d32"), 7)
+        glow.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+        q.save()
+        q.setPen(glow)
+        q.setOpacity(0.3)
+        q.drawLine(a, b)
         q.restore()
 
 
@@ -462,9 +545,26 @@ class BreadboardPage(QtWidgets.QWidget):
         self.probe_input.setToolTip("The input this probe records on: Acquisition shows this point of the circuit")
         self.noise = UnitSpinBox(0, 1, "V", decimals=6, step=0.001)
         self.noise.setToolTip("Recording noise added to the probe's trace (RMS)")
+        self.sw_mode = QtWidgets.QComboBox()
+        self.sw_mode.addItem("Hand (toggle)", "toggle")
+        self.sw_mode.addItem("Gate voltage (MOSFET)", "mosfet")
+        self.sw_mode.setToolTip("Hand: you open and close it. MOSFET: the voltage on its gate leg does")
+        self.flip = QtWidgets.QPushButton()
+        self.flip.setToolTip("Flip the switch (or double-click it on the board), while recording too")
+        self.channel = QtWidgets.QComboBox()
+        self.channel.addItem("N-channel", "n")
+        self.channel.addItem("P-channel", "p")
+        self.channel.setToolTip("N: closes when the gate is above the source by the threshold. P: below it")
+        self.vth = UnitSpinBox(0.01, 10, "V", step=0.1)
+        self.vth.setToolTip("How far the gate must be from the source to close it")
+        self.ron = UnitSpinBox(1e-3, 1e6, "Ω", families=[("mΩ", 1e-3), ("Ω", 1.0), ("kΩ", 1e3)], decimals=4, step=0.1)
+        self.ron.setToolTip("The switch's resistance when closed")
         self.rows = {}
         for key, label, w in (("source", "Source", self.source), ("volts", "Voltage", self.volts),
                               ("ohms", "Resistance", self.ohms), ("farads", "Capacitance", self.farads),
+                              ("sw_mode", "Flipped by", self.sw_mode), ("flip", "State", self.flip),
+                              ("channel", "Type", self.channel), ("vth", "Threshold V<sub>th</sub>", self.vth),
+                              ("ron", "R<sub>on</sub>", self.ron),
                               ("input", "Records on", self.probe_input), ("noise", "Noise", self.noise)):
             form.addRow(label, w)
             self.rows[key] = (form.labelForField(w), w)
@@ -499,7 +599,11 @@ class BreadboardPage(QtWidgets.QWidget):
         self.btn_reset.clicked.connect(lambda: self._apply(bb.default_board(), keep_sel=False))
         self.btn_clear.clicked.connect(lambda: self._apply(bb.Board(), keep_sel=False))
         self.source.currentIndexChanged.connect(self._part_edited)
-        for w in (self.volts, self.ohms, self.farads, self.noise):
+        self.sw_mode.currentIndexChanged.connect(self._part_edited)
+        self.channel.currentIndexChanged.connect(self._part_edited)
+        self.flip.clicked.connect(self._flip)
+        self._live = QtCore.QTimer(self, interval=100, timeout=self._poll_switches)
+        for w in (self.volts, self.ohms, self.farads, self.noise, self.vth, self.ron):
             w.valueChanged.connect(self._part_edited)
         self.probe_input.currentIndexChanged.connect(self._part_edited)
         main.window_box.valueChanged.connect(lambda _v: self._show_timing())
@@ -529,6 +633,19 @@ class BreadboardPage(QtWidgets.QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         self._show_timing()                  # the Stimulator or Window may have changed meanwhile
+        self._live.start()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._live.stop()
+
+    def _poll_switches(self) -> None:
+        """Show which MOSFET switches the recording has closed."""
+        state = getattr(getattr(self.main, "backend", None), "_board", None)
+        live = state.closed_now() if state is not None and getattr(state, "board", None) is self.board else {}
+        if live != self.view.live:
+            self.view.live = live
+            self.view.update()
 
     def _inputs(self) -> list:
         cfg = self.main.cfg
@@ -548,6 +665,8 @@ class BreadboardPage(QtWidgets.QWidget):
             self.part_info.setText("")
         else:
             ends = part.a if part.kind == "probe" else f"{part.a} to {part.b}"
+            if part.gate in part.holes():
+                ends = f"drain {part.a}, source {part.b}, gate {part.gate}"
             self.part_name.setText(f"<b>{bb.NAMES[part.kind]}</b>  ({ends})")
             info = ""
             if part.kind == "vin":
@@ -571,6 +690,21 @@ class BreadboardPage(QtWidgets.QWidget):
                     self.probe_input.addItem(f"{part.input} (not an input now)", part.input)
                 self.probe_input.setCurrentIndex(max(0, self.probe_input.findData(part.input)))
                 self.noise.setValue(part.noise_v)
+            elif part.kind == "switch":
+                shown |= {"sw_mode", "ron"}
+                self.sw_mode.setCurrentIndex(max(0, self.sw_mode.findData(part.mode)))
+                self.ron.setValue(part.value)
+                if part.mode == "toggle":
+                    shown.add("flip")
+                    self.flip.setText("Open it" if part.closed else "Close it")
+                    info = f"<b>{'Closed' if part.closed else 'Open'}</b>. Double-click it on the board to flip it."
+                else:
+                    shown |= {"channel", "vth"}
+                    self.channel.setCurrentIndex(max(0, self.channel.findData(part.channel)))
+                    self.vth.setValue(part.vth)
+                    above = "above" if part.channel == "n" else "below"
+                    info = (f"Closes while the gate is more than V<sub>th</sub> {above} the source; open, it connects "
+                            "nothing. No current flows into the gate. The preview's 1 V pulse may not reach V<sub>th</sub>.")
             elif part.kind == "wire":
                 info = "Joins the two strips it connects."
             self.part_info.setText(info)
@@ -608,7 +742,25 @@ class BreadboardPage(QtWidgets.QWidget):
         elif part.kind == "probe":
             part.input = self.probe_input.currentData() or ""
             part.noise_v = self.noise.value()
+        elif part.kind == "switch":
+            part.mode = self.sw_mode.currentData()
+            part.value = self.ron.value()
+            part.channel = self.channel.currentData()
+            part.vth = self.vth.value()
+            if part.mode == "mosfet" and not part.gate:
+                part.gate = gate_hole(part.a, part.b) or ""
+                if not part.gate:
+                    self._show_message("No free hole beside the switch for its gate: move it first.", error=True)
+                    self._show_part()
+                    return
         self._apply(board)
+
+    def _flip(self) -> None:
+        i = self.view.sel
+        if 0 <= i < len(self.board.parts) and self.board.parts[i].kind == "switch":
+            board = bb.copy_board(self.board)
+            board.parts[i].closed = not board.parts[i].closed
+            self._apply(board)
 
     def delete_selected(self) -> None:
         i = self.view.sel

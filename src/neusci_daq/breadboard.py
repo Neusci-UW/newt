@@ -14,13 +14,18 @@ Parts sit between two holes (a probe in one):
 - resistor: `value` ohms
 - capacitor: `value` farads
 - wire: joins two holes (two strips become one net)
+- switch: `value` ohms when closed, no connection when open. `mode` "toggle": flipped
+  by hand (`closed`). `mode` "mosfet": `a` is the drain, `b` the source and `gate` a
+  third hole; it closes while the gate is more than `vth` above the source ("n"
+  channel) or below it ("p"). No current flows into the gate.
 - probe: records the voltage of its hole's net on input `input` ("" = not recorded)
 
 The circuit is solved by modified nodal analysis at each sample. Capacitors use
 backward Euler (i = C (v - v_prev) / dt), which is stable at any step, so an RC
 charges with the right time constant at any sample rate. Every net also has a
 tiny conductance to ground, so a part left floating reads 0 V instead of making
-the circuit unsolvable.
+the circuit unsolvable. A MOSFET switch is checked once per sample, from the voltages
+of the sample before; each pattern of open and closed switches is solved once and kept.
 """
 from __future__ import annotations
 
@@ -31,10 +36,10 @@ import numpy as np
 COLS = 30
 ROWS = "abcdefghij"
 RAILS = ("t+", "t-", "b+", "b-")          # top + and -, bottom + and -
-KINDS = ("vin", "resistor", "capacitor", "wire", "probe")
-NAMES = {"vin": "Input voltage", "resistor": "Resistor", "capacitor": "Capacitor", "wire": "Wire", "probe": "Probe"}
-UNITS = {"vin": "V", "resistor": "Ω", "capacitor": "F"}
-DEFAULT_VALUE = {"vin": 1.0, "resistor": 10e3, "capacitor": 1e-6, "wire": 0.0, "probe": 0.0}
+KINDS = ("vin", "resistor", "capacitor", "switch", "wire", "probe")
+NAMES = {"vin": "Input voltage", "resistor": "Resistor", "capacitor": "Capacitor", "switch": "Switch", "wire": "Wire", "probe": "Probe"}
+UNITS = {"vin": "V", "resistor": "Ω", "capacitor": "F", "switch": "Ω"}
+DEFAULT_VALUE = {"vin": 1.0, "resistor": 10e3, "capacitor": 1e-6, "switch": 1.0, "wire": 0.0, "probe": 0.0}
 GND = "gnd"
 G_MIN = 1e-9                              # S from every net to ground
 
@@ -44,10 +49,20 @@ class Part:
     kind: str                             # one of KINDS
     a: str                                # hole: "a12" (row, column) or "t-12" (rail, column)
     b: str = ""                           # second hole; "" for a probe
-    value: float = 0.0                    # V (fixed input), Ω, F
+    value: float = 0.0                    # V (fixed input), Ω (resistor; switch when closed), F
     source: str = "stim"                  # input voltage: "stim" (the stimulator's output) or "dc"
     input: str = ""                       # probe: the input it records on, "" = none
     noise_v: float = 0.002                # probe: recording noise (RMS)
+    mode: str = "toggle"                  # switch: "toggle" (by hand) or "mosfet" (by its gate's voltage)
+    closed: bool = False                  # switch, toggle: closed now
+    gate: str = ""                        # switch, mosfet: the gate's hole (a = drain, b = source)
+    vth: float = 2.0                      # switch, mosfet: threshold, V
+    channel: str = "n"                    # switch, mosfet: "n" (on above vth) or "p" (on below -vth)
+
+    def holes(self) -> list[str]:
+        """Every hole the part has a leg in."""
+        gate = [self.gate] if self.kind == "switch" and self.mode == "mosfet" and self.gate else []
+        return [h for h in (self.a, self.b) if h] + gate
 
 
 @dataclass
@@ -112,9 +127,8 @@ def nets(board: Board) -> dict[str, str]:
         return s
 
     for p in board.parts:
-        for h in (p.a, p.b):
-            if h:
-                find(strip_of(h))
+        for h in p.holes():
+            find(strip_of(h))
     for p in board.parts:
         if p.kind == "wire":
             ra, rb = find(strip_of(p.a)), find(strip_of(p.b))
@@ -134,10 +148,17 @@ def validate(board: Board) -> None:
             parse_hole(p.b)
             if p.a == p.b:
                 raise ValueError(f"{NAMES[p.kind]}: both ends are in the same hole")
-        if p.kind in ("resistor", "capacitor") and not p.value > 0:
+        if p.kind in ("resistor", "capacitor", "switch") and not p.value > 0:
             raise ValueError(f"{NAMES[p.kind]}: the value must be above 0")
         if p.kind == "vin" and p.source not in ("stim", "dc"):
             raise ValueError("Input voltage: the source must be the stimulator or fixed")
+        if p.kind == "switch":
+            if p.mode not in ("toggle", "mosfet") or p.channel not in ("n", "p"):
+                raise ValueError("Switch: unknown mode or channel")
+            if p.mode == "mosfet":
+                parse_hole(p.gate)
+                if p.gate in (p.a, p.b):
+                    raise ValueError("Switch: the gate shares a hole with another leg")
     inputs = [p.input for p in board.probes() if p.input]
     if len(inputs) != len(set(inputs)):
         raise ValueError("Two probes record on the same input")
@@ -179,6 +200,11 @@ class BoardState:
                 mat[i, j] -= g
                 mat[j, i] -= g
 
+        self.switches = []                       # (part, index in board.parts, a, b, gate, source)
+        for k, p in enumerate(board.parts):
+            if p.kind == "switch":
+                gate = self._idx(p.gate) if p.mode == "mosfet" else None
+                self.switches.append((p, k, self._idx(p.a), self._idx(p.b), gate, self._idx(p.b)))
         for p in board.parts:
             if p.kind == "resistor":
                 stamp(a, p, 1.0 / p.value)
@@ -194,19 +220,46 @@ class BoardState:
                 a[j, r] -= 1
                 a[r, j] -= 1
             e[r, k] = 1.0
-        try:
-            ainv = np.linalg.inv(a)
-        except np.linalg.LinAlgError:
-            raise ValueError("The circuit can't be solved: an input voltage is shorted, "
-                             "or two input voltages are joined") from None
-        self.p = ainv @ gc
-        self.q = ainv @ e
+        self._a, self._gc, self._e, self._stamp = a, gc, e, stamp
+        self._mats: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self.v = np.zeros(n + m)
         prev_v, prev_node = old
         if prev_v is not None:                   # carry charge over on nets that survive
             for name, i in self.node.items():
                 if name in prev_node:
                     self.v[i] = prev_v[prev_node[name]]
+        self.key = self._key(self.v)
+        self.p, self.q = self._solve(self.key)
+
+    def _key(self, v: np.ndarray) -> tuple:
+        """Which switches are closed, given node voltages `v`."""
+        out = []
+        for p, _k, _a, _b, g, s in self.switches:
+            if p.mode == "toggle":
+                out.append(bool(p.closed))
+            else:
+                vgs = (0.0 if g is None else v[g]) - (0.0 if s is None else v[s])
+                out.append(bool(vgs > p.vth if p.channel == "n" else vgs < -p.vth))
+        return tuple(out)
+
+    def _solve(self, key: tuple) -> tuple[np.ndarray, np.ndarray]:
+        """The step matrices with the switches in `key` closed (kept for next time)."""
+        if key not in self._mats:
+            a = self._a.copy()
+            for (p, *_), on in zip(self.switches, key):
+                if on:
+                    self._stamp(a, p, 1.0 / p.value)
+            try:
+                ainv = np.linalg.inv(a)
+            except np.linalg.LinAlgError:
+                raise ValueError("The circuit can't be solved: an input voltage is shorted, "
+                                 "or two input voltages are joined") from None
+            self._mats[key] = (ainv @ self._gc, ainv @ self._e)
+        return self._mats[key]
+
+    def closed_now(self) -> dict[int, bool]:
+        """Each switch's state after the last sample, by its index in board.parts."""
+        return {k: on for (_p, k, *_), on in zip(self.switches, self.key)}
 
     def _idx(self, hole: str) -> int | None:
         net = self.net_of[strip_of(hole)]
@@ -226,13 +279,19 @@ class BoardState:
             u[:, k] = stim if p.source == "stim" else p.value
         cols = [self._known(h) for h in holes]
         out = np.zeros((len(holes), len(stim)))
-        v, p, q = self.v, self.p, self.q
+        v, p, q, key = self.v, self.p, self.q, self.key
+        gated = any(sw[0].mode == "mosfet" for sw in self.switches)
         for s in range(len(stim)):
+            if gated:
+                k = self._key(v)
+                if k != key:
+                    key = k
+                    p, q = self._solve(key)
             v = p @ v + q @ u[s]
             for r, c in enumerate(cols):
                 if c is not None:
                     out[r, s] = v[c]
-        self.v = v
+        self.v, self.p, self.q, self.key = v, p, q, key
         return out
 
     def _known(self, hole: str) -> int | None:
@@ -274,8 +333,14 @@ def to_toml_lines(board: Board) -> list[str]:
         lines += ["", "[[simulated.breadboard]]", f'part = "{p.kind}"', f'a = "{p.a}"']
         if p.b:
             lines.append(f'b = "{p.b}"')
-        if p.kind in ("vin", "resistor", "capacitor"):
+        if p.kind in ("vin", "resistor", "capacitor", "switch"):
             lines.append(f"value = {p.value:g}")
+        if p.kind == "switch":
+            lines.append(f'mode = "{p.mode}"')
+            if p.mode == "toggle":
+                lines.append(f"closed = {'true' if p.closed else 'false'}")
+            else:
+                lines += [f'gate = "{p.gate}"', f"vth = {p.vth:g}", f'channel = "{p.channel}"']
         if p.kind == "vin":
             lines.append(f'source = "{p.source}"')
         if p.kind == "probe":
@@ -291,7 +356,9 @@ def from_toml(sim: dict) -> Board:
     for d in raw:
         kind = d.get("part", "")
         parts.append(Part(kind, str(d.get("a", "")), str(d.get("b", "")), float(d.get("value", DEFAULT_VALUE.get(kind, 0.0))),
-                          str(d.get("source", "stim")), str(d.get("input", "")), float(d.get("noise_v", 0.002))))
+                          str(d.get("source", "stim")), str(d.get("input", "")), float(d.get("noise_v", 0.002)),
+                          str(d.get("mode", "toggle")), bool(d.get("closed", False)), str(d.get("gate", "")),
+                          float(d.get("vth", 2.0)), str(d.get("channel", "n"))))
     board = Board(parts)
     validate(board)
     return board

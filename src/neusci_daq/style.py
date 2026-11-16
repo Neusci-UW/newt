@@ -237,3 +237,53 @@ def dot_icon(color: str, square: bool = False, size: int = 10) -> QtGui.QIcon:
     p.drawRect(r) if square else p.drawEllipse(r)
     p.end()
     return QtGui.QIcon(pix)
+
+
+def scale_icon(kind: str, ink: str | None = None, size: int = 16) -> QtGui.QIcon:
+    """The plot scale buttons: "in" and "out" (a magnifier with + or −), "fit_x" (|↔|,
+    all the data), "fit_y" (↕, autoscale) and "end" (→|, the newest data)."""
+    if ink is None:
+        ink = tokens(_applied["mode"] or LIGHT)["ink"]
+    scale = 2.0
+    pix = QtGui.QPixmap(int(size * scale), int(size * scale))
+    pix.setDevicePixelRatio(scale)
+    pix.fill(QtCore.Qt.GlobalColor.transparent)
+    p = QtGui.QPainter(pix)
+    p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+    pen = QtGui.QPen(QtGui.QColor(ink), 1.4)
+    pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    P, s, m = QtCore.QPointF, size, size / 2
+
+    def arrow(a: QtCore.QPointF, b: QtCore.QPointF) -> None:
+        """A line from a to b with a head at b."""
+        p.drawLine(a, b)
+        d = b - a
+        n = (d.x() ** 2 + d.y() ** 2) ** 0.5 or 1
+        ux, uy = d.x() / n * 3.2, d.y() / n * 3.2
+        p.drawLine(b, P(b.x() - ux - uy, b.y() - uy + ux))
+        p.drawLine(b, P(b.x() - ux + uy, b.y() - uy - ux))
+
+    if kind in ("in", "out"):
+        c, r = P(6.5, 6.5), 4.5
+        p.drawEllipse(c, r, r)
+        p.drawLine(P(c.x() + r * 0.72, c.y() + r * 0.72), P(s - 1.5, s - 1.5))
+        p.drawLine(P(c.x() - 2.2, c.y()), P(c.x() + 2.2, c.y()))
+        if kind == "in":
+            p.drawLine(P(c.x(), c.y() - 2.2), P(c.x(), c.y() + 2.2))
+    elif kind == "fit_x":
+        p.drawLine(P(1.5, 3.5), P(1.5, s - 3.5))
+        p.drawLine(P(s - 1.5, 3.5), P(s - 1.5, s - 3.5))
+        arrow(P(m, m), P(4, m))
+        arrow(P(m, m), P(s - 4, m))
+    elif kind == "fit_y":
+        p.drawLine(P(3.5, 1.5), P(s - 3.5, 1.5))
+        p.drawLine(P(3.5, s - 1.5), P(s - 3.5, s - 1.5))
+        arrow(P(m, m), P(m, 4))
+        arrow(P(m, m), P(m, s - 4))
+    elif kind == "end":
+        arrow(P(1.5, m), P(s - 4.5, m))
+        p.drawLine(P(s - 2, 3), P(s - 2, s - 3))
+    p.end()
+    return QtGui.QIcon(pix)

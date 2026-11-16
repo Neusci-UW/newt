@@ -35,12 +35,15 @@ class WheelViewBox(pg.ViewBox):
         self.on_draw = None                     # f([(x, y)…], finished): plain left-drag draws a shape
         self._drawn: list = []
         self.bounds = [None, None]              # (lo, hi) per axis, to use instead of the data's edges
+        self.y_free = False                     # y set by hand (Max/Min, the scale buttons): may go past the data
 
     def _refresh_limits(self) -> None:
         if self.clamp_to_data:
             lim = self.state["limits"]
             lim["xLimits"], lim["yLimits"] = [None, None], [None, None]
             for axis, key in ((0, "xLimits"), (1, "yLimits")):
+                if axis == 1 and self.y_free:
+                    continue
                 if self.bounds[axis] is not None:
                     lim[key] = list(self.bounds[axis])
                     continue
@@ -148,6 +151,7 @@ class WheelViewBox(pg.ViewBox):
     def zoom_back(self) -> None:
         """Undo the last box zoom; with none left, fit the y axis to the data."""
         if not self._zoom_history:
+            self.y_free = False
             self.enableAutoRange(axis="y")
             return
         (xr, yr), auto = self._zoom_history.pop()

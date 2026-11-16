@@ -55,7 +55,7 @@ from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
 from .simpage import SimOffPage, SimPage
 from .breadpage import BreadboardPage
-from .membranepage import AP_PAGE, RC_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
+from .membranepage import AP_PAGE, HH_PAGE, RC_PAGE, SUM_PAGE, SYN_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
@@ -337,6 +337,42 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         bb.addWidget(self.btn_overlay_ch)
         bb.addSpacing(6)
         bb.addWidget(self.btn_comments)
+        # Time scale, at the bottom right like LabChart's: newest data, all the data,
+        # zoom out, Window (the toolbar's, mirrored) and zoom in.
+        self.time_bar = QtWidgets.QWidget()
+        tl = QtWidgets.QHBoxLayout(self.time_bar)
+        tl.setContentsMargins(12, 2, 0, 2)
+        tl.setSpacing(4)
+        self._time_buttons = {}
+        for kind, tip, slot in (("end", "Show the newest data", self._time_to_end),
+                                ("fit_x", "Show all the data", self._time_fit_all),
+                                ("out", "Zoom out in time (twice the Window)", lambda: self._zoom_time(2.0)),
+                                ("in", "Zoom in in time (half the Window)", lambda: self._zoom_time(0.5))):
+            b = QtWidgets.QToolButton()
+            b.setToolTip(tip)
+            b.setAccessibleName(tip.split(" (")[0])
+            b.setFixedSize(30, 26)
+            b.clicked.connect(slot)
+            self._time_buttons[kind] = b
+        self.window_readout = WindowBox(minimum=0.01, maximum=WINDOW_MAX, value=self.cfg.window_s,
+                                        suffix=" s", decimals=4)
+        # No arrows: zoom out/in are beside it. (NoButtons collapses the text to nothing
+        # under the app's stylesheet, so the arrows are there but take no room.)
+        self.window_readout.setStyleSheet(
+            "QAbstractSpinBox { padding-right: 4px; }"
+            " QAbstractSpinBox::up-button, QAbstractSpinBox::down-button { width: 0px; border: none; }"
+            " QAbstractSpinBox::up-arrow, QAbstractSpinBox::down-arrow { image: none; width: 0px; }")
+        self.window_readout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.window_readout.setKeyboardTracking(False)
+        self.window_readout.setToolTip("Window: how many seconds the plots show")
+        self.window_readout.valueChanged.connect(
+            lambda v: v != self.window_box.value() and self.window_box.setValue(v))
+        self.window_box.valueChanged.connect(lambda *_: self._sync_time_bar())
+        tb_ = self._time_buttons
+        for w in (tb_["end"], tb_["fit_x"], None, tb_["out"], self.window_readout, tb_["in"]):
+            tl.addSpacing(6) if w is None else tl.addWidget(w)
+        bb.addWidget(self.time_bar)
+        self._update_theme_button()                 # the time bar's icons
 
         self.scroll = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
         self.scroll.valueChanged.connect(self._scrolled)
@@ -384,8 +420,14 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.membrane_page = MembranePage(self)
         # The membrane as an RC circuit, then the same charging done by ions.
         self.rc_page = MembranePage(self, page=RC_PAGE, what="RC circuit")
-        # A spike travelling along an axon, using both lessons above.
+        # Voltage-gated channels: the Hodgkin–Huxley model.
+        self.hh_page = MembranePage(self, page=HH_PAGE, what="Hodgkin–Huxley")
+        # A spike travelling along an axon, using the lessons above.
         self.ap_page = MembranePage(self, page=AP_PAGE, what="action potential")
+        # The spike crossing to the next cell: Ca²⁺, vesicles, receptors and the synaptic current.
+        self.syn_page = MembranePage(self, page=SYN_PAGE, what="synapse")
+        # Inputs adding up to a spike: voltage-gated channels and the axon initial segment.
+        self.sum_page = MembranePage(self, page=SUM_PAGE, what="summation")
         placeholder = lambda title, text: self._placeholder(title, text)
         # Record and Stimulus (the stimulator and its protocols) are sub-pages of Acquisition. Either half of
         # a split can show any page, two of Acquisition's included.
@@ -398,11 +440,14 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
           + ([("simoff", "Simulators", self.simoff_page)] if self.simoff_page else [])
           + [("membrane", "Membrane potential", self.membrane_page),
              ("rc", "RC circuit", self.rc_page),
-             ("ap", "Action potential", self.ap_page)], groups=[
+             ("hh", "Hodgkin–Huxley", self.hh_page),
+             ("ap", "Action potential", self.ap_page),
+             ("syn", "Synapse", self.syn_page),
+             ("sum", "Summation", self.sum_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "stim"]),
             ("analysis", "Analysis", ["analysis"]),
             ("datasim", "Data Simulation", ["sim", "board", "simoff"]),   # data sources Acquisition can record
-            ("lessons", "Lessons", ["membrane", "rc", "ap"]),
+            ("lessons", "Lessons", ["membrane", "rc", "hh", "ap", "syn", "sum"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -549,6 +594,11 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
                                   else "Light mode: click for dark mode")
         for mode, b in getattr(self, "split_buttons", {}).items():
             b.setIcon(layout_icon(mode, ink))
+        for kind, b in getattr(self, "_time_buttons", {}).items():
+            b.setIcon(style.scale_icon(kind, ink))
+        for strip in getattr(self, "strips", []):
+            if hasattr(strip, "set_ink"):
+                strip.set_ink(ink)
 
     def _app_mode(self) -> str:
         return style.DARK if self.plot_mode == theme.DARK else style.LIGHT
@@ -569,8 +619,14 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.membrane_page.apply_theme(mode)
         if getattr(self, "rc_page", None):
             self.rc_page.apply_theme(mode)
+        if getattr(self, "hh_page", None):
+            self.hh_page.apply_theme(mode)
         if getattr(self, "ap_page", None):
             self.ap_page.apply_theme(mode)
+        if getattr(self, "syn_page", None):
+            self.syn_page.apply_theme(mode)
+        if getattr(self, "sum_page", None):
+            self.sum_page.apply_theme(mode)
         if hasattr(self, "analysis_page"):
             self.analysis_page.apply_theme(mode)
         self._update_theme_button()

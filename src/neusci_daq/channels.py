@@ -6,12 +6,16 @@ switched-on rows are acquired and recorded.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+
+import pyqtgraph as pg
 
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from .colors import CHOICES, CHOICE_NAMES, normalize_color
 from .config import Channel
+from . import style
 
 STRIP_WIDTH = 180
 OFF_COLOR = "#9aa0a6"
@@ -103,6 +107,28 @@ class ColorButton(QtWidgets.QToolButton):
 COMPACT_WIDTH = 54
 LINE_MIN, LINE_MAX = 0.5, 20.0
 
+_PREFIX = {"p": 1e-12, "n": 1e-9, "µ": 1e-6, "u": 1e-6, "m": 1e-3, "": 1.0, "k": 1e3, "M": 1e6, "G": 1e9}
+
+
+def format_y(v: float, unit: str, si: bool) -> str:
+    """A Max/Min value as the plot's axis shows it: "-80 mV" for a channel in V."""
+    if abs(v) < 1e-15:
+        v = 0.0
+    if si:
+        return pg.siFormat(v, precision=3, suffix=unit)
+    return f"{v:.4g} {unit}".strip()
+
+
+def parse_y(text: str, unit: str, si: bool) -> float | None:
+    """A typed Max/Min: "-80 mV", "-80m" or "-0.08" for a channel in V; None if it isn't a number."""
+    t = text.strip().replace("−", "-")
+    if unit and t.endswith(unit):
+        t = t[:-len(unit)].strip()
+    m = re.fullmatch(r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*([pnµumkMG]?)", t)
+    if not m or (m.group(2) and not si):
+        return None
+    return float(m.group(1)) * _PREFIX[m.group(2)]
+
 
 class ChannelStrip(QtWidgets.QFrame):
     """On/off, name, input, line thickness, color and remove controls for one channel.
@@ -173,18 +199,52 @@ class ChannelStrip(QtWidgets.QFrame):
         lay.addWidget(self.remove, 1, 2)
         lay.addWidget(QtWidgets.QLabel("Line"), 2, 0, 1, 1)
         lay.addWidget(self.line_width, 2, 1)
+        # The plot's y range: typed, or zoomed with the buttons. Display only, so it works
+        # while recording. Set once the plot exists (attach_plot).
+        self._vb = None
+        self.y_max, self.y_min = QtWidgets.QLineEdit(), QtWidgets.QLineEdit()
+        for w, end in ((self.y_max, "top"), (self.y_min, "bottom")):
+            w.setToolTip(f"The value at the {end} of the plot. Type one (e.g. 80 mV) to set it; "
+                         "right-click the plot › Autoscale to fit it to the data again")
+            w.editingFinished.connect(lambda w=w: self._typed_y(w))
+        self.y_out, self.y_in, self.y_fit = (QtWidgets.QToolButton() for _ in range(3))
+        for b, tip in ((self.y_out, "Zoom out on the y axis (show twice the range)"),
+                       (self.y_in, "Zoom in on the y axis (show half the range)"),
+                       (self.y_fit, "Autoscale: fit the y axis to the data")):
+            b.setToolTip(tip)
+            b.setAccessibleName(tip.split(" (")[0].split(":")[0])
+            b.setFixedSize(30, 26)
+        self.set_ink(None)
+        self.y_out.clicked.connect(lambda: self._zoom_y(2.0))
+        self.y_in.clicked.connect(lambda: self._zoom_y(0.5))
+        self.y_fit.clicked.connect(lambda: self._autoscale and self._autoscale(self._vb))
+        btns = QtWidgets.QHBoxLayout()
+        btns.setContentsMargins(0, 0, 0, 0)
+        btns.setSpacing(4)
+        for b in (self.y_out, self.y_in, self.y_fit):
+            btns.addWidget(b)
+        btns.addStretch(1)
+        lay.addWidget(QtWidgets.QLabel("Max"), 3, 0)
+        lay.addWidget(self.y_max, 3, 1, 1, 2)
+        lay.addWidget(QtWidgets.QLabel("Min"), 4, 0)
+        lay.addWidget(self.y_min, 4, 1, 1, 2)
+        lay.addWidget(QtWidgets.QLabel("Scale"), 5, 0)
+        lay.addLayout(btns, 5, 1, 1, 2)
+        self._y_widgets = (self.y_max, self.y_min, self.y_out, self.y_in, self.y_fit)
+        for w in self._y_widgets:
+            w.setEnabled(False)                     # until there's a plot (off: none)
         self.stim = QtWidgets.QCheckBox("⚡ Stimulus")
         self.stim.setChecked(is_stim)
         self.stim.setToolTip("This channel records the stimulus: tick if this input records the stimulator's output (wired to it, or in the "
                              "simulation). Its pulses give exact stimulus times for Trials, and group the "
                              "trials by stimulus. Only one channel can")
         self.stim.setVisible(on_stim is not None)
-        lay.addWidget(self.stim, 3, 0, 1, 3)
+        lay.addWidget(self.stim, 6, 0, 1, 3)
         info = QtWidgets.QLabel(f"{row.ch.units} · scale ×{row.ch.scale:g}")
         info.setToolTip("Units and scale come from the config file")
         info.setStyleSheet("color: gray")
-        lay.addWidget(info, 4, 1, 1, 2)
-        lay.setRowStretch(5, 1)
+        lay.addWidget(info, 7, 1, 1, 2)
+        lay.setRowStretch(8, 1)
 
         # Defer: the strip is rebuilt after a change, and must not be deleted
         # while its own signal is still running.
@@ -202,6 +262,60 @@ class ChannelStrip(QtWidgets.QFrame):
         self.compact = False
         self.expanded = True
         self._collapse_timer = QtCore.QTimer(self, interval=250, timeout=self._maybe_collapse)
+
+    # -- y scale -------------------------------------------------------------------
+    def attach_plot(self, vb, unit: str, si: bool, autoscale, on_hold=None) -> None:
+        """Tie Max/Min and the scale buttons to this channel's plot. autoscale(vb) fits it
+        to the data; on_hold() is called when the range is set by hand."""
+        self._vb, self._unit, self._si = vb, unit, si
+        self._autoscale, self._on_hold = autoscale, on_hold
+        for w in self._y_widgets:
+            w.setEnabled(True)
+        vb.sigYRangeChanged.connect(self._show_y)
+        self._show_y(vb, vb.viewRange()[1])
+
+    def set_ink(self, ink: str | None) -> None:
+        """Draw the scale buttons' icons in the app's text color (None: the current theme's)."""
+        for b, kind in ((self.y_out, "out"), (self.y_in, "in"), (self.y_fit, "fit_y")):
+            b.setIcon(style.scale_icon(kind, ink))
+
+    def _show_y(self, _vb, rng) -> None:
+        try:
+            for w, v in ((self.y_min, rng[0]), (self.y_max, rng[1])):
+                if not w.hasFocus():                # don't overwrite what's being typed
+                    w.setText(format_y(float(v), self._unit, self._si))
+        except RuntimeError:                        # the strip went before its plot
+            pass
+
+    def _set_y(self, lo: float, hi: float) -> None:
+        vb = self._vb
+        vb.y_free = True                            # may go past the data
+        vb.enableAutoRange(axis="y", enable=False)
+        vb.setYRange(lo, hi, padding=0)
+        vb.sigRangeChangedManually.emit([False, True])     # overlaid axes follow (MultiAxis)
+        if self._on_hold is not None:
+            self._on_hold()
+
+    def _typed_y(self, w: QtWidgets.QLineEdit) -> None:
+        if self._vb is None:
+            return
+        lo, hi = self._vb.viewRange()[1]
+        v = parse_y(w.text(), self._unit, self._si)
+        if w is self.y_max:
+            hi = v
+        else:
+            lo = v
+        if v is None or not hi > lo:
+            self._show_y(self._vb, self._vb.viewRange()[1])     # not a usable range: put it back
+            return
+        self._set_y(lo, hi)
+
+    def _zoom_y(self, f: float) -> None:
+        if self._vb is None:
+            return
+        lo, hi = self._vb.viewRange()[1]
+        c, h = (lo + hi) / 2, (hi - lo) / 2 * f
+        self._set_y(c - h, c + h)
 
     def set_locked(self, locked: bool) -> None:
         """While recording, lock everything except the color and line thickness."""

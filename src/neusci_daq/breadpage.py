@@ -3,7 +3,8 @@ simulated): parts placed on a breadboard, and probes on it that Acquisition reco
 like any input. See breadboard.py for the board and how the circuit is solved.
 
 Drag a part from the strip onto the board, or pick it and click two holes (one for
-a probe). Click a part to select it and set its value; drag it, or one of its ends,
+a probe or a ground). Less-used parts (LED, diode, push button, potentiometer,
+inductor, battery) are under More parts. Click a part to select it and set its value; drag it, or one of its ends,
 to move it; double-click a hand switch to flip it. Delete removes it, Esc cancels a placement. Changes
 apply straight away, while recording too, and Setup › Save channel setup writes the
 board to the config's [simulated] section.
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
@@ -33,8 +35,21 @@ _TOOLS = (("select", "Select", "Click a part to select it and change its value; 
           ("switch", "Switch", "Flipped by hand, or by a gate voltage like a MOSFET (set it in Selected part): "
                                "drag it onto the board, or click its two ends"),
           ("wire", "Wire", "Joins two holes: drag it onto the board, or click its two ends"),
-          ("probe", "Probe", "A recording site: drag it onto a hole, or click one; then pick the input it records on"))
-_PART_COLOR = {"vin": "#7c4dff", "resistor": "#b87a1e", "capacitor": "#1e88a8", "switch": "#c2185b", "wire": "#2e7d32"}   # all read on light and dark boards
+          ("probe", "Probe", "A recording site: drag it onto a hole, or click one; then pick the input it records on"),
+          ("ground", "⏚ Ground", "Ties a hole to 0 V, like a wire to a − rail: drag it onto a hole, or click one"))
+_MORE = (("led", "LED", "lights when current flows forward"),
+         ("diode", "Diode", "current flows one way only"),
+         None,
+         ("button", "Push button", "closed only while you hold it"),
+         ("pot", "Potentiometer", "three legs: an adjustable divider"),
+         ("inductor", "Inductor", "henries"),
+         None,
+         ("battery", "Battery", "a fixed voltage, + and − ends"))
+_PART_COLOR = {"vin": "#7c4dff", "resistor": "#b87a1e", "capacitor": "#1e88a8", "switch": "#c2185b", "wire": "#2e7d32",
+               "ground": "#5f6670", "diode": "#455a64", "button": "#c2185b", "pot": "#b87a1e", "inductor": "#6d4c41",
+               "battery": "#7c4dff"}   # all read on light and dark boards
+_LED_RGB = {"red": "#e53935", "yellow": "#fdd835", "green": "#43a047", "blue": "#1e88e5", "white": "#e0e0e0"}
+_LEGS = ("a", "b", "gate", "wiper")           # every leg a part can have
 _PROBE_FREE = "#8a8f98"
 _WARN = {style.LIGHT: "#8a5a00", style.DARK: "#f2c14e"}
 
@@ -66,12 +81,23 @@ def shifted(hole: str, drow: int, dcol: int) -> str | None:
     return f"{_ROWS[r]}{c}" if 0 <= r < len(_ROWS) and 1 <= c <= bb.COLS else None
 
 
-def dropped_part(kind: str, hole: str) -> bb.Part:
-    """A part dropped on `hole`: a probe there, anything else from there across _SPAN columns."""
-    if kind == "probe":
-        return bb.Part("probe", hole)
+def placed_part(kind: str, a: str, b: str = "") -> bb.Part | None:
+    """A new part from `a` to `b` with its defaults; a potentiometer gets its wiper beside
+    the middle. None if there's no room for the wiper."""
+    part = bb.new_part(kind, a, b)
+    if kind == "pot":
+        part.wiper = gate_hole(a, b) or ""
+        if not part.wiper:
+            return None
+    return part
+
+
+def dropped_part(kind: str, hole: str) -> bb.Part | None:
+    """A part dropped on `hole`: a probe or ground there, anything else from there across _SPAN columns."""
+    if kind in bb.ONE_HOLE:
+        return bb.new_part(kind, hole)
     end = shifted(hole, 0, _SPAN) or shifted(hole, 0, -_SPAN)
-    return bb.Part(kind, hole, end, bb.DEFAULT_VALUE[kind], source="stim")
+    return placed_part(kind, hole, end)
 
 
 def gate_hole(a: str, b: str) -> str | None:
@@ -138,6 +164,8 @@ class BoardView(QtWidgets.QWidget):
         self.mouse = QtCore.QPointF()
         self.drag: dict | None = None         # a placed part (or one end of it) being moved
         self.live: dict[int, bool] = {}       # MOSFET switches closed while recording, by part index
+        self.lit: dict[int, float] = {}       # LED currents (A), by part index: while recording, else at rest
+        self.held = -1                        # a push button held down
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -176,7 +204,7 @@ class BoardView(QtWidgets.QWidget):
             dr = _ROWS.index(bb.parse_hole(self.hover)[0]) - _ROWS.index(bb.parse_hole(d["from"])[0])
             dc = bb.parse_hole(self.hover)[1] - bb.parse_hole(d["from"])[1]
             part = d["board"].parts[d["i"]]
-            legs = {k: h for k, h in zip(("a", "b", "gate"), (part.a, part.b, part.gate)) if h in part.holes()}
+            legs = {k: getattr(part, k) for k in _LEGS if getattr(part, k) in part.holes()}
             ends = legs if d["end"] is None else {d["end"]: legs[d["end"]]}
             moved = {k: shifted(h, dr, dc) for k, h in ends.items() if h}
             if all(moved.values()):
@@ -190,6 +218,12 @@ class BoardView(QtWidgets.QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if self.held >= 0:                                # a push button springs open
+            board = bb.copy_board(self.board)
+            if self.held < len(board.parts):
+                board.parts[self.held].closed = False
+            self.held = -1
+            self.edited.emit(board)
         d, self.drag = self.drag, None
         if d is not None and d.get("moved"):
             self.edited.emit(self.board)
@@ -218,7 +252,11 @@ class BoardView(QtWidgets.QWidget):
             return
         e.acceptProposedAction()
         self.page.tool_buttons["select"].click()          # back to Select, so the new part can be moved
-        self._add(dropped_part(kind, hole))
+        part = dropped_part(kind, hole)
+        if part is None:
+            self.page._show_message("No free hole beside it for the wiper: drop it somewhere else.", error=True)
+        else:
+            self._add(part)
 
     def leaveEvent(self, e):
         self.hover = None
@@ -232,9 +270,15 @@ class BoardView(QtWidgets.QWidget):
         if self.tool == "select":
             i = self._part_at(p)
             self.select(i)
+            if i >= 0 and self.board.parts[i].kind == "button" and self._on_body(i, p):   # press it: closed while held
+                board = bb.copy_board(self.board)
+                board.parts[i].closed = True
+                self.held = i
+                self.edited.emit(board)
+                return
             if i >= 0:                                  # grab it: an end moves that end, the body the whole part
                 part = self.board.parts[i]
-                end = next((k for k in ("a", "b", "gate") if getattr(part, k) in part.holes() and part.kind != "probe" and
+                end = next((k for k in _LEGS if getattr(part, k) in part.holes() and part.kind not in bb.ONE_HOLE and
                             math.hypot(p.x() - hole_xy(getattr(part, k)).x(), p.y() - hole_xy(getattr(part, k)).y()) < 6),
                            None)
                 start = getattr(part, end) if end else (nearest_hole(p) or part.a)
@@ -244,13 +288,16 @@ class BoardView(QtWidgets.QWidget):
         hole = nearest_hole(p)
         if hole is None:
             return
-        if self.tool == "probe":
-            self._add(bb.Part("probe", hole))
+        if self.tool in bb.ONE_HOLE:
+            self._add(bb.new_part(self.tool, hole))
         elif self.pending is None:
             self.pending = hole
         elif hole != self.pending:
-            self._add(bb.Part(self.tool, self.pending, hole, bb.DEFAULT_VALUE[self.tool],
-                              source="stim"))
+            part = placed_part(self.tool, self.pending, hole)
+            if part is None:
+                self.page._show_message("No free hole beside it for the wiper: pick other ends.", error=True)
+            else:
+                self._add(part)
             self.pending = None
         self.update()
 
@@ -279,16 +326,28 @@ class BoardView(QtWidgets.QWidget):
         self.sel = len(board.parts) - 1
         self.edited.emit(board)
 
+    def _dist(self, part: bb.Part, p: QtCore.QPointF) -> float:
+        a = hole_xy(part.a)
+        if part.kind in bb.ONE_HOLE:
+            return math.hypot(p.x() - a.x(), p.y() - a.y())
+        d = _seg_dist(p, a, hole_xy(part.b))
+        for leg in (part.gate, part.wiper):
+            if leg and leg in part.holes():
+                d = min(d, _seg_dist(p, (a + hole_xy(part.b)) / 2, hole_xy(leg)))
+        return d
+
     def _part_at(self, p: QtCore.QPointF) -> int:
         best, idx = 9.0, -1
         for i, part in enumerate(self.board.parts):
-            a = hole_xy(part.a)
-            d = math.hypot(p.x() - a.x(), p.y() - a.y()) if part.kind == "probe" else _seg_dist(p, a, hole_xy(part.b))
-            if part.gate in part.holes():
-                d = min(d, _seg_dist(p, (a + hole_xy(part.b)) / 2, hole_xy(part.gate)))
+            d = self._dist(part, p)
             if d < best:
                 best, idx = d, i
         return idx
+
+    def _on_body(self, i: int, p: QtCore.QPointF) -> bool:
+        """Is `p` on the part's body, away from its legs (so a press there is a press, not a grab)?"""
+        part = self.board.parts[i]
+        return all(math.hypot(p.x() - hole_xy(h).x(), p.y() - hole_xy(h).y()) >= 6 for h in part.holes())
 
     def select(self, i: int) -> None:
         self.sel = i
@@ -328,8 +387,8 @@ class BoardView(QtWidgets.QWidget):
             for c in range(bb.COLS):
                 q.drawRect(QtCore.QRectF(_X0 + c * PITCH - 2.2, y - 2.2, 4.4, 4.4))
         for i, part in enumerate(self.board.parts):
-            on = part.closed if part.mode == "toggle" else self.live.get(i, False)
-            self._draw_part(q, part, i == self.sel, t, on)
+            on = part.closed if part.kind == "button" or part.mode == "toggle" else self.live.get(i, False)
+            self._draw_part(q, part, i == self.sel, t, on, self.lit.get(i, 0.0))
         if self.pending:                                  # a part being placed: from its first hole to the mouse
             a = hole_xy(self.pending)
             q.setPen(QtGui.QPen(QtGui.QColor(t["focus"]), 2, QtCore.Qt.PenStyle.DashLine))
@@ -342,7 +401,23 @@ class BoardView(QtWidgets.QWidget):
             q.drawEllipse(hole_xy(self.hover), 6, 6)
         q.end()
 
-    def _draw_part(self, q: QtGui.QPainter, part: bb.Part, selected: bool, t: dict, on: bool = False) -> None:
+    def _draw_part(self, q: QtGui.QPainter, part: bb.Part, selected: bool, t: dict, on: bool = False,
+                   amps: float = 0.0) -> None:
+        if part.kind == "ground":                          # the ground symbol hanging below its hole
+            c = QtGui.QColor(_PART_COLOR["ground"])
+            p = hole_xy(part.a)
+            if selected:
+                q.setPen(QtGui.QPen(QtGui.QColor(t["focus"]), 2))
+                q.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                q.drawEllipse(p + QtCore.QPointF(0, 5), 11, 11)
+            q.setPen(QtGui.QPen(c, 2))
+            q.setBrush(c)
+            q.drawEllipse(p, 2.5, 2.5)
+            q.drawLine(p, p + QtCore.QPointF(0, 7))
+            for k, w in enumerate((8, 5, 2)):
+                y = p.y() + 7 + 3 * k
+                q.drawLine(QtCore.QPointF(p.x() - w, y), QtCore.QPointF(p.x() + w, y))
+            return
         if part.kind == "probe":
             c = QtGui.QColor(self.page.probe_color(part))
             p = hole_xy(part.a)
@@ -359,7 +434,7 @@ class BoardView(QtWidgets.QWidget):
             q.drawText(QtCore.QPointF(p.x() + 9, p.y() - 8), part.input or "—")
             return
         a, b = hole_xy(part.a), hole_xy(part.b)
-        color = QtGui.QColor(_PART_COLOR[part.kind])
+        color = QtGui.QColor(_LED_RGB.get(part.color, "#e53935") if part.kind == "led" else _PART_COLOR[part.kind])
         if selected:
             glow = QtGui.QPen(QtGui.QColor(t["focus"]), 8)
             glow.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
@@ -375,8 +450,9 @@ class BoardView(QtWidgets.QWidget):
         body = min(34.0, length * 0.7) if part.kind != "wire" else 0.0
         ang = math.atan2(b.y() - a.y(), b.x() - a.x())
         gate = None
-        if part.gate in part.holes():                    # the gate leg, in the part's own frame
-            g = hole_xy(part.gate)
+        leg = part.gate if part.gate in part.holes() else part.wiper if part.wiper in part.holes() else ""
+        if leg:                                          # the gate or wiper leg, in the part's own frame
+            g = hole_xy(leg)
             q.drawEllipse(g, 3, 3)
             gx, gy = g.x() - a.x(), g.y() - a.y()
             gate = (math.cos(ang) * gx + math.sin(ang) * gy, -math.sin(ang) * gx + math.cos(ang) * gy)
@@ -406,6 +482,60 @@ class BoardView(QtWidgets.QWidget):
             q.setPen(QtGui.QPen(color, 3))
             q.drawLine(QtCore.QPointF(mid - 3, -8), QtCore.QPointF(mid - 3, 8))
             q.drawLine(QtCore.QPointF(mid + 3, -8), QtCore.QPointF(mid + 3, 8))
+        elif part.kind == "pot":                         # a resistor with an arrow from the wiper
+            path = QtGui.QPainterPath(QtCore.QPointF(s0, 0))
+            for k in range(6):
+                path.lineTo(s0 + body * (k + 0.5) / 6, -5 if k % 2 == 0 else 5)
+            path.lineTo(s1, 0)
+            q.drawPath(path)
+            tip = QtCore.QPointF(s0 + body * part.pos, 0)
+            side = 1 if gate[1] >= 0 else -1
+            q.drawLine(QtCore.QPointF(*gate), QtCore.QPointF(tip.x(), side * 7))
+            q.setBrush(color)
+            q.drawPolygon(QtGui.QPolygonF([tip + QtCore.QPointF(0, side * 5), tip + QtCore.QPointF(-3, side * 10),
+                                           tip + QtCore.QPointF(3, side * 10)]))
+        elif part.kind == "inductor":                    # four loops
+            path = QtGui.QPainterPath(QtCore.QPointF(s0, 0))
+            w = body / 4
+            for k in range(4):
+                path.arcTo(QtCore.QRectF(s0 + k * w, -w / 2 - 1, w, w + 2), 180, -180)
+            q.drawPath(path)
+        elif part.kind in ("diode", "led"):              # a triangle pointing to the bar: anode at a
+            mid, h = (s0 + s1) / 2, 6.0
+            if part.kind == "led" and amps > 0:          # glow, brighter with more current
+                glow = QtGui.QRadialGradient(QtCore.QPointF(mid, 0), 18)
+                c0 = QtGui.QColor(color)
+                c0.setAlphaF(min(0.85, 0.25 + 0.6 * amps / max(part.value, 1e-9)))
+                glow.setColorAt(0, c0)
+                glow.setColorAt(1, QtGui.QColor(0, 0, 0, 0))
+                q.setPen(QtCore.Qt.PenStyle.NoPen)
+                q.setBrush(glow)
+                q.drawEllipse(QtCore.QPointF(mid, 0), 18, 18)
+                q.setPen(pen)
+            q.drawLine(QtCore.QPointF(s0, 0), QtCore.QPointF(mid - h, 0))
+            q.drawLine(QtCore.QPointF(mid + h, 0), QtCore.QPointF(s1, 0))
+            q.setBrush(color if part.kind == "diode" or amps > 0 else QtGui.QColor(t["panel"]))
+            q.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(mid - h, -h), QtCore.QPointF(mid - h, h), QtCore.QPointF(mid + h, 0)]))
+            q.setPen(QtGui.QPen(color, 2.6))
+            q.drawLine(QtCore.QPointF(mid + h, -h), QtCore.QPointF(mid + h, h))
+            if part.kind == "led":                       # two little arrows: light out
+                q.setPen(QtGui.QPen(color, 1.2))
+                for dx in (-2, 3):
+                    q.drawLine(QtCore.QPointF(mid + dx, -h - 1), QtCore.QPointF(mid + dx + 4, -h - 6))
+                if amps > part.value:                    # over its maximum current
+                    q.setPen(QtGui.QColor(_WARN.get(self.page._mode, _WARN[style.LIGHT])))
+                    q.drawText(QtCore.QPointF(mid - 3, h + 12), "!")
+        elif part.kind == "button":                      # a push button: a bar lifted off two contacts, down while held
+            q.setBrush(color)
+            q.drawEllipse(QtCore.QPointF(s0, 0), 2.5, 2.5)
+            q.drawEllipse(QtCore.QPointF(s1, 0), 2.5, 2.5)
+            lift = 0 if on else -6
+            if on:
+                self._glow(q, QtCore.QPointF(s0, 0), QtCore.QPointF(s1, 0))
+            q.drawLine(QtCore.QPointF(s0, lift), QtCore.QPointF(s1, lift))
+            mid = (s0 + s1) / 2
+            q.drawLine(QtCore.QPointF(mid, lift), QtCore.QPointF(mid, lift - 6))
+            q.drawLine(QtCore.QPointF(mid - 4, lift - 6), QtCore.QPointF(mid + 4, lift - 6))
         elif part.kind == "switch" and gate is None:     # a hand switch: a lever, down when closed
             q.setBrush(color)
             q.drawEllipse(QtCore.QPointF(s0, 0), 2.5, 2.5)
@@ -436,6 +566,15 @@ class BoardView(QtWidgets.QWidget):
             q.setBrush(color)
             q.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(mid, tip), QtCore.QPointF(mid - 3, base),
                                            QtCore.QPointF(mid + 3, base)]))
+        elif part.kind == "battery":                     # long plate (+) at a, short plate (−) toward b
+            mid = (s0 + s1) / 2
+            q.drawLine(QtCore.QPointF(s0, 0), QtCore.QPointF(mid - 2, 0))
+            q.drawLine(QtCore.QPointF(mid + 3, 0), QtCore.QPointF(s1, 0))
+            q.drawLine(QtCore.QPointF(mid - 2, -8), QtCore.QPointF(mid - 2, 8))
+            q.setPen(QtGui.QPen(color, 3.5))
+            q.drawLine(QtCore.QPointF(mid + 3, -4), QtCore.QPointF(mid + 3, 4))
+            q.setPen(QtGui.QColor(t["muted"]))
+            q.drawText(QtCore.QPointF(s0 - 10, -6), "+")
         elif part.kind == "vin":
             mid, r = (s0 + s1) / 2, min(10.0, body / 2)
             q.setBrush(QtGui.QColor(t["panel"]))
@@ -482,7 +621,7 @@ class BreadboardPage(QtWidgets.QWidget):
         left.setSpacing(10)
         intro = QtWidgets.QLabel(
             "Build a circuit on a breadboard and record from it. Drag a part onto the board, or pick it and click "
-            "two holes (one for a probe); drag a placed part, or one of its ends, to move it. In each column, holes a–e are joined, and so are f–j; the − rails are ground. "
+            "two holes (one for a probe or a ground); drag a placed part, or one of its ends, to move it. LEDs and other parts are under More parts. In each column, holes a–e are joined, and so are f–j; the − rails are ground. "
             "Give a probe an input and Acquisition records that point of the circuit. An input voltage from "
             "the stimulator plays whatever the Stimulus tab sends.")
         intro.setWordWrap(True)
@@ -499,6 +638,23 @@ class BreadboardPage(QtWidgets.QWidget):
             self.tool_buttons[key] = b
             b.clicked.connect(lambda _=False, k=key: self.view.set_tool(k))
             tools.addWidget(b)
+        self.more = QtWidgets.QToolButton()
+        self.more.setText("More parts")
+        self.more.setCheckable(True)
+        self.more.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.more.setToolTip("Less-used parts: pick one, then click its holes on the board")
+        menu = QtWidgets.QMenu(self.more)
+        for item in _MORE:
+            if item is None:
+                menu.addSeparator()
+                continue
+            key, label, hint = item
+            act = menu.addAction(f"{label}  —  {hint}")
+            act.triggered.connect(lambda _=False, k=key, lab=label: self._pick_more(k, lab))
+        self.more.setMenu(menu)
+        self.tool_group.addButton(self.more)
+        self.tool_group.buttonToggled.connect(lambda b, on: b is self.more and not on and self.more.setText("More parts"))
+        tools.addWidget(self.more)
         tools.addStretch(1)
         self.btn_delete = QtWidgets.QPushButton("Delete part")
         self.btn_delete.setToolTip("Remove the selected part (Delete key)")
@@ -559,8 +715,24 @@ class BreadboardPage(QtWidgets.QWidget):
         self.vth.setToolTip("How far the gate must be from the source to close it")
         self.ron = UnitSpinBox(1e-3, 1e6, "Ω", families=[("mΩ", 1e-3), ("Ω", 1.0), ("kΩ", 1e3)], decimals=4, step=0.1)
         self.ron.setToolTip("The switch's resistance when closed")
+        self.led_color = QtWidgets.QComboBox()
+        for name in bb.LED_VF:
+            self.led_color.addItem(name.capitalize(), name)
+        self.led_color.setToolTip("The colour sets the usual forward voltage; you can change it below")
+        self.vf = UnitSpinBox(0.05, 10, "V", step=0.1)
+        self.vf.setToolTip("Below this, no current flows forward; above it, the part conducts")
+        self.imax = UnitSpinBox(1e-4, 1, "A", families=[("A", 1.0), ("mA", 1e-3)], decimals=4, step=1)
+        self.imax.setToolTip("Above this the LED would be damaged: the board warns instead")
+        self.henries = UnitSpinBox(1e-9, 100, "H", families=[("H", 1.0), ("mH", 1e-3), ("µH", 1e-6), ("uH", 1e-6),
+                                                             ("nH", 1e-9)], decimals=12, step=1)
+        self.wiper = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.wiper.setRange(0, 100)
+        self.wiper.setToolTip("Where the wiper sits: 0% at the first end, 100% at the other")
         self.rows = {}
         for key, label, w in (("source", "Source", self.source), ("volts", "Voltage", self.volts),
+                              ("led_color", "Colour", self.led_color), ("vf", "Forward V", self.vf),
+                              ("imax", "Max current", self.imax), ("henries", "Inductance", self.henries),
+                              ("wiper", "Wiper", self.wiper),
                               ("ohms", "Resistance", self.ohms), ("farads", "Capacitance", self.farads),
                               ("sw_mode", "Flipped by", self.sw_mode), ("flip", "State", self.flip),
                               ("channel", "Type", self.channel), ("vth", "Threshold V<sub>th</sub>", self.vth),
@@ -596,6 +768,7 @@ class BreadboardPage(QtWidgets.QWidget):
         self.view.edited.connect(self._apply)
         self.view.selected.connect(lambda _i: self._show_part())
         self.btn_delete.clicked.connect(self.delete_selected)
+        self._rest_lit: dict[int, float] = {}
         self.btn_reset.clicked.connect(lambda: self._apply(bb.default_board(), keep_sel=False))
         self.btn_clear.clicked.connect(lambda: self._apply(bb.Board(), keep_sel=False))
         self.source.currentIndexChanged.connect(self._part_edited)
@@ -603,8 +776,10 @@ class BreadboardPage(QtWidgets.QWidget):
         self.channel.currentIndexChanged.connect(self._part_edited)
         self.flip.clicked.connect(self._flip)
         self._live = QtCore.QTimer(self, interval=100, timeout=self._poll_switches)
-        for w in (self.volts, self.ohms, self.farads, self.noise, self.vth, self.ron):
+        for w in (self.volts, self.ohms, self.farads, self.noise, self.vth, self.ron, self.vf, self.imax, self.henries):
             w.valueChanged.connect(self._part_edited)
+        self.led_color.currentIndexChanged.connect(self._led_color_picked)
+        self.wiper.valueChanged.connect(self._part_edited)
         self.probe_input.currentIndexChanged.connect(self._part_edited)
         main.window_box.valueChanged.connect(lambda _v: self._show_timing())
         self.tool_buttons["select"].setChecked(True)
@@ -622,6 +797,7 @@ class BreadboardPage(QtWidgets.QWidget):
 
     def load(self) -> None:
         self.view.board = self.board
+        self.view.lit = self._lit_at_rest()
         if self.view.sel >= len(self.board.parts):
             self.view.sel = -1
         self._show_part()
@@ -640,12 +816,32 @@ class BreadboardPage(QtWidgets.QWidget):
         self._live.stop()
 
     def _poll_switches(self) -> None:
-        """Show which MOSFET switches the recording has closed."""
+        """Show which MOSFET switches the recording has closed, and how bright its LEDs are."""
         state = getattr(getattr(self.main, "backend", None), "_board", None)
-        live = state.closed_now() if state is not None and getattr(state, "board", None) is self.board else {}
-        if live != self.view.live:
-            self.view.live = live
+        recording = state is not None and getattr(state, "board", None) is self.board
+        live = state.closed_now() if recording else {}
+        lit = state.lit_now() if recording else self._rest_lit
+        if live != self.view.live or lit != self.view.lit:
+            self.view.live, self.view.lit = live, lit
             self.view.update()
+            self._show_part_info()
+
+    def _lit_at_rest(self) -> dict[int, float]:
+        """Each LED's current with the stimulator at 0 V, once the circuit has settled."""
+        self._rest_lit = {}
+        if any(p.kind == "led" for p in self.board.parts):
+            try:
+                state = bb.BoardState(self.board, 1e-4)
+                state.run(np.zeros(2000), [])
+                self._rest_lit = state.lit_now()
+            except ValueError:
+                pass
+        return self._rest_lit
+
+    def _pick_more(self, kind: str, label: str) -> None:
+        self.more.setText(f"More parts: {label}")
+        self.more.setChecked(True)
+        self.view.set_tool(kind)
 
     def _inputs(self) -> list:
         cfg = self.main.cfg
@@ -664,9 +860,13 @@ class BreadboardPage(QtWidgets.QWidget):
             self.part_name.setText("Click a part to select it, or pick a part above to place one.")
             self.part_info.setText("")
         else:
-            ends = part.a if part.kind == "probe" else f"{part.a} to {part.b}"
+            ends = part.a if part.kind in bb.ONE_HOLE else f"{part.a} to {part.b}"
             if part.gate in part.holes():
                 ends = f"drain {part.a}, source {part.b}, gate {part.gate}"
+            elif part.kind == "pot":
+                ends = f"ends {part.a} and {part.b}, wiper {part.wiper}"
+            elif bb.is_diode(part):
+                ends = f"+ {part.a}, − {part.b}"
             self.part_name.setText(f"<b>{bb.NAMES[part.kind]}</b>  ({ends})")
             info = ""
             if part.kind == "vin":
@@ -707,7 +907,35 @@ class BreadboardPage(QtWidgets.QWidget):
                             "nothing. No current flows into the gate. The preview's 1 V pulse may not reach V<sub>th</sub>.")
             elif part.kind == "wire":
                 info = "Joins the two strips it connects."
+            elif part.kind == "ground":
+                info = "Ties this hole's strip to 0 V, like a wire to a − rail."
+            elif part.kind == "battery":
+                shown.add("volts")
+                self.volts.setValue(part.value)
+                info = "+ end at " + part.a
+            elif part.kind == "inductor":
+                shown.add("henries")
+                self.henries.setValue(part.value)
+            elif part.kind == "pot":
+                shown |= {"ohms", "wiper"}
+                self.ohms.setValue(part.value)
+                self.wiper.setValue(round(part.pos * 100))
+                info = (f"{part.pos:.0%} of the way from {part.a}: {part.value * part.pos:,.0f} Ω to the wiper, "
+                        f"{part.value * (1 - part.pos):,.0f} Ω on to {part.b}.")
+            elif part.kind == "button":
+                shown.add("ron")
+                self.ron.setValue(part.value)
+                info = "Closed only while you hold the mouse down on it; it opens when you let go."
+            elif bb.is_diode(part):
+                shown.add("vf")
+                self.vf.setValue(part.vf)
+                if part.kind == "led":
+                    shown |= {"led_color", "imax"}
+                    self.led_color.setCurrentIndex(max(0, self.led_color.findData(part.color)))
+                    self.imax.setValue(part.value)
             self.part_info.setText(info)
+            if bb.is_diode(part):
+                self._show_part_info()
         for key, (label, w) in self.rows.items():
             label.setVisible(key in shown)
             w.setVisible(key in shown)
@@ -726,6 +954,35 @@ class BreadboardPage(QtWidgets.QWidget):
             lines.append(f"<span style='color:{c}'>●</span> {p.a}: {where}")
         self.probe_list.setText("<br>".join(lines))
 
+    def _show_part_info(self) -> None:
+        """A diode's or LED's current now (while recording) or at rest."""
+        i = self.view.sel
+        part = self.board.parts[i] if 0 <= i < len(self.board.parts) else None
+        if part is None or not bb.is_diode(part):
+            return
+        if part.kind == "diode":
+            self.part_info.setText("Current flows from + to − only, once + is more than the forward voltage above −.")
+            return
+        amps = self.view.lit.get(i, 0.0)
+        x, u = best_prefix(amps, "A", ("µ", "m", ""))
+        if amps <= 0:
+            state = "<b>Off</b>: no current flows forward."
+        elif amps > part.value:
+            warn = _WARN.get(self._mode, _WARN[style.LIGHT])
+            state = f'<span style="color:{warn}">⚠ <b>{x:.3g} {u}</b>, over its maximum: add resistance in series.</span>'
+        else:
+            state = f"<b>Lit</b>, {x:.3g} {u}."
+        self.part_info.setText(state + " Brightness follows the current (at rest with the stimulator at 0 V, or live while recording).")
+
+    def _led_color_picked(self, *_) -> None:
+        """A new colour brings that colour's usual forward voltage."""
+        if self._loading:
+            return
+        self._loading = True
+        self.vf.setValue(bb.LED_VF[self.led_color.currentData()])
+        self._loading = False
+        self._part_edited()
+
     # -- widgets -> config ------------------------------------------------------------
     def _part_edited(self, *_) -> None:
         if self._loading or not 0 <= self.view.sel < len(self.board.parts):
@@ -742,6 +999,20 @@ class BreadboardPage(QtWidgets.QWidget):
         elif part.kind == "probe":
             part.input = self.probe_input.currentData() or ""
             part.noise_v = self.noise.value()
+        elif part.kind == "battery":
+            part.value = self.volts.value()
+        elif part.kind == "inductor":
+            part.value = self.henries.value()
+        elif part.kind == "pot":
+            part.value = self.ohms.value()
+            part.pos = self.wiper.value() / 100
+        elif part.kind == "button":
+            part.value = self.ron.value()
+        elif bb.is_diode(part):
+            part.vf = self.vf.value()
+            if part.kind == "led":
+                part.color = self.led_color.currentData()
+                part.value = self.imax.value()
         elif part.kind == "switch":
             part.mode = self.sw_mode.currentData()
             part.value = self.ron.value()

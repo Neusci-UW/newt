@@ -2,7 +2,7 @@
 of its toolbar and plots."""
 from __future__ import annotations
 
-from pyqtgraph.Qt import QtCore, QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from .plotzoom import WheelViewBox
 
@@ -34,10 +34,16 @@ class _TraceViewBox(WheelViewBox):
     Window and the main window, so every acquisition plot follows and live mode keeps
     the newest data at the right edge."""
 
-    def __init__(self, zoom_time, pan_time, zoom_to=None, **kw):
+    def __init__(self, zoom_time, pan_time, zoom_to=None, autoscale=None, **kw):
         super().__init__(**kw)
         self.zoom_time, self.pan_time = zoom_time, pan_time
         self._zoom_to = zoom_to
+        if autoscale is not None:                       # right-click › Autoscale: fit y to the data
+            act = QtGui.QAction("Autoscale", self.menu)
+            act.triggered.connect(lambda: autoscale(self))
+            first = self.menu.actions()[0] if self.menu.actions() else None
+            self.menu.insertAction(first, act)
+            self.menu.insertSeparator(first)
 
     def set_time_range(self, x0: float, x1: float) -> None:
         if self._zoom_to is not None:

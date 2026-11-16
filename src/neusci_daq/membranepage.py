@@ -28,8 +28,14 @@ LESSON_PAGES = Path(__file__).with_name("lessons")
 PAGE = LESSON_PAGES / "membrane_potential.html"
 # The RC circuit page: a capacitor charging, then the same thing done by ions
 RC_PAGE = LESSON_PAGES / "rc_membrane.html"
+# The Hodgkin–Huxley page: voltage-gated channels, ion by ion and in the circuit
+HH_PAGE = LESSON_PAGES / "hodgkin_huxley.html"
 # The action potential page: a spike travelling along an axon
 AP_PAGE = LESSON_PAGES / "action_potential.html"
+# The synapse page: a spike crossing a chemical synapse, vesicles, receptors and the synaptic current
+SYN_PAGE = LESSON_PAGES / "synapse.html"
+# The summation page: inputs adding up, voltage-gated channels, and where the spike starts
+SUM_PAGE = LESSON_PAGES / "summation.html"
 
 # QtWebEngine has to be imported before the QApplication exists. gui.py imports this
 # module at the top, before run() makes the app, so importing it here is early enough.

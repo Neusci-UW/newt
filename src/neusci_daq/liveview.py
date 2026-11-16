@@ -42,7 +42,8 @@ class LiveMixin:
         self._multi = None
 
     def _new_plot(self, name: str, unit: str, color: str, width: float = 1.0) -> pg.PlotWidget:
-        pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time, self._zoom_to))
+        pw = pg.PlotWidget(viewBox=_TraceViewBox(self._zoom_time, self._pan_time, self._zoom_to,
+                                                      autoscale=self._autoscale_view))
         pw.getPlotItem().vb.clamp_to_data = not self.btn_run.isChecked()
         p = pw.getPlotItem()
         self.plot_widgets.append(pw)
@@ -73,6 +74,17 @@ class LiveMixin:
         self._style_plot(pw)
         return pw
 
+    def _autoscale_view(self, vb) -> None:
+        """Right-click › Autoscale: fit this plot's y axis to its data now. With View ›
+        Auto-scale on it keeps fitting; off, it holds the new range."""
+        vb._zoom_history.clear()
+        vb.y_free = False                                # back within the data
+        vb.enableAutoRange(axis="y", enable=True)
+        vb.updateAutoRange()
+        vb.enableAutoRange(axis="y", enable=self.auto_scale_y)
+        if self._multi is not None and self.plots and vb is self.plots[0].vb:
+            self._multi.fit()                            # the overlaid traces too
+
     def set_auto_scale_y(self, on: bool) -> None:
         """View › Auto-scale voltage. Turning it off holds every plot's current range."""
         self.auto_scale_y = bool(on)
@@ -82,6 +94,7 @@ class LiveMixin:
         self.act_auto_y.blockSignals(False)
         self._unfitted.clear()
         for p in self.plots:
+            p.vb.y_free = False
             p.enableAutoRange(axis="y", enable=self.auto_scale_y)
         if self._multi is not None:
             self._multi.set_auto(self.auto_scale_y)
@@ -327,6 +340,9 @@ class LiveMixin:
             self.strips.append(strip)
             if r.ch.enabled:
                 content = self._new_plot(r.ch.name, r.ch.units, r.ch.color, r.ch.width)
+                p = content.getPlotItem()
+                strip.attach_plot(p.vb, r.ch.units, r.ch.units in _SI_BASE, self._autoscale_view,
+                                  on_hold=lambda p=p: self._unfitted.discard(p))
             else:
                 content = QtWidgets.QLabel("off")
                 content.setStyleSheet("color: gray; padding-left: 8px")
@@ -470,6 +486,41 @@ class LiveMixin:
         else:
             self._show_stopped(start)
 
+    def _time_fit_all(self) -> None:
+        """Time bar › Show all the data: Window becomes the data's length."""
+        span = self._data_span()
+        if span is None or not self.plots:
+            return
+        wb = self.window_box
+        wb.setValue(min(span, wb.maximum()))
+        if self.mode == REVIEW:
+            self.scroll.setValue(0)
+        else:
+            self._show_stopped(-np.inf)
+
+    def _time_to_end(self) -> None:
+        """Time bar › Show the newest data: scroll to the end. (While acquiring it's already there.)"""
+        if not self.plots or (self.mode == LIVE and self.btn_run.isChecked()):
+            return
+        if self.mode == REVIEW:
+            self.scroll.setValue(self.scroll.maximum())
+        else:
+            self._show_stopped(np.inf)
+
+    def _sync_time_bar(self) -> None:
+        """The time bar's Window follows the toolbar's; its newest/all buttons only do
+        something when there's a stopped trace or a recorded block to move about in."""
+        wb, ro = self.window_box, getattr(self, "window_readout", None)
+        if ro is None:
+            return
+        ro.blockSignals(True)
+        ro.setRange(wb.minimum(), wb.maximum())
+        ro.setValue(wb.value())
+        ro.blockSignals(False)
+        still = self._data_span() is not None
+        for kind in ("end", "fit_x"):
+            self._time_buttons[kind].setEnabled(still)
+
     def _data_span(self) -> float | None:
         """How many seconds of data there are to show, or None if Window isn't limited:
         while acquiring, or with no trace."""
@@ -494,6 +545,7 @@ class LiveMixin:
                 self._window_wanted = wb.value()
             wb.setMaximum(limit)
         self._fitting_window = False
+        self._sync_time_bar()
 
     def _window_changed(self):
         if not self._fitting_window:

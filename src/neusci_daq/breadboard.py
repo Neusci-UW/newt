@@ -19,13 +19,24 @@ Parts sit between two holes (a probe in one):
   third hole; it closes while the gate is more than `vth` above the source ("n"
   channel) or below it ("p"). No current flows into the gate.
 - probe: records the voltage of its hole's net on input `input` ("" = not recorded)
+- ground: one hole, tied to 0 V (like a wire to a - rail)
+- battery: a fixed `value` in V, + end at `a`
+- diode, LED: current flows from `a` (anode) to `b` (cathode) only. Below the forward
+  voltage `vf` no current flows; above it the part is `vf` in series with a small
+  resistance (R_DIODE, R_LED). Checked once per sample, like a MOSFET switch. An LED
+  has a `color`, which sets its `vf`, and `value` is its maximum current in A.
+- push button: `value` ohms while held down (`closed`), no connection otherwise
+- potentiometer: `value` ohms from `a` to `b`, with a wiper leg at `wiper`, `pos` of
+  the way from `a` (0 to 1)
+- inductor: `value` henries
 
 The circuit is solved by modified nodal analysis at each sample. Capacitors use
 backward Euler (i = C (v - v_prev) / dt), which is stable at any step, so an RC
-charges with the right time constant at any sample rate. Every net also has a
+charges with the right time constant at any sample rate; so do inductors, whose
+currents are unknowns of their own (v = L (i - i_prev) / dt). Every net also has a
 tiny conductance to ground, so a part left floating reads 0 V instead of making
-the circuit unsolvable. A MOSFET switch is checked once per sample, from the voltages
-of the sample before; each pattern of open and closed switches is solved once and kept.
+the circuit unsolvable. A MOSFET switch, diode or LED is checked once per sample, from the
+voltages of the sample before; each pattern of open and closed ones is solved once and kept.
 """
 from __future__ import annotations
 
@@ -36,10 +47,20 @@ import numpy as np
 COLS = 30
 ROWS = "abcdefghij"
 RAILS = ("t+", "t-", "b+", "b-")          # top + and -, bottom + and -
-KINDS = ("vin", "resistor", "capacitor", "switch", "wire", "probe")
-NAMES = {"vin": "Input voltage", "resistor": "Resistor", "capacitor": "Capacitor", "switch": "Switch", "wire": "Wire", "probe": "Probe"}
-UNITS = {"vin": "V", "resistor": "Ω", "capacitor": "F", "switch": "Ω"}
-DEFAULT_VALUE = {"vin": 1.0, "resistor": 10e3, "capacitor": 1e-6, "switch": 1.0, "wire": 0.0, "probe": 0.0}
+KINDS = ("vin", "resistor", "capacitor", "switch", "wire", "probe", "ground",
+         "led", "diode", "button", "pot", "inductor", "battery")
+NAMES = {"vin": "Input voltage", "resistor": "Resistor", "capacitor": "Capacitor", "switch": "Switch", "wire": "Wire",
+         "probe": "Probe", "ground": "Ground", "led": "LED", "diode": "Diode", "button": "Push button",
+         "pot": "Potentiometer", "inductor": "Inductor", "battery": "Battery"}
+UNITS = {"vin": "V", "resistor": "Ω", "capacitor": "F", "switch": "Ω", "button": "Ω", "pot": "Ω", "inductor": "H",
+         "battery": "V", "led": "A"}
+DEFAULT_VALUE = {"vin": 1.0, "resistor": 10e3, "capacitor": 1e-6, "switch": 1.0, "wire": 0.0, "probe": 0.0,
+                 "ground": 0.0, "led": 0.02, "diode": 0.0, "button": 1.0, "pot": 10e3, "inductor": 10e-3, "battery": 5.0}
+ONE_HOLE = ("probe", "ground")
+LED_VF = {"red": 2.0, "yellow": 2.1, "green": 2.2, "blue": 3.0, "white": 3.1}   # forward voltage by colour, V
+DIODE_VF = 0.7
+R_LED, R_DIODE = 15.0, 1.0                  # Ω, in series with vf while conducting
+R_MIN = 1.0                                 # Ω, the least a potentiometer's half can be
 GND = "gnd"
 G_MIN = 1e-9                              # S from every net to ground
 
@@ -58,11 +79,35 @@ class Part:
     gate: str = ""                        # switch, mosfet: the gate's hole (a = drain, b = source)
     vth: float = 2.0                      # switch, mosfet: threshold, V
     channel: str = "n"                    # switch, mosfet: "n" (on above vth) or "p" (on below -vth)
+    vf: float = 0.0                       # diode, LED: forward voltage, V
+    color: str = "red"                    # LED
+    wiper: str = ""                       # potentiometer: the wiper's hole
+    pos: float = 0.5                      # potentiometer: the wiper's place, 0 (at a) to 1 (at b)
 
     def holes(self) -> list[str]:
         """Every hole the part has a leg in."""
         gate = [self.gate] if self.kind == "switch" and self.mode == "mosfet" and self.gate else []
-        return [h for h in (self.a, self.b) if h] + gate
+        wiper = [self.wiper] if self.kind == "pot" and self.wiper else []
+        return [h for h in (self.a, self.b) if h] + gate + wiper
+
+
+def new_part(kind: str, a: str, b: str = "") -> Part:
+    """A part with its default settings."""
+    p = Part(kind, a, "" if kind in ONE_HOLE else b, DEFAULT_VALUE[kind])
+    if kind == "led":
+        p.vf = LED_VF[p.color]
+    elif kind == "diode":
+        p.vf = DIODE_VF
+    return p
+
+
+def is_source(p: Part) -> bool:
+    """An input voltage or a battery: a voltage source in the circuit."""
+    return p.kind in ("vin", "battery")
+
+
+def is_diode(p: Part) -> bool:
+    return p.kind in ("diode", "led")
 
 
 @dataclass
@@ -130,8 +175,8 @@ def nets(board: Board) -> dict[str, str]:
         for h in p.holes():
             find(strip_of(h))
     for p in board.parts:
-        if p.kind == "wire":
-            ra, rb = find(strip_of(p.a)), find(strip_of(p.b))
+        if p.kind in ("wire", "ground"):
+            ra, rb = find(strip_of(p.a)), find(GND if p.kind == "ground" else strip_of(p.b))
             if ra != rb:
                 if rb == GND:                 # keep ground's name for the joined net
                     ra, rb = rb, ra
@@ -144,12 +189,22 @@ def validate(board: Board) -> None:
         if p.kind not in KINDS:
             raise ValueError(f"unknown part {p.kind!r}")
         parse_hole(p.a)
-        if p.kind != "probe":
+        if p.kind not in ONE_HOLE:
             parse_hole(p.b)
             if p.a == p.b:
                 raise ValueError(f"{NAMES[p.kind]}: both ends are in the same hole")
-        if p.kind in ("resistor", "capacitor", "switch") and not p.value > 0:
+        if p.kind in ("resistor", "capacitor", "switch", "button", "pot", "inductor", "led") and not p.value > 0:
             raise ValueError(f"{NAMES[p.kind]}: the value must be above 0")
+        if is_diode(p) and not p.vf > 0:
+            raise ValueError(f"{NAMES[p.kind]}: the forward voltage must be above 0")
+        if p.kind == "led" and p.color not in LED_VF:
+            raise ValueError(f"LED: unknown colour {p.color!r}")
+        if p.kind == "pot":
+            parse_hole(p.wiper)
+            if p.wiper in (p.a, p.b):
+                raise ValueError("Potentiometer: the wiper shares a hole with an end")
+            if not 0 <= p.pos <= 1:
+                raise ValueError("Potentiometer: the wiper must be between its ends")
         if p.kind == "vin" and p.source not in ("stim", "dc"):
             raise ValueError("Input voltage: the source must be the stimulator or fixed")
         if p.kind == "switch":
@@ -181,17 +236,19 @@ class BoardState:
         self.net_of = net_of
         names = sorted({n for n in net_of.values() if n != GND})
         self.node = {n: i for i, n in enumerate(names)}
-        vins = [p for p in board.parts if p.kind == "vin"]
+        vins = [p for p in board.parts if is_source(p)]
+        inds = [p for p in board.parts if p.kind == "inductor"]
         self.vins = vins
-        n, m = len(names), len(vins)
-        a = np.zeros((n + m, n + m))
-        gc = np.zeros((n + m, n + m))            # capacitor conductances: the history term
-        e = np.zeros((n + m, m))                  # how each source's voltage enters
+        self.diodes = [(p, k, self._idx(p.a), self._idx(p.b)) for k, p in enumerate(board.parts) if is_diode(p)]
+        n, m, nl, nd = len(names), len(vins), len(inds), len(self.diodes)
+        size = n + m + nl                        # node voltages, then source currents, then inductor currents
+        a = np.zeros((size, size))
+        gc = np.zeros((size, size))              # the history term: capacitors' voltages, inductors' currents
+        e = np.zeros((size, m + nd))             # how each source's voltage (and each diode's vf) enters
         for i in range(n):
             a[i, i] += G_MIN
 
-        def stamp(mat, p, g):
-            i, j = self._idx(p.a), self._idx(p.b)
+        def stamp_ij(mat, i, j, g):
             if i is not None:
                 mat[i, i] += g
             if j is not None:
@@ -200,10 +257,13 @@ class BoardState:
                 mat[i, j] -= g
                 mat[j, i] -= g
 
+        def stamp(mat, p, g):
+            stamp_ij(mat, self._idx(p.a), self._idx(p.b), g)
+
         self.switches = []                       # (part, index in board.parts, a, b, gate, source)
         for k, p in enumerate(board.parts):
-            if p.kind == "switch":
-                gate = self._idx(p.gate) if p.mode == "mosfet" else None
+            if p.kind in ("switch", "button"):
+                gate = self._idx(p.gate) if p.kind == "switch" and p.mode == "mosfet" else None
                 self.switches.append((p, k, self._idx(p.a), self._idx(p.b), gate, self._idx(p.b)))
         for p in board.parts:
             if p.kind == "resistor":
@@ -211,6 +271,10 @@ class BoardState:
             elif p.kind == "capacitor":
                 stamp(a, p, p.value / self.dt)
                 stamp(gc, p, p.value / self.dt)
+            elif p.kind == "pot":
+                w = self._idx(p.wiper)
+                stamp_ij(a, self._idx(p.a), w, 1.0 / max(R_MIN, p.value * p.pos))
+                stamp_ij(a, w, self._idx(p.b), 1.0 / max(R_MIN, p.value * (1 - p.pos)))
         for k, p in enumerate(vins):
             r, i, j = n + k, self._idx(p.a), self._idx(p.b)
             if i is not None:
@@ -220,9 +284,19 @@ class BoardState:
                 a[j, r] -= 1
                 a[r, j] -= 1
             e[r, k] = 1.0
-        self._a, self._gc, self._e, self._stamp = a, gc, e, stamp
+        for k, p in enumerate(inds):             # v_a - v_b = L (i - i_prev) / dt; i flows a -> b
+            r, i, j, ldt = n + m + k, self._idx(p.a), self._idx(p.b), p.value / self.dt
+            if i is not None:
+                a[i, r] += 1
+                a[r, i] += 1
+            if j is not None:
+                a[j, r] -= 1
+                a[r, j] -= 1
+            a[r, r] -= ldt
+            gc[r, r] -= ldt
+        self._a, self._gc, self._e, self._stamp, self._stamp_ij, self._m = a, gc, e, stamp, stamp_ij, m
         self._mats: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
-        self.v = np.zeros(n + m)
+        self.v = np.zeros(size)
         prev_v, prev_node = old
         if prev_v is not None:                   # carry charge over on nets that survive
             for name, i in self.node.items():
@@ -232,34 +306,60 @@ class BoardState:
         self.p, self.q = self._solve(self.key)
 
     def _key(self, v: np.ndarray) -> tuple:
-        """Which switches are closed, given node voltages `v`."""
+        """Which switches are closed and which diodes conduct, given node voltages `v`."""
         out = []
         for p, _k, _a, _b, g, s in self.switches:
-            if p.mode == "toggle":
+            if p.kind == "button" or p.mode == "toggle":
                 out.append(bool(p.closed))
             else:
                 vgs = (0.0 if g is None else v[g]) - (0.0 if s is None else v[s])
                 out.append(bool(vgs > p.vth if p.channel == "n" else vgs < -p.vth))
+        for p, _k, i, j in self.diodes:          # conducting while the anode is more than vf above the cathode
+            vab = (0.0 if i is None else v[i]) - (0.0 if j is None else v[j])
+            out.append(bool(vab > p.vf))
         return tuple(out)
 
     def _solve(self, key: tuple) -> tuple[np.ndarray, np.ndarray]:
-        """The step matrices with the switches in `key` closed (kept for next time)."""
+        """The step matrices with the switches and diodes in `key` on (kept for next time)."""
         if key not in self._mats:
-            a = self._a.copy()
-            for (p, *_), on in zip(self.switches, key):
+            a, e = self._a.copy(), self._e.copy()
+            ns = len(self.switches)
+            for (p, *_), on in zip(self.switches, key[:ns]):
                 if on:
                     self._stamp(a, p, 1.0 / p.value)
+            for d, ((p, _k, i, j), on) in enumerate(zip(self.diodes, key[ns:])):
+                if on:                           # g (v_a - v_b - vf): a conductance, and vf as a source
+                    g = 1.0 / (R_LED if p.kind == "led" else R_DIODE)
+                    self._stamp_ij(a, i, j, g)
+                    if i is not None:
+                        e[i, self._m + d] += g
+                    if j is not None:
+                        e[j, self._m + d] -= g
             try:
                 ainv = np.linalg.inv(a)
             except np.linalg.LinAlgError:
-                raise ValueError("The circuit can't be solved: an input voltage is shorted, "
-                                 "or two input voltages are joined") from None
-            self._mats[key] = (ainv @ self._gc, ainv @ self._e)
+                raise ValueError("The circuit can't be solved: an input voltage or battery is shorted, "
+                                 "or two of them are joined") from None
+            self._mats[key] = (ainv @ self._gc, ainv @ e)
         return self._mats[key]
+
+    def diode_current(self, k: int) -> float:
+        """The current through the diode or LED at board.parts[k], anode to cathode, A (after the last sample)."""
+        for d, (p, kk, i, j) in enumerate(self.diodes):
+            if kk == k:
+                if not self.key[len(self.switches) + d]:
+                    return 0.0
+                vab = (0.0 if i is None else self.v[i]) - (0.0 if j is None else self.v[j])
+                return max(0.0, (vab - p.vf) / (R_LED if p.kind == "led" else R_DIODE))
+        return 0.0
 
     def closed_now(self) -> dict[int, bool]:
         """Each switch's state after the last sample, by its index in board.parts."""
         return {k: on for (_p, k, *_), on in zip(self.switches, self.key)}
+
+    def lit_now(self) -> dict[int, float]:
+        """Each LED's current after the last sample, A, by its index in board.parts."""
+        return {k: self.diode_current(k) for p, k, *_ in self.diodes if p.kind == "led"}
 
     def _idx(self, hole: str) -> int | None:
         net = self.net_of[strip_of(hole)]
@@ -274,13 +374,15 @@ class BoardState:
     def run(self, stim: np.ndarray, holes: list[str]) -> np.ndarray:
         """Step one sample per value of `stim` (the stimulator's output, V). Returns the
         voltage at each of `holes`, one row per hole."""
-        u = np.empty((len(stim), len(self.vins)))
+        u = np.empty((len(stim), len(self.vins) + len(self.diodes)))
         for k, p in enumerate(self.vins):
-            u[:, k] = stim if p.source == "stim" else p.value
+            u[:, k] = stim if p.kind == "vin" and p.source == "stim" else p.value
+        for d, (p, *_) in enumerate(self.diodes):
+            u[:, len(self.vins) + d] = p.vf
         cols = [self._known(h) for h in holes]
         out = np.zeros((len(holes), len(stim)))
         v, p, q, key = self.v, self.p, self.q, self.key
-        gated = any(sw[0].mode == "mosfet" for sw in self.switches)
+        gated = bool(self.diodes) or any(sw[0].kind == "switch" and sw[0].mode == "mosfet" for sw in self.switches)
         for s in range(len(stim)):
             if gated:
                 k = self._key(v)
@@ -333,8 +435,14 @@ def to_toml_lines(board: Board) -> list[str]:
         lines += ["", "[[simulated.breadboard]]", f'part = "{p.kind}"', f'a = "{p.a}"']
         if p.b:
             lines.append(f'b = "{p.b}"')
-        if p.kind in ("vin", "resistor", "capacitor", "switch"):
+        if p.kind in ("vin", "resistor", "capacitor", "switch", "button", "pot", "inductor", "battery", "led"):
             lines.append(f"value = {p.value:g}")
+        if is_diode(p):
+            lines.append(f"vf = {p.vf:g}")
+        if p.kind == "led":
+            lines.append(f'color = "{p.color}"')
+        if p.kind == "pot":
+            lines += [f'wiper = "{p.wiper}"', f"pos = {p.pos:g}"]
         if p.kind == "switch":
             lines.append(f'mode = "{p.mode}"')
             if p.mode == "toggle":
@@ -358,7 +466,9 @@ def from_toml(sim: dict) -> Board:
         parts.append(Part(kind, str(d.get("a", "")), str(d.get("b", "")), float(d.get("value", DEFAULT_VALUE.get(kind, 0.0))),
                           str(d.get("source", "stim")), str(d.get("input", "")), float(d.get("noise_v", 0.002)),
                           str(d.get("mode", "toggle")), bool(d.get("closed", False)), str(d.get("gate", "")),
-                          float(d.get("vth", 2.0)), str(d.get("channel", "n"))))
+                          float(d.get("vth", 2.0)), str(d.get("channel", "n")),
+                          vf=float(d.get("vf", LED_VF.get(str(d.get("color", "red")), 2.0) if kind == "led" else DIODE_VF if kind == "diode" else 0.0)),
+                          color=str(d.get("color", "red")), wiper=str(d.get("wiper", "")), pos=float(d.get("pos", 0.5))))
     board = Board(parts)
     validate(board)
     return board

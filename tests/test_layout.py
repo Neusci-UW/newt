@@ -353,7 +353,7 @@ def test_everything_fits_on_a_1024_px_wide_window(app, scaled_win, mode):
         assert win.btn_rec.text().endswith("0:00") or win.btn_rec.text().endswith("0:01")
         win.stop_stimulus()
         win.btn_rec.setChecked(False)
-        assert win.btn_rec.text() == "Record"
+        assert win.btn_rec.text() == "Record: Off"
         win.btn_run.setChecked(False)
     finally:
         style._applied["mode"] = None
@@ -388,7 +388,7 @@ def test_short_record_text_keeps_its_meaning_in_a_tooltip(app, win):
     assert win.btn_rec.toolTip() == "Stop recording"
     assert not win.lbl_rate.isVisible() and not win.lbl_window.isVisible()
     win.btn_rec.setChecked(False)
-    assert (win.btn_rec.text(), win.btn_rec.toolTip()) == ("Record", "")
+    assert (win.btn_rec.text(), win.btn_rec.toolTip()) == ("Record: Off", "")
     win.btn_run.setChecked(False)
 
 

@@ -256,7 +256,7 @@ class SimPage(QtWidgets.QWidget):
                     item = _readonly("")
                 self.recs.setItem(r, col, item)
             if monitor:
-                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Stimulus Design › Output › Record on): "
+                self.recs.cellWidget(r, 0).setToolTip("Wired to the stimulator (Acquisition › Complex Stimulus › Output › Record on): "
                                                       "it records the stimulus")
                 self.recs.item(r, 2).setText("records the stimulus")
 

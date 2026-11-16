@@ -12,6 +12,7 @@ keeps volts at the output.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from pyqtgraph.Qt import QtCore, QtWidgets
@@ -66,11 +67,13 @@ class SegmentEditor(QtWidgets.QWidget):
 
     # -- in and out ------------------------------------------------------------------
     def set_stimulus(self, s: Stimulus) -> None:
-        self._parts = [dict(p) for p in stimmod.to_segments(s).parts]
+        self._base = stimmod.to_segments(s)          # its settings besides the segments (offset)
+        self._parts = [dict(p) for p in self._base.parts]
         self._build()
 
     def stimulus(self) -> Stimulus:
-        return Stimulus(shape="segments", parts=[dict(p) for p in self._parts])
+        base = getattr(self, "_base", None) or Stimulus(shape="segments")
+        return replace(base, shape="segments", parts=[dict(p) for p in self._parts])
 
     def refresh_units(self) -> None:
         """The stimulator's units changed: show the levels in the new ones."""

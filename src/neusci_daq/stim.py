@@ -78,19 +78,20 @@ def new_part(kind: str, level: float | None = None, dur: float | None = None) ->
     pulse level V, dur ms wide, `count` of them every `interval` ms; sine level V
     amplitude around `offset` at `freq` Hz for dur ms; triangle and square level V at `freq`
     Hz (square is on for the first half of each cycle); chirp level V amplitude sweeping from
-    `freq` to `freq2` Hz (`log` for a logarithmic sweep); noise Gaussian with level V standard
+    `freq` to `freq2` Hz (`log` for a logarithmic sweep) while its amplitude goes in a straight
+    line from level to `level2` V; noise Gaussian with level V standard
     deviation (`seed` 0: new noise every time, else the same noise each time); exp a jump to
     level V decaying with `tau` ms; alpha a rise and fall peaking at level V at `tau` ms
     (an EPSC's shape); points straight lines (or steps, `join`) through [ms, V] `points`,
     each V × level; file the file's volts × level."""
-    p = {"kind": kind, "level": 0.0, "dur": 10.0, "d_level": "", "d_dur": ""}
+    p = {"kind": kind, "level": 0.0, "dur": 10.0, "d_level": "", "d_dur": "", "offset": 0.0}
     p.update({"step": {"level": 1.0, "dur": 10.0},
               "ramp": {"level": 1.0, "dur": 20.0, "start": 0.0},
               "pulse": {"level": 1.0, "dur": 1.0, "count": 1, "interval": 100.0, "biphasic": False},
               "sine": {"level": 1.0, "dur": 100.0, "freq": 10.0, "offset": 0.0},
               "triangle": {"level": 1.0, "dur": 100.0, "freq": 10.0},
               "square": {"level": 1.0, "dur": 100.0, "freq": 10.0},
-              "chirp": {"level": 1.0, "dur": 200.0, "freq": 5.0, "freq2": 50.0, "log": False},
+              "chirp": {"level": 1.0, "level2": 1.0, "dur": 200.0, "freq": 5.0, "freq2": 50.0, "log": False},
               "noise": {"level": 0.2, "dur": 100.0, "seed": 0},
               "exp": {"level": 1.0, "dur": 50.0, "tau": 10.0},
               "alpha": {"level": 1.0, "dur": 50.0, "tau": 5.0},
@@ -175,7 +176,7 @@ class Stimulus:
     duration_ms: float = 100.0     # step, ramp, sine
     start_v: float = 0.0           # ramp
     end_v: float = 1.0             # ramp
-    offset_v: float = 0.0          # sine
+    offset_v: float = 0.0          # sine; segments: the whole stimulus sits on it
     freq_hz: float = 10.0          # sine
     segments: list = field(default_factory=_default_segments)   # custom
     file: str = ""                 # file
@@ -188,7 +189,8 @@ class Stimulus:
         Levels are shown as volts × `scale` in `units` (the [stimulator] units setting)."""
         lv = lambda v: f"{v * scale:g}"
         if self.shape == "segments":
-            return " · ".join(_describe_part(p, units, scale) for p in self.parts) or "No segments"
+            text = " · ".join(_describe_part(p, units, scale) for p in self.parts) or "No segments"
+            return text + (f" (all on {lv(self.offset_v)} {units})" if self.offset_v else "")
         d = f"{self.delay_ms:g} ms delay, " if self.delay_ms else ""
         if self.shape == "pulse":
             s = f"{'Biphasic pulse' if self.biphasic else 'Pulse'} {lv(self.amplitude_v)} {units}, {self.width_ms:g} ms"
@@ -262,6 +264,8 @@ class Stimulus:
                     t0 += len(w) * 1000.0 / rate if p.get("kind") == "file" else _part_ms(p)
                 except ValueError as e:
                     raise ValueError(f"{letter(i)} ({SEG_KINDS.get(p.get('kind'), '?')}): {e}") from None
+            if self.offset_v:                            # the whole stimulus, baselines too
+                parts = [w + self.offset_v for w in parts]
         elif self.shape == "custom":
             if not self.segments:
                 raise ValueError("Add at least one segment.")
@@ -441,7 +445,15 @@ def _part_ms(p: dict) -> float:
 
 def _part_wave(p: dict, rate: float, t0_ms: float = 0.0) -> np.ndarray:
     """One segment's samples, for a segment starting `t0_ms` into the output (its
-    edges land on the sample nearest their true time). Raises ValueError."""
+    edges land on the sample nearest their true time), shifted by its `offset` V (every
+    kind has one; a baseline's makes it a holding level). Raises ValueError."""
+    w = _part_shape(p, rate, t0_ms)
+    off = float(p.get("offset", 0.0) or 0.0)
+    return w + off if off else w
+
+
+def _part_shape(p: dict, rate: float, t0_ms: float = 0.0) -> np.ndarray:
+    """A segment's samples before its offset."""
     kind = p.get("kind")
     dt_ms = 1000.0 / rate
     level, dur = float(p.get("level", 0.0)), float(p.get("dur", 0.0))
@@ -462,7 +474,7 @@ def _part_wave(p: dict, rate: float, t0_ms: float = 0.0) -> np.ndarray:
         if freq <= 0 or freq > rate / 2:
             raise ValueError(f"the frequency must be between 0 and {rate / 2:,.0f} Hz (half the output rate).")
         t = np.arange(k) / rate
-        return float(p.get("offset", 0.0)) + abs(level) * np.sin(2 * np.pi * freq * t)
+        return abs(level) * np.sin(2 * np.pi * freq * t)
     if kind == "pulse":
         k = samples(dur, rate)                       # every pulse the same width
         if k == 0:
@@ -502,7 +514,8 @@ def _part_wave(p: dict, rate: float, t0_ms: float = 0.0) -> np.ndarray:
             phase = 2 * np.pi * f0 * T / np.log(r) * (r ** (t / T) - 1)
         else:
             phase = 2 * np.pi * (f0 * t + (f1 - f0) * t ** 2 / (2 * T))
-        return level * np.sin(phase)
+        end = float(p.get("level2", level))
+        return (level + (end - level) * t / T) * np.sin(phase)
     if kind == "noise":
         seed = int(p.get("seed", 0))
         rng = np.random.default_rng(seed if seed else None)
@@ -545,7 +558,9 @@ def _describe_part(p: dict, units: str, scale: float) -> str:
     elif kind in ("triangle", "square"):
         s = f"{SEG_KINDS[kind]} {lv(p['level'])} {units}, {float(p.get('freq', 0)):g} Hz for {dur:g} ms"
     elif kind == "chirp":
-        s = (f"Chirp {lv(p['level'])} {units}, {float(p.get('freq', 0)):g}→{float(p.get('freq2', 0)):g} Hz"
+        a0, a1 = float(p["level"]), float(p.get("level2", p["level"]))
+        amp = lv(a0) if a0 == a1 else f"{lv(a0)}→{lv(a1)}"
+        s = (f"Chirp {amp} {units}, {float(p.get('freq', 0)):g}→{float(p.get('freq2', 0)):g} Hz"
              f"{' (log)' if p.get('log') else ''} over {dur:g} ms")
     elif kind == "noise":
         s = f"Noise SD {lv(abs(float(p['level'])))} {units} for {dur:g} ms" + (" (same each time)" if int(p.get("seed", 0)) else "")
@@ -560,6 +575,9 @@ def _describe_part(p: dict, units: str, scale: float) -> str:
             f" ×{float(p['level']):g}" if float(p.get("level", 1)) != 1 else "")
     else:
         s = "?"
+    off = float(p.get("offset", 0.0) or 0.0)
+    if off:
+        s += f", offset {lv(off)} {units}"
     changes = [w for w, k in (("level", "d_level"), ("duration", "d_dur")) if p.get(k)]
     return s + (f" ({' and '.join(changes)} change per trial)" if changes else "")
 

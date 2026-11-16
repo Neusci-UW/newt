@@ -60,7 +60,7 @@ from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
 from .simplestim import SimpleStimPage
-from .dockstim import DockedStimulator
+from .dockstim import DockedDesign, DockedStimulator
 from .ministim import MiniStimulator
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
 from . import colors
@@ -175,7 +175,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_run = QtWidgets.QPushButton("Start", checkable=True)
         self.btn_run.setObjectName("start")
         self.btn_run.toggled.connect(self._toggle_run)
-        self.btn_rec = QtWidgets.QPushButton("Record", checkable=True)   # on/off: Start records while on
+        self.btn_rec = QtWidgets.QPushButton("Record: Off", checkable=True)   # on/off: Start records while on
         self.btn_rec.setObjectName("record")
         self.btn_rec.setIcon(style.dot_icon(style.RECORDING))
         self.btn_rec.toggled.connect(self._toggle_rec)
@@ -215,14 +215,13 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.lbl_rate, self.lbl_window = QtWidgets.QLabel("Sampling rate"), QtWidgets.QLabel("Window")
         self.rate_box.setToolTip("Sampling rate: samples per second, per channel")
         self._short_rec = False          # "0:12" instead of "Stop recording · 0:12" when space is short
-        self._tb_live = [A(self.btn_run), A(self.btn_rec), tb.addSeparator(),
-                         A(self.lbl_rate), A(self.rate_box)]
-        self._act_lbl_rate = self._tb_live[3]
+        # Start, Record, the rate and which stimulator shows sit in the run bar under the
+        # channels (built below). Window isn't on a bar: the time bar's readout mirrors it.
+        self._tb_live = []
         # The block shown is picked in the Blocks panel (↑ ↓); block_combo just holds which.
         self._tb_review = []
-        self._tb_acq = [A(self.lbl_window), A(self.window_box)]
-        self._act_lbl_window = self._tb_acq[0]
-        self._tb_acq_live = [tb.addSeparator(), A(self.comment_edit)]
+        self._tb_acq = []
+        self._tb_acq_live = [A(self.comment_edit)]
         self._tb_review.append(A(self.btn_live))
         spacer = QtWidgets.QWidget()            # fills the space when the comment box is hidden
         spacer.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
@@ -418,6 +417,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.camera_panel.hide()
         row.addWidget(self.camera_panel)
         lay.addLayout(row, 1)
+        lay.addWidget(self._build_run_bar())
         lay.addWidget(self.bottom_bar)
         lay.addWidget(self.scroll)
         self.stim_page = StimPage(self)
@@ -425,8 +425,10 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.stimulus_page = StimulusPage(self, self.stim_page, self.trials_page)   # the two, as one page
         self.simple_page = SimpleStimPage(self)       # a pulse, pair or train, for teaching labs
         self.dock_stim = DockedStimulator(self, self.simple_page)    # its main controls, under Trials
-        self.dock_stim.setVisible(self.stim_out is not None)
         self.left_column.addWidget(self.dock_stim)
+        self.dock_design = DockedDesign(self)                        # or Complex Stimulus's Run
+        self.left_column.addWidget(self.dock_design)
+        self.set_record_stim(self.settings.value("record_stim", "simple"))
         # A small stimulator floating over the Record page's plots.
         self.mini_stim = MiniStimulator(self, self.plot_area)
         self.mini_stim.hide()
@@ -456,7 +458,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.tabs = TabArea([
             ("acq", "Record", central),
             ("simple", "Simple Stimulus", self.simple_page),
-            ("stim", "Stimulus Design", self.stimulus_page),
+            ("stim", "Complex Stimulus", self.stimulus_page),
             ("analysis", "Analysis", self.analysis_page),
             ("sim", "Neural network simulator", with_banner(self, self.sim_page)),
             ("board", "Breadboard simulator", with_banner(self, self.board_page)),
@@ -637,6 +639,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.simple_page.apply_theme(mode)
         if hasattr(self, "dock_stim"):
             self.dock_stim.apply_theme(mode)
+            self.dock_design.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
         if hasattr(self, "stimulus_page"):
@@ -717,9 +720,59 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             a.setVisible(acq)
         for a in self._tb_acq_live:
             a.setVisible(live and acq)
+        if hasattr(self, "run_bar"):
+            self.run_bar.setVisible(live)
         self._tb_spacer.setVisible(not (live and acq))
         self._update_stim_chip()
         self._fit_toolbar()
+
+    def _build_run_bar(self) -> QtWidgets.QWidget:
+        """Under the channels: Start, Record, the sampling rate, and which stimulator the
+        Record page shows (none, Simple Stimulus's, or Complex Stimulus's)."""
+        self.run_bar = bar = QtWidgets.QWidget()
+        bar.setObjectName("runBar")
+        bar.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        rl = QtWidgets.QHBoxLayout(bar)
+        rl.setContentsMargins(8, 6, 8, 6)
+        rl.setSpacing(8)
+
+        def sep():
+            f = QtWidgets.QFrame()
+            f.setFrameShape(QtWidgets.QFrame.Shape.VLine)
+            return f
+        for w in (self.btn_run, self.btn_rec, sep(), self.lbl_rate, self.rate_box, sep(),
+                  QtWidgets.QLabel("Stimulus")):
+            rl.addWidget(w)
+        self.stim_mode_group = QtWidgets.QButtonGroup(self)
+        self.stim_mode_buttons = {}
+        seg = QtWidgets.QHBoxLayout()
+        seg.setSpacing(2)
+        for key, name, tip in (("none", "None", "No stimulator on the Record page"),
+                               ("simple", "Simple", "Simple Stimulus's pulse, pair, train or wave"),
+                               ("complex", "Complex", "Run what's set up on Complex Stimulus")):
+            b = QtWidgets.QPushButton(name, checkable=True)
+            b.setToolTip(tip)
+            self.stim_mode_group.addButton(b)
+            self.stim_mode_buttons[key] = b
+            seg.addWidget(b)
+        rl.addLayout(seg)
+        rl.addStretch(1)
+        self.window_box.hide()                     # kept for its value; the time bar shows it
+        self.stim_mode_group.buttonClicked.connect(
+            lambda b: self.set_record_stim(next(k for k, x in self.stim_mode_buttons.items() if x is b)))
+        return bar
+
+    def set_record_stim(self, mode: str) -> None:
+        """Which stimulator shows under Trials on the Record page: "none", "simple" or "complex"."""
+        mode = mode if mode in ("none", "simple", "complex") else "simple"
+        self.settings.setValue("record_stim", mode)
+        self.stim_mode_buttons[mode].setChecked(True)
+        has = self.stim_out is not None
+        if hasattr(self, "dock_stim"):
+            self.dock_stim.setVisible(has and mode == "simple")
+            self.dock_design.setVisible(has and mode == "complex")
+        for b in self.stim_mode_buttons.values():
+            b.setEnabled(has)
 
     def set_mini_stim(self, on: bool) -> None:
         """Show or hide the small stimulator over the Record page's plots."""
@@ -734,7 +787,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         on = self.repeating or busy or protocol
         if protocol:
             self.stim_chip_text.setText(self.trials_page.chip_text())
-            self.stim_chip.setToolTip("A protocol is running (Acquisition › Stimulus Design). Stop ends it.")
+            self.stim_chip.setToolTip("A protocol is running (Acquisition › Complex Stimulus). Stop ends it.")
         elif on:
             self.stim_chip_text.setText("Stimulating")      # the interval is in the tooltip
             self.stim_chip.setToolTip(f"Repeating every {self.stim_repeat_s:g} s" if self.repeating

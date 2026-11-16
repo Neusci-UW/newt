@@ -1,4 +1,4 @@
-"""Acquisition › Stimulus Design: build a stimulus from segments and send it as trials, in
+"""Acquisition › Complex Stimulus: build a stimulus from segments and send it as trials, in
 the Simple Stimulus style.
 
 Left: the whole stimulus drawn large (designparts.StimPicture). Click a segment on it to
@@ -22,7 +22,10 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from . import protocols as T
 from . import stim as stimmod
 from . import style
+from dataclasses import replace
+
 from .designparts import KindPicker, SegmentPanel, StimPicture, segment_spans
+from .simplestim import _spin
 
 MAX_FADED = 30               # trials drawn faded behind the one shown
 
@@ -54,6 +57,12 @@ class StimulusPage(QtWidgets.QWidget):
         self.summary_label = QtWidgets.QLabel()
         top.addWidget(self.summary_label)
         top.addStretch(1)
+        top.addWidget(QtWidgets.QLabel("Offset"))
+        self.offset = _spin(-100000, 100000, 3, stim._unit_label,
+                            "A steady level the whole stimulus sits on, baselines included (0 = none). "
+                            "Each segment can have its own offset too.")
+        self.offset.setMinimumWidth(100)
+        top.addWidget(self.offset)
         self.out_switch = QtWidgets.QWidget()
         osw = QtWidgets.QHBoxLayout(self.out_switch)
         osw.setContentsMargins(0, 0, 0, 0)
@@ -253,6 +262,8 @@ class StimulusPage(QtWidgets.QWidget):
         self.out_group.idClicked.connect(self._switch_output)
         self.btn_second.clicked.connect(self._second_output)
         self.btn_once.clicked.connect(self._send_once)
+        self.offset.valueChanged.connect(
+            lambda v: self._push_stimulus(replace(self._stimulus(), offset_v=v / (self.stim._scale or 1.0))))
         self.progress_timer = QtCore.QTimer(self, interval=250, timeout=self._show_progress)
         self.progress_timer.start()
         self.place()
@@ -285,7 +296,9 @@ class StimulusPage(QtWidgets.QWidget):
     def _push(self, parts: list[dict], editor: bool = False) -> None:
         """Use these segments for the stimulus being edited. `editor`: rebuild the segment's
         settings too (not while one of them is being typed in)."""
-        s = stimmod.Stimulus(shape="segments", parts=parts)
+        self._push_stimulus(replace(self._stimulus(), parts=parts), editor)
+
+    def _push_stimulus(self, s: stimmod.Stimulus, editor: bool = False) -> None:
         self._pushing = True
         try:
             if self.which == 1 and self.main.stimulus2 is not None:
@@ -399,6 +412,10 @@ class StimulusPage(QtWidgets.QWidget):
             names.append("Train" if kind == "pulse" and int(p.get("count", 1)) > 1
                          else stimmod.SEG_KINDS.get(kind, kind))
         units, k = stim._unit_label, stim._scale
+        if not self.offset.hasFocus():
+            self.offset.blockSignals(True)
+            self.offset.setValue(float(s.offset_v) * k)
+            self.offset.blockSignals(False)
         if editor:
             self.panel.show_part(self.sel, parts[self.sel], units, k, len(parts))
         else:
@@ -473,7 +490,7 @@ class StimulusPage(QtWidgets.QWidget):
                 tr.set_varying(want)
             self._show_mode(want)
             stim.set_locked(tr.running)
-            for w in (self.n_trials, self.panel, self.btn_add, self.picture):
+            for w in (self.n_trials, self.panel, self.btn_add, self.picture, self.offset):
                 w.setEnabled(not tr.running)
             self._output_title()
             if not self._pushing:

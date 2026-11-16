@@ -1,4 +1,4 @@
-"""The parts of Acquisition › Stimulus Design (stimuluspage.py), in the Simple Stimulus style:
+"""The parts of Acquisition › Complex Stimulus (stimuluspage.py), in the Simple Stimulus style:
 
 - StimPicture: the whole stimulus drawn large, segment by segment (A, B, C…). Every trial
   is drawn faded and the one shown bold; the selected segment is shaded and its numbers
@@ -46,24 +46,26 @@ FIELDS = {
               ("count", "Pulses", "n", None), ("interval", "Interval", "ms", None)],
     "ramp": [("start", "From", "level", None), ("level", "To", "level", "d_level"), ("dur", "Duration", "ms", "d_dur")],
     "sine": [("level", "Amplitude", "level", "d_level"), ("freq", "Frequency", "Hz", None),
-             ("dur", "Duration", "ms", "d_dur"), ("offset", "Offset", "level", None)],
+             ("dur", "Duration", "ms", "d_dur")],
     "triangle": [("level", "Amplitude", "level", "d_level"), ("freq", "Frequency", "Hz", None),
                  ("dur", "Duration", "ms", "d_dur")],
     "square": [("level", "Level", "level", "d_level"), ("freq", "Frequency", "Hz", None),
                ("dur", "Duration", "ms", "d_dur")],
-    "chirp": [("level", "Amplitude", "level", "d_level"), ("freq", "Start", "Hz", None), ("freq2", "End", "Hz", None),
-              ("dur", "Duration", "ms", "d_dur")],
+    "chirp": [("level", "Start amplitude", "level", "d_level"), ("level2", "End amplitude", "level", None),
+              ("freq", "Start", "Hz", None), ("freq2", "End", "Hz", None), ("dur", "Duration", "ms", "d_dur")],
     "noise": [("level", "SD", "level", "d_level"), ("dur", "Duration", "ms", "d_dur")],
     "exp": [("level", "Jump", "level", "d_level"), ("tau", "τ (decay)", "ms", None), ("dur", "Duration", "ms", "d_dur")],
     "alpha": [("level", "Peak", "level", "d_level"), ("tau", "Peak at", "ms", None), ("dur", "Duration", "ms", "d_dur")],
     "points": [("level", "Scale", "x", "d_level")],
     "file": [("level", "Scale", "x", "d_level")],
 }
+for _f in FIELDS.values():                   # every kind can sit on a DC offset
+    _f.append(("offset", "Offset", "level", None))
 HINTS = {"base": "0 V at the output.", "step": "Holds a level, then the next segment starts.",
          "pulse": "One pulse, or a train of them.", "ramp": "A straight line from one level to another.",
          "sine": "A sine wave around the offset.", "triangle": "Straight up to the amplitude and down to minus it.",
          "square": "On at the level for the first half of each cycle, then 0.",
-         "chirp": "A sine wave whose frequency sweeps from start to end.",
+         "chirp": "A sine wave whose frequency and amplitude sweep from start to end.",
          "noise": "Random values around 0, Gaussian with this standard deviation.",
          "exp": "Jumps to the level, then decays with τ.", "alpha": "Rises and falls like an EPSC, peaking at τ.",
          "points": "Your own shape: times and levels, joined by lines or steps (levels × Scale).",
@@ -192,6 +194,7 @@ class StimPicture(QtWidgets.QWidget):
         self.colors = dict(wave="#1a5fd0", dim="#d9822b", text="#5c6370", ink="#1f2328", line="#d9dce1",
                            sel=QtGui.QColor(26, 95, 208, 20), axis="#c9ced6")
         self._hover = -1
+        self.compact = False          # a small copy: just the traces, no letters, axis or numbers
 
     def set_data(self, waves, spans, names, sel, dims, rate, units, k) -> None:
         self.waves, self.spans, self.names, self.sel, self.dims = waves, spans, names, sel, dims
@@ -199,7 +202,8 @@ class StimPicture(QtWidgets.QWidget):
         self.update()
 
     def _geom(self):
-        L, R, T, B = 52, self.width() - 14, 30, self.height() - 46
+        L, R, T, B = ((4, self.width() - 4, 4, self.height() - 4) if self.compact
+                      else (52, self.width() - 14, 30, self.height() - 46))
         n = max((len(w) for w in self.waves), default=1)
         n = max(n, self.spans[-1][1] if self.spans else 1, 2)
         lo = min([0.0] + [float(w.min()) for w in self.waves if len(w)])
@@ -222,6 +226,8 @@ class StimPicture(QtWidgets.QWidget):
         return -1
 
     def mouseMoveEvent(self, ev):
+        if self.compact:
+            return
         i = self._band_at(ev.position().x())
         if i != self._hover:
             self._hover = i
@@ -233,6 +239,8 @@ class StimPicture(QtWidgets.QWidget):
         self.update()
 
     def mousePressEvent(self, ev):
+        if self.compact:
+            return
         i = self._band_at(ev.position().x())
         if i >= 0:
             self.picked.emit(i)
@@ -270,7 +278,7 @@ class StimPicture(QtWidgets.QWidget):
         bold = QtGui.QFont(self.font())
         bold.setBold(True)
         # the segments: shaded when picked or under the mouse, dashed edges, letter and kind under
-        for i, (a, b) in enumerate(self.spans):
+        for i, (a, b) in enumerate([] if self.compact else self.spans):
             x0, x1 = X(a), X(max(a + 1, b))
             r = QtCore.QRectF(x0, T - 22, x1 - x0, B - T + 22)
             if i == self.sel or i == self._hover:
@@ -299,13 +307,14 @@ class StimPicture(QtWidgets.QWidget):
         p.setPen(QtGui.QPen(QtGui.QColor(c["axis"]), 1))
         p.drawLine(QtCore.QPointF(L, Y(0)), QtCore.QPointF(R, Y(0)))
         p.setPen(QtGui.QColor(c["text"]))
-        for v in (hi, 0.0, lo):
+        for v in () if self.compact else (hi, 0.0, lo):
             if v == 0.0 or abs(Y(v) - Y(0)) > 14:
                 p.drawText(QtCore.QRectF(0, Y(v) - 8, L - 6, 16),
                            QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter,
                            f"{v * self.k:.3g} {self.units}")
         total_ms = n / self.rate * 1000
-        p.drawText(QtCore.QRectF(R - 120, B + 20, 120, 16), QtCore.Qt.AlignmentFlag.AlignRight, f"{total_ms:.4g} ms")
+        if not self.compact:
+            p.drawText(QtCore.QRectF(R - 120, B + 20, 120, 16), QtCore.Qt.AlignmentFlag.AlignRight, f"{total_ms:.4g} ms")
         # every trial faded, the shown one bold
         wc = QtGui.QColor(c["wave"])
         for j, w in enumerate(self.waves):
@@ -413,7 +422,7 @@ class SegmentPanel(QtWidgets.QFrame):
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
-        lab = QtWidgets.QLabel(f"<span style='color:{DIM[self._mode]}'>■</span> {label}")
+        lab = QtWidgets.QLabel(label if key == "offset" else f"<span style='color:{DIM[self._mode]}'>■</span> {label}")
         lay.addWidget(lab)
         val = self.part.get(key, 0)
         if what == "n":
@@ -601,6 +610,14 @@ class SegmentPanel(QtWidgets.QFrame):
         lv = lambda key: f"{float(p.get(key, 0)) * k:g} {u}"
         out = []
         for key, label, what, dkey in FIELDS.get(kind, []):
+            if key == "offset":
+                if float(p.get("offset", 0) or 0):
+                    out.append(f"offset {lv('offset')}")
+                continue
+            if key == "level2":
+                if float(p.get("level2", p.get("level", 0))) != float(p.get("level", 0)):
+                    out[-1] = out[-1].split(" (")[0] + f" → {lv('level2')}"
+                continue
             if what == "level":
                 out.append(lv(key))
             elif what == "ms":
@@ -613,7 +630,7 @@ class SegmentPanel(QtWidgets.QFrame):
                 got = stimmod.parse_per_trial(p[dkey])
                 kk = k if what == "level" else 1.0
                 out[-1] += f" ({stimmod.format_per_trial(got, kk)}{' / trial' if got[0] == 'step' else ''})"
-        if kind == "chirp" and len(out) >= 3:
+        if kind == "chirp" and len(out) >= 3:              # amplitude, start Hz, end Hz …
             out[1:3] = [f"{out[1]} → {out[2]}"]
         return out
 

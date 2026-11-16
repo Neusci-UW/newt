@@ -63,7 +63,7 @@ def test_record_button_shows_elapsed_time(app, win):
     pump(app, 0.3)
     assert win.btn_rec.text().startswith("Stop recording · 0:0")
     win.btn_rec.setChecked(False)
-    assert win.btn_rec.text() == "Record"
+    assert win.btn_rec.text() == "Record: Off"
     win.btn_run.setChecked(False)
 
 

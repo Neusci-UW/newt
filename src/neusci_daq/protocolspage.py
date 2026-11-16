@@ -741,9 +741,6 @@ class ProtocolsPage(QtWidgets.QWidget):
         t = style.tokens(self._mode)
         c, cfg = self.chk, self.main.cfg
         problems = list(c.errors) if c else []
-        if not cfg.stim_monitor:
-            problems.append("Record the stimulus on a spare input first (Output › Record on), "
-                            "so each stimulus can be lined up on when the stimulus really started.")
         if problems:
             self.summary.setStyleSheet(f"color: {t['error']}")
             self.summary.setText("\n".join(problems))
@@ -760,7 +757,7 @@ class ProtocolsPage(QtWidgets.QWidget):
 
     def _update_buttons(self):
         idle = not self.running
-        can = idle and self.varying and bool(self.chk and self.chk.ok) and bool(self.main.cfg.stim_monitor)
+        can = idle and self.varying and bool(self.chk and self.chk.ok)
         self.btn_run.setEnabled(can)
         self.btn_pause.setEnabled(self.running)
         self.btn_stop.setEnabled(self.running)
@@ -877,6 +874,14 @@ class ProtocolsPage(QtWidgets.QWidget):
     # ======================================================================
     # running
     # ======================================================================
+    def _ensure_stim_recorded(self) -> bool:
+        """Stimuli are lined up on the recorded stimulus: record it on a spare input if it isn't yet."""
+        cfg = self.main.cfg
+        if cfg.stim_monitor and any(ch.physical == cfg.stim_monitor for ch in cfg.channels):
+            return True
+        spare = next((phys for _, phys, ok, _ in self.main.monitor_choices() if phys and ok), "")
+        return bool(spare) and self.main.set_stim_monitor(spare)
+
     def run_protocol(self) -> bool:
         main, cfg = self.main, self.main.cfg
         self._settings_changed()
@@ -886,8 +891,8 @@ class ProtocolsPage(QtWidgets.QWidget):
             problem = "Protocols needs the nidaqmx (or simulated) backend to send stimuli."
         elif main.mode != "live":
             problem = "Go back to live mode first (Trials panel › Live): protocols record new data."
-        elif not cfg.stim_monitor or not any(ch.physical == cfg.stim_monitor for ch in cfg.channels):
-            problem = "Record the stimulus on a spare input first (Line up on › Choose…)."
+        elif not self._ensure_stim_recorded():
+            problem = "No spare input to record the stimulus on: free one up so stimuli can be lined up."
         elif not c or not c.ok:
             problem = "Fix the protocol first: " + (c.errors[0] if c and c.errors else "")
         elif main.stim_out.busy:

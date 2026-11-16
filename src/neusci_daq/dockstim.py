@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from pyqtgraph.Qt import QtCore, QtWidgets
 
+from . import stim as stimmod
 from . import style
+from .designparts import StimPicture
 from .simplestim import DIM, FIELDS, MARKED, MODES, NAMES, WAVES, PulseDiagram, _Spin
 
 SHORT = {"single": "Pulse", "pair": "Pair", "train": "Train", "sine": "Sine", "triangle": "Tri"}
@@ -84,6 +86,7 @@ class DockedStimulator(QtWidgets.QFrame):
         self.rate = _small_spin(0.01, 5000, 2, "Hz", "Pulses per second in the train")
         self.freq = _small_spin(0.01, 2500, 2, "Hz", "Cycles per second")
         self.dur = _small_spin(1, 600000, 1, "ms", "How long the wave lasts")
+        self.offset = _small_spin(-100000, 100000, 3, units, "A steady level the whole stimulus sits on (0 = none)")
         self.count = QtWidgets.QSpinBox(minimum=2, maximum=1000)
         self.count.setKeyboardTracking(False)
         self.count.setToolTip("How many pulses in the train")
@@ -93,9 +96,9 @@ class DockedStimulator(QtWidgets.QFrame):
         self.labels = {}
         # (row, column) in a 2-wide grid; boxes that are never shown together share a cell
         self.boxes = {"level": self.level, "width": self.width, "interval": self.interval, "rate": self.rate,
-                      "count": self.count, "freq": self.freq, "dur": self.dur}
+                      "count": self.count, "freq": self.freq, "dur": self.dur, "offset": self.offset}
         cells = {"level": (0, 0), "width": (0, 1), "freq": (0, 1), "interval": (1, 0), "rate": (1, 0),
-                 "dur": (1, 0), "count": (1, 1)}
+                 "dur": (1, 0), "count": (1, 1), "offset": (2, 0)}
         for key, w in self.boxes.items():
             lab = QtWidgets.QLabel()
             self.labels[key] = lab
@@ -138,7 +141,7 @@ class DockedStimulator(QtWidgets.QFrame):
         self.btn_more.clicked.connect(lambda: main.tabs.show_tab("simple"))
         self.btn_fold.toggled.connect(self._fold)
         self.type_group.buttonClicked.connect(lambda *_: self._edited())
-        for w in (self.level, self.width, self.interval, self.rate, self.every, self.freq, self.dur):
+        for w in (self.level, self.width, self.interval, self.rate, self.every, self.freq, self.dur, self.offset):
             w.valueChanged.connect(self._edited)
         self.count.valueChanged.connect(self._edited)
         self.ramp.toggled.connect(self._edited)
@@ -162,7 +165,7 @@ class DockedStimulator(QtWidgets.QFrame):
             d = self.page.values()
             for w, key in ((self.level, "level"), (self.width, "width"), (self.interval, "interval"),
                            (self.rate, "rate"), (self.count, "count"), (self.every, "every"),
-                           (self.freq, "freq"), (self.dur, "dur")):
+                           (self.freq, "freq"), (self.dur, "dur"), (self.offset, "offset")):
                 if w.value() != d[key] and not w.hasFocus():
                     w.setValue(d[key])
             self.type_buttons[d["mode"]].setChecked(True)
@@ -185,7 +188,8 @@ class DockedStimulator(QtWidgets.QFrame):
         d.update(mode=next(k for k, b in self.type_buttons.items() if b.isChecked()),
                  level=self.level.value(), width=self.width.value(), interval=self.interval.value(),
                  rate=self.rate.value(), count=self.count.value(), every=self.every.value(),
-                 ramp=self.ramp.isChecked(), freq=self.freq.value(), dur=self.dur.value())
+                 ramp=self.ramp.isChecked(), freq=self.freq.value(), dur=self.dur.value(),
+                 offset=self.offset.value())
         self.page._set_values(d)
         self.page._changed()            # saves, redraws the page, and calls sync() here
 
@@ -249,3 +253,143 @@ class DockedStimulator(QtWidgets.QFrame):
         self.btn_more.setStyleSheet(f"QPushButton {{ color: {t['focus']}; background: transparent; border: none;"
                                     f" padding: 0 2px; }}")
         self.sync()
+
+
+class DockedDesign(QtWidgets.QFrame):
+    """Complex Stimulus's stimulus, docked under Trials instead: a small picture of every
+    trial, what it is, Run (or Send, for one stimulus) and Stop, and the progress. It's
+    changed on Complex Stimulus ("edit…")."""
+
+    MAX_DRAWN = 10                   # trials drawn in the small picture
+
+    def __init__(self, main):
+        super().__init__()
+        self.main = main
+        self._mode = style.LIGHT
+        self.setObjectName("dockStim")
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(230)
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(10, 8, 10, 10)
+        v.setSpacing(6)
+        head = QtWidgets.QHBoxLayout()
+        self.lamp = QtWidgets.QLabel()
+        self.title = QtWidgets.QLabel("<b>Complex Stimulus</b>")
+        self.btn_edit = QtWidgets.QPushButton("edit…")
+        self.btn_edit.setFlat(True)
+        self.btn_edit.setToolTip("Open Acquisition › Complex Stimulus to change the stimulus or the trials")
+        head.addWidget(self.lamp)
+        head.addWidget(self.title)
+        head.addStretch(1)
+        head.addWidget(self.btn_edit)
+        v.addLayout(head)
+        self.picture = StimPicture()
+        self.picture.compact = True
+        self.picture.setMinimumHeight(80)
+        self.picture.setMaximumHeight(80)
+        v.addWidget(self.picture)
+        self.what = QtWidgets.QLabel()
+        self.what.setWordWrap(True)
+        v.addWidget(self.what)
+        btns = QtWidgets.QHBoxLayout()
+        btns.setSpacing(4)
+        self.btn_run = QtWidgets.QPushButton("Run")
+        self.btn_run.setObjectName("start")
+        self.btn_run.setMinimumHeight(30)
+        self.btn_stop = QtWidgets.QPushButton("Stop")
+        self.btn_stop.setToolTip("Stop the protocol or stimulus and set the output to 0 V (Esc)")
+        btns.addWidget(self.btn_run, 2)
+        btns.addWidget(self.btn_stop, 1)
+        v.addLayout(btns)
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(6)
+        v.addWidget(self.progress)
+        self.status = QtWidgets.QLabel()
+        self.status.setWordWrap(True)
+        v.addWidget(self.status)
+
+        self.btn_edit.clicked.connect(lambda: main.tabs.show_tab("stim"))
+        self.btn_run.clicked.connect(self._run)
+        self.btn_stop.clicked.connect(main.stop_stimulus)
+        main.trials_page.placed.connect(self.redraw)
+        self.timer = QtCore.QTimer(self, interval=300, timeout=self.refresh)
+
+    def _run(self) -> None:
+        tr = self.main.trials_page
+        if tr.varying:
+            if not tr.run_protocol():
+                self.refresh()                  # its summary says what's missing
+        else:
+            self.main.fire_stimulus()
+
+    def redraw(self) -> None:
+        """The small picture: every trial (up to MAX_DRAWN), the first bold."""
+        if not self.isVisible():
+            return
+        main = self.main
+        s = stimmod.to_segments(main.stimulus)
+        n = main.stimulus_page.n_trials.value() if hasattr(main, "stimulus_page") else 1
+        waves = []
+        for t in list(range(1, min(n, self.MAX_DRAWN))) + [0]:
+            try:
+                waves.append(s.at_trial(t).waveform(main.cfg.stim_rate))
+            except (ValueError, OSError):
+                pass
+        self.picture.set_data(waves, [], [], -1, [], main.cfg.stim_rate, "V", 1.0)
+        self.refresh()
+
+    def refresh(self) -> None:
+        main, tr = self.main, self.main.trials_page
+        t = style.tokens(self._mode)
+        running = tr.running
+        busy = main.stim_out is not None and main.stim_out.busy
+        backend = getattr(main, "backend", None)
+        live = backend is not None and backend.running
+        if tr.varying and tr.chk is not None:
+            c = tr.chk
+            what = (f"{tr.protocol.name}: {c.n_trials} stimuli" if c.ok else
+                    (c.errors[0] if c.errors else "Not ready"))
+        else:
+            what = main.describe_stimuli()
+        self.what.setText(what if len(what) < 140 else what[:137] + "…")
+        if running:
+            n = min(tr.next_i, len(tr.trials))
+            self.progress.setMaximum(max(1, len(tr.trials)))
+            self.progress.setValue(n)
+            state, ok = f"Stimulus {n} of {len(tr.trials)}" + (" · paused" if tr.paused else ""), True
+        elif not live:
+            state, ok = "Press Start first.", False
+        elif tr.varying and tr.chk is not None and not tr.chk.ok:
+            state, ok = "Fix it on Complex Stimulus (edit…).", False
+        elif tr.varying and not main.cfg.stim_monitor:
+            state, ok = "Record the stimulus first (Complex Stimulus › Output).", False
+        else:
+            state, ok = "Ready", True
+        self.progress.setVisible(running)
+        self.status.setText(state)
+        self.status.setStyleSheet(f"color: {t['subtle'] if ok else t['error']}")
+        self.lamp.setText(f"<span style='color:{'#1e8e3e' if ok else t['error']}'>●</span>")
+        self.btn_run.setText("Run" if tr.varying else "Send")
+        self.btn_run.setEnabled(ok and not running and not busy)
+        self.btn_stop.setEnabled(running or busy or main.repeating)
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self.redraw()
+        self.timer.start()
+
+    def hideEvent(self, ev):
+        super().hideEvent(ev)
+        self.timer.stop()
+
+    def apply_theme(self, mode: str) -> None:
+        self._mode = mode
+        t = style.tokens(mode)
+        self.setStyleSheet(f"QFrame#dockStim {{ background: {t['ground']}; border-top: 1px solid {t['line']}; }}"
+                           f"QPushButton {{ padding: 3px 6px; }}")
+        self.btn_edit.setStyleSheet(f"QPushButton {{ color: {t['focus']}; background: transparent; border: none;"
+                                    f" padding: 0 2px; }}")
+        self.what.setStyleSheet(f"color: {t['muted']}")
+        self.picture.apply_theme(mode)
+        self.redraw()

@@ -654,7 +654,7 @@ class LiveMixin:
         if self.recorder.recording:
             return
         on = self.btn_rec.isChecked()
-        self.btn_rec.setText("Record: On" if on else "Record")
+        self.btn_rec.setText("Record: On" if on else "Record: Off")
         if not on:
             self.btn_rec.setToolTip("Turn on to record: now while acquiring, or as soon as you press Start")
         elif self.btn_run.isChecked():
@@ -719,47 +719,10 @@ class LiveMixin:
         self._fit_toolbar()
 
     def _fit_toolbar(self) -> None:
-        """Keep every control on the toolbar when the window is narrow (or the
-        system font is wide, as on macOS): first drop the "Sampling rate" label,
-        then "Window", then shorten "Stop recording · 0:12" to "0:12". Each comes
-        back as soon as there's room. Otherwise Qt hides whatever doesn't fit in
-        a » menu, which on a laptop was the light/dark and split buttons."""
-        tb = getattr(self, "toolbar", None)
-        if tb is None or not tb.isVisible():    # unshown: its width means nothing yet;
-            return                              # showing it sends a resizeEvent
-        lay = tb.layout()
-        labels = [(self._act_lbl_rate, self.lbl_rate), (self._act_lbl_window, self.lbl_window)]
-        label_acts = {act for act, _ in labels}
-        others = [tb.widgetForAction(a) for a in tb.actions() if a.isVisible() and a not in label_acts]
-        others = [w for w in others if w is not None]
-        wanted = [(act, lbl) for act, lbl in labels if self._label_wanted(act)]
-        n = len(others) + len(wanted)
-        m, lm = tb.contentsMargins(), lay.contentsMargins()
-        # Width with every wanted label shown and the full Record text.
-        full = (sum(w.sizeHint().width() for w in others) + sum(lbl.sizeHint().width() for _, lbl in wanted)
-                + lay.spacing() * max(0, n - 1) + m.left() + m.right() + lm.left() + lm.right() + 12)
-        recording = self.recorder.recording
-        fm = self.btn_rec.fontMetrics()
-        rec_saving = fm.horizontalAdvance("Stop recording · ") if recording else 0
-        if self._short_rec:
-            full += rec_saving                  # the button is short right now
-        over = full - tb.width()
-        for act, lbl in wanted:                 # least important first
-            show = over <= 0
-            if not show:
-                over -= lbl.sizeHint().width() + lay.spacing()
-            act.setVisible(show)
-        short = recording and over > 0
-        if short != self._short_rec:
-            self._short_rec = short
-            if recording:
-                self._set_rec_text(self.recorder.samples_written / max(self.backend.actual_rate, 1e-9))
+        """Record's text is always the full "Stop recording · 0:12": it's on the run bar
+        under the channels now, with room to spare."""
+        self._short_rec = False
 
-    def _label_wanted(self, act) -> bool:
-        """Whether this label's group is showing at all (live mode; Acquisition visible)."""
-        if act is self._act_lbl_rate:
-            return self.mode == LIVE
-        return hasattr(self, "tabs") and self.tabs.is_visible("acq")
 
 
     def _lock_channels(self, locked: bool):

@@ -33,7 +33,7 @@ TOKENS = {
 }
 START = "#1a5fd0"
 RECORDING = "#c62828"
-RECORD = "#b42318"
+RECORD = "#1a1a1a"
 
 _applied = {"mode": None}     # set once the style is in use (by run(), not by tests)
 
@@ -89,7 +89,7 @@ QPushButton#start {{ background: {START}; }}
 QPushButton#start:hover {{ background: #1752b5; }}
 QPushButton#start:checked {{ background: {START}; }}
 QPushButton#record {{ background: {RECORD}; }}
-QPushButton#record:hover {{ background: #9e1f15; }}
+QPushButton#record:hover {{ background: #333333; }}
 QPushButton#record:checked {{ background: {RECORDING}; }}
 QPushButton#start:disabled, QPushButton#record:disabled {{ background: {t['disabled']}; color: {t['disabled_ink']}; }}
 

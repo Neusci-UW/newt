@@ -5,7 +5,7 @@ numbers, press Stimulate. It can also send every few seconds and raise the ampli
 a fixed amount after each stimulus (threshold and recruitment labs), and remembers named
 presets. There are no protocol plans or response charts: students watch the Record page.
 
-It keeps its own stimulus, separate from Stimulus Design's, and sends it through the
+It keeps its own stimulus, separate from Complex Stimulus's, and sends it through the
 main window's send_wave, so each stimulus is still a comment and saved with the block.
 """
 from __future__ import annotations
@@ -17,23 +17,25 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
 from .mainparts import LIVE
-from .stim import Stimulus
+from dataclasses import replace
+
+from .stim import Stimulus, to_segments
 
 MODES = (("single", "Single pulse"), ("pair", "Pulse pair"), ("train", "Train"),
          ("sine", "Sine wave"), ("triangle", "Triangle wave"))
 WAVES = ("sine", "triangle")
-FIELDS = {"single": ("level", "width"), "pair": ("level", "width", "interval"),
-          "train": ("level", "width", "rate", "count"), "sine": ("level", "freq", "dur"),
-          "triangle": ("level", "freq", "dur")}
+FIELDS = {"single": ("level", "width", "offset"), "pair": ("level", "width", "interval", "offset"),
+          "train": ("level", "width", "rate", "count", "offset"), "sine": ("level", "freq", "dur", "offset"),
+          "triangle": ("level", "freq", "dur", "offset")}
 MARKED = {"single": ("level", "width"), "pair": ("level", "interval"), "train": ("level", "rate", "count"),
           "sine": ("level", "freq", "dur"), "triangle": ("level", "freq", "dur")}
 NAMES = {"level": "Amplitude", "width": "Width", "interval": "Interval", "rate": "Rate", "count": "Pulses",
-         "freq": "Frequency", "dur": "Duration"}
+         "freq": "Frequency", "dur": "Duration", "offset": "Offset"}
 MAX_CYCLES = 500               # a triangle wave is made of ramps: 3 per cycle
 DELAY_MS = 2.0                 # 0 V before the first pulse, so the recorded stimulus has a clear start
 DIM = {style.LIGHT: "#d9822b", style.DARK: "#f0a35a"}
 DEFAULTS = dict(mode="single", level=2.0, width=0.2, interval=20.0, rate=20.0, count=5,
-                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0)
+                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0, offset=0.0)
 
 
 class _Spin(QtWidgets.QDoubleSpinBox):
@@ -272,6 +274,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.rate = _spin(0.01, 5000, 2, "Hz", "Pulses per second in the train")
         self.freq = _spin(0.01, 2500, 2, "Hz", "Cycles per second")
         self.dur = _spin(1, 600000, 1, "ms", "How long the wave lasts")
+        self.offset = _spin(-100000, 100000, 3, units, "A steady level the whole stimulus sits on (0 = none)")
         self.count = QtWidgets.QSpinBox(minimum=2, maximum=1000)
         self.count.setKeyboardTracking(False)
         self.count.setMinimumWidth(110)
@@ -284,12 +287,12 @@ class SimpleStimPage(QtWidgets.QWidget):
         for col, (key, name, w) in enumerate((("level", "Amplitude", self.level), ("width", "Width", self.width),
                                                ("interval", "Interval", self.interval), ("rate", "Rate", self.rate),
                                                ("count", "Pulses", self.count), ("freq", "Frequency", self.freq),
-                                               ("dur", "Duration", self.dur))):
+                                               ("dur", "Duration", self.dur), ("offset", "Offset", self.offset))):
             lab = QtWidgets.QLabel(name)
             self.field_labels[key] = lab
             grid.addWidget(lab, 0, col)
             grid.addWidget(w, 1, col)
-        grid.setColumnStretch(7, 1)
+        grid.setColumnStretch(8, 1)
         lv.addLayout(grid)
 
         send = QtWidgets.QHBoxLayout()
@@ -390,7 +393,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         self._fill_presets()
         self.mode_group.buttonClicked.connect(lambda *_: self._changed())
         for w in (self.level, self.width, self.interval, self.rate, self.every, self.ramp_by, self.ramp_to,
-                  self.freq, self.dur):
+                  self.freq, self.dur, self.offset):
             w.valueChanged.connect(self._changed)
         self.count.valueChanged.connect(self._changed)
         self.ramp.toggled.connect(self._changed)
@@ -420,12 +423,13 @@ class SimpleStimPage(QtWidgets.QWidget):
         return dict(mode=self.mode(), level=self.level.value(), width=self.width.value(),
                     interval=self.interval.value(), rate=self.rate.value(), count=self.count.value(),
                     every=self.every.value(), ramp=self.ramp.isChecked(), ramp_by=self.ramp_by.value(),
-                    ramp_to=self.ramp_to.value(), freq=self.freq.value(), dur=self.dur.value())
+                    ramp_to=self.ramp_to.value(), freq=self.freq.value(), dur=self.dur.value(),
+                    offset=self.offset.value())
 
     def _set_values(self, d: dict) -> None:
         d = {**DEFAULTS, **d}
         widgets = (self.level, self.width, self.interval, self.rate, self.count, self.every,
-                   self.ramp_by, self.ramp_to, self.ramp, self.freq, self.dur)
+                   self.ramp_by, self.ramp_to, self.ramp, self.freq, self.dur, self.offset)
         for w in widgets:
             w.blockSignals(True)
         self.mode_buttons.get(d["mode"], self.mode_buttons["single"]).setChecked(True)
@@ -440,6 +444,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.ramp_to.setValue(float(d["ramp_to"]))
         self.freq.setValue(float(d["freq"]))
         self.dur.setValue(float(d["dur"]))
+        self.offset.setValue(float(d["offset"]))
         for w in widgets:
             w.blockSignals(False)
 
@@ -448,7 +453,14 @@ class SimpleStimPage(QtWidgets.QWidget):
 
     # -- the stimulus ----------------------------------------------------------------------
     def stimulus(self) -> Stimulus:
-        """What Stimulate sends: a pulse, two, or a train, in volts at the output."""
+        """What Stimulate sends, in volts at the output, on its offset (from the first
+        sample to the last; the output goes back to 0 V after)."""
+        s = to_segments(self._shape())
+        off = self.offset.value() / (self.main.cfg.stim_scale or 1.0)
+        return replace(s, parts=[{**p, "offset": off} for p in s.parts]) if off else s
+
+    def _shape(self) -> Stimulus:
+        """A pulse, two, a train, or a wave, before the offset."""
         cfg, mode = self.main.cfg, self.mode()
         scale = cfg.stim_scale or 1.0
         amp, freq, dur = self.level.value() / scale, self.freq.value(), self.dur.value()
@@ -463,20 +475,21 @@ class SimpleStimPage(QtWidgets.QWidget):
 
     def describe(self) -> str:
         units, mode = self.main.cfg.stim_units or "V", self.mode()
+        off = f" · offset {self.offset.value():g} {units}" if self.offset.value() else ""
         if mode in WAVES:
             return (f"{'Sine' if mode == 'sine' else 'Triangle'} {self.level.value():g} {units} · "
-                    f"{self.freq.value():g} Hz · {self.dur.value():g} ms")
+                    f"{self.freq.value():g} Hz · {self.dur.value():g} ms" + off)
         s = f"{self.level.value():g} {units} · {self.width.value():g} ms"
         if mode == "pair":
             s += f" · pair {self.interval.value():g} ms apart"
         elif mode == "train":
             s += f" · {self.count.value()} at {self.rate.value():g} Hz"
-        return s
+        return s + off
 
     def _changed(self, *_):
         mode = self.mode()
         widgets = {"level": self.level, "width": self.width, "interval": self.interval, "rate": self.rate,
-                   "count": self.count, "freq": self.freq, "dur": self.dur}
+                   "count": self.count, "freq": self.freq, "dur": self.dur, "offset": self.offset}
         for key, w in widgets.items():
             w.setVisible(key in FIELDS[mode])
             self.field_labels[key].setVisible(key in FIELDS[mode])
@@ -512,7 +525,7 @@ class SimpleStimPage(QtWidgets.QWidget):
     def fire(self) -> bool:
         main = self.main
         if main.trials_page.running:
-            self.show_message("A protocol is running on Stimulus Design; stop it first.", error=True)
+            self.show_message("A protocol is running on Complex Stimulus; stop it first.", error=True)
             return False
         if main.repeating:
             main.set_repeat(False)
@@ -642,7 +655,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         if main.stim_out is None:
             state, ok = "No stimulator: it needs the nidaqmx (or simulated) backend.", False
         elif protocol:
-            state, ok = "A protocol is running on Stimulus Design.", False
+            state, ok = "A protocol is running on Complex Stimulus.", False
         elif not live:
             state, ok = "Press Start on the Record page first.", False
         elif self.repeating:
@@ -664,7 +677,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         mon = next((c for c in cfg.channels if c.physical == cfg.stim_monitor), None) if cfg.stim_monitor else None
         where = f"recorded on {mon.name}" if mon is not None else "not recorded"
         self.output_note.setText(f"Output {cfg.stim_output}, {where}, limit ±{cfg.stim_max_v:g} V · "
-                                 f"<a href='#' style='color:{t['focus']}'>change on Stimulus Design</a>")
+                                 f"<a href='#' style='color:{t['focus']}'>change on Complex Stimulus</a>")
 
     def showEvent(self, ev):
         super().showEvent(ev)

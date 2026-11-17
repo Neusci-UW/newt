@@ -65,9 +65,17 @@ class _Pane(QtWidgets.QWidget):
         self.sub_head.hide()
         lay.addWidget(self.sub_head)
         self._sub_ids: list[str] = []
-        self.body = QtWidgets.QVBoxLayout()
+        # The page, in a scroll area: when the window is smaller than the page needs, the
+        # page scrolls instead of holding the window bigger than the screen.
+        self.body_box = QtWidgets.QWidget()
+        self.body = QtWidgets.QVBoxLayout(self.body_box)
         self.body.setContentsMargins(0, 0, 0, 0)
-        lay.addLayout(self.body, 1)
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidget(self.body_box)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.scroll.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Ignored)
+        lay.addWidget(self.scroll, 1)
         self.page_id: str | None = None
 
     def _sub_clicked(self, k: int) -> None:
@@ -94,7 +102,7 @@ class _Pane(QtWidgets.QWidget):
 
     def show_page(self, pid: str, widget: QtWidgets.QWidget):
         self._set_heads(pid)
-        if self.page_id == pid and widget.parent() is self:
+        if self.page_id == pid and widget.parent() is self.body_box:
             return
         while self.body.count():
             w = self.body.takeAt(0).widget()

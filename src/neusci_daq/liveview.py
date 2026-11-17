@@ -813,7 +813,10 @@ class LiveMixin:
             self.backend.start()
         except Exception as e:
             self.btn_run.setChecked(False)
-            QtWidgets.QMessageBox.critical(self, "Could not start acquisition", repr(e))
+            if getattr(self, "_quiet_start", False):    # switching input devices: it says so itself
+                self._start_error = e
+            else:
+                QtWidgets.QMessageBox.critical(self, "Could not start acquisition", repr(e))
             return False
         rate = float(self.backend.actual_rate)
         same = (len(self.ring) and self.ring.n == len(self.cfg.channels)

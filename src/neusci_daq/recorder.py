@@ -79,6 +79,12 @@ class Recorder:
     def recording(self) -> bool:
         return self._file is not None
 
+    def rebind(self, backend: Backend) -> None:
+        """Record from another backend (the input device changed). Not while recording."""
+        self.backend.unsubscribe(self._q)
+        backend.subscribe(self._q)              # the same queue: the writer thread keeps reading it
+        self.backend, self.cfg = backend, backend.cfg
+
     def start(self, path: str | Path | None = None) -> Path:
         cfg = self.cfg
         if path is None:

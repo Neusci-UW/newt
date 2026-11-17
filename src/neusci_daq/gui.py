@@ -42,7 +42,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import config as cfgmod
 from . import simulation as sim
 from . import style, theme
-from .backends import Backend, make_backend
+from .backends import Backend, make_backend, preload_daq
 from .channels import ChannelRow, ChannelStrip, ColorButton
 from .comments import CommentsPanel
 from .config import Config
@@ -92,6 +92,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.settings = settings or QtCore.QSettings("neusci", "neusci-daq-visualizer")
         self.store = TrialStore()    # recorded blocks, read once for review, Blocks and Analysis
         self._axis_group = AxisGroup()   # the plots' left axes, one width, so the plots line up
+        preload_daq()            # the NI driver loads in the background, ready for a switch to it
         self.backend: Backend = make_backend(cfg)
         self.display_q: queue.Queue = self.backend.subscribe()
         self.recorder = Recorder(self.backend)
@@ -454,18 +455,9 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         sim_box = QtWidgets.QWidget()
         sb = QtWidgets.QVBoxLayout(sim_box)
         sb.setContentsMargins(8, 8, 8, 6)
-        if self.cfg.backend != "simulated":
-            self.btn_input_mode = QtWidgets.QPushButton("Switch to Simulated cells")
-            self.btn_input_mode.setToolTip(
-                "Reopen NEWT on the simulated input device, which records the Neural network and Breadboard "
-                "simulators (stop recording first). Your channel setup is remembered.")
-            self.btn_input_mode.clicked.connect(lambda: self.switch_input("simulated"))
-        else:
-            self.btn_input_mode = QtWidgets.QPushButton("Switch to live recording mode")
-            self.btn_input_mode.setToolTip(
-                "Reopen NEWT on the real input device used before Simulated cells (stop recording first), "
-                "with its channel setup")
-            self.btn_input_mode.clicked.connect(self.switch_to_live)
+        self.btn_input_mode = QtWidgets.QPushButton()
+        self.btn_input_mode.clicked.connect(self._input_mode_clicked)
+        self._show_input_mode()
         sb.addWidget(self.btn_input_mode)
         self.left_column.addWidget(sim_box)
         self.left_column.addWidget(self.blocks_panel, 1)

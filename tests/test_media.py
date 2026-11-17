@@ -180,18 +180,15 @@ def test_listen_live_and_play_back_in_review(app, win, sd):
 
 
 def test_switching_to_an_audio_input_and_back(app, win, sd):
-    from neusci_daq import gui
-    assert win.switch_input("audio", "Fake Interface")
-    new = gui._WINDOWS[-1]
-    try:
-        assert new.cfg.backend == "audio" and [c.physical for c in new.cfg.channels] == ["in1", "in2"]
-        assert type(new.backend).__name__ == "AudioBackend"
-        assert new.switch_input("simulated")
-        back = gui._WINDOWS[-1]
-        assert back.cfg.backend == "simulated" and [c.name for c in back.cfg.channels] == ["Ch1", "Ch2"]
-        back.close()
-    finally:
-        new.close()
+    assert win.switch_input("audio", "Fake Interface")              # in this window: no new one
+    assert win.cfg.backend == "audio" and [c.physical for c in win.cfg.channels] == ["in1", "in2"]
+    assert type(win.backend).__name__ == "AudioBackend" and win.recorder.backend is win.backend
+    assert win.stim_out is None and not win.sim_page.sim_banner.isHidden()
+    sim = win._sim_backend
+    assert win.switch_input("simulated")
+    assert win.cfg.backend == "simulated" and [c.name for c in win.cfg.channels] == ["Ch1", "Ch2"]
+    assert win.backend is sim and win.stim_out is not None          # the same cells, carrying on
+    assert win.sim_page.sim_banner.isHidden() and win.btn_input_mode.text() == "Switch to live recording mode"
 
 
 # ---------------------------------------------------------------- video

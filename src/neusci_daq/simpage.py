@@ -546,14 +546,21 @@ class SimOffBanner(QtWidgets.QFrame):
 
 
 def with_banner(main, page: QtWidgets.QWidget) -> QtWidgets.QWidget:
-    """`page`, with a SimOffBanner above it unless the simulated backend records."""
-    if main.cfg.backend == "simulated":
-        return page
+    """`page`, with a SimOffBanner above it, shown while a real input device records."""
     box = QtWidgets.QWidget()
     v = QtWidgets.QVBoxLayout(box)
-    v.setContentsMargins(0, 8, 0, 0)
     v.setSpacing(4)
     page.sim_banner = SimOffBanner(main)
     v.addWidget(page.sim_banner)
     v.addWidget(page, 1)
+    show_banner(page, main.cfg.backend != "simulated")
     return box
+
+
+def show_banner(page: QtWidgets.QWidget, on: bool) -> None:
+    """Show or hide `page`'s SimOffBanner (see with_banner) as the input device changes."""
+    banner = getattr(page, "sim_banner", None)
+    if banner is None:
+        return
+    banner.setVisible(on)
+    banner.parentWidget().layout().setContentsMargins(0, 8 if on else 0, 0, 0)

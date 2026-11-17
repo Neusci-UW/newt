@@ -36,8 +36,10 @@ class Backend:
         self._thread: threading.Thread | None = None
 
     # -- public API -------------------------------------------------------
-    def subscribe(self) -> queue.Queue:
-        q: queue.Queue = queue.Queue()
+    def subscribe(self, q: queue.Queue | None = None) -> queue.Queue:
+        """A queue that gets every chunk: a new one, or `q` (moving it over from another
+        backend when the input device changes)."""
+        q = queue.Queue() if q is None else q
         self._subs = self._subs + [q]       # replaced, not changed, so _publish never sees it mid-change
         return q
 
@@ -95,14 +97,21 @@ class SimulatedBackend(Backend):
     running apply from the next chunk."""
 
     _pending = None    # (monitor input, waveform at the input rate, sample fired at) from SimulatedOutput
+    # Kept from run to run (Stop then Start, or a real input device and back), so the cells
+    # carry on where they were instead of settling from rest again.
+    _rng = None
+    _net = None        # NetworkState, made on the first chunk
+    _net_cfg = None    # the settings it was made from
+    _board = None      # breadboard.BoardState, made when a probe first records
+    _board_cfg = None
 
     def _setup(self):
-        self._rng = np.random.default_rng(0)
+        if self._rng is None:
+            self._rng = np.random.default_rng(0)
+        if self._net is not None:
+            self._net.stim = []       # a stimulus from the last run doesn't carry on
+        self._pending = None
         self._stim = None             # (monitor input, waveform, position) being played
-        self._net = None              # NetworkState, made on the first chunk
-        self._net_cfg = None          # the settings it was made from
-        self._board = None            # breadboard.BoardState, made when a probe first records
-        self._board_cfg = None
         self._tail: dict[str, np.ndarray] = {}    # per input: spike samples past the last chunk
         self._spike_log: list[tuple[float, int]] = []   # (time s, cell) of recent spikes
         self._time = 0.0
@@ -360,6 +369,41 @@ class MultiChannelIOBackend(Backend):
 
 BACKENDS = {"nidaqmx": NidaqmxBackend, "multichannelio": MultiChannelIOBackend,
             "simulated": SimulatedBackend}
+
+
+_DAQ = {"started": False, "done": threading.Event(), "error": ""}
+
+
+def preload_daq() -> None:
+    """Load the NI-DAQmx driver in the background, once, so the first switch to the NI DAQ
+    doesn't wait for it (and daq_devices can answer without blocking)."""
+    if _DAQ["started"]:
+        return
+    _DAQ["started"] = True
+
+    def run():
+        try:
+            import nidaqmx.system
+            nidaqmx.system.System.local().devices.device_names
+        except Exception as e:
+            _DAQ["error"] = str(e) or type(e).__name__
+        finally:
+            _DAQ["done"].set()
+    threading.Thread(target=run, daemon=True, name="daq-preload").start()
+
+
+def daq_devices() -> list[str] | None:
+    """The NI DAQs plugged in now, [] if none (or no driver), None while the driver is still
+    loading. Quick once it has loaded."""
+    if not _DAQ["done"].is_set():
+        return None
+    if _DAQ["error"]:
+        return []
+    try:
+        import nidaqmx.system
+        return list(nidaqmx.system.System.local().devices.device_names)
+    except Exception:
+        return []
 
 
 def make_backend(cfg: Config) -> Backend:

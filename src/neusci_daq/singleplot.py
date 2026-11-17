@@ -290,58 +290,156 @@ class SinglePlotPage(QtWidgets.QWidget):
         f.addRow("Y label", self.t_y)
         f.addRow("Y from", _row(self.y0, QtWidgets.QLabel("to"), self.y1, self.ylog))
         sl.addLayout(f)
-        # look
+        # look: whole looks at once, then a section for each part (each folds away; one ticked
+        # 🔗 is the same on every figure of the Plot Canvas)
         sl.addWidget(_head("Look"))
-        g = QtWidgets.QFormLayout()
-        self.font = QtWidgets.QDoubleSpinBox(decimals=1, minimum=5, maximum=96, singleStep=0.5, suffix=" pt")
-        self.lw = QtWidgets.QDoubleSpinBox(decimals=2, minimum=0.1, maximum=24, singleStep=0.1, suffix=" pt")
-        self.lw.setToolTip("How thick the lines print (on the Canvas: a plain line's width; lines drawn "
-                           "thicker keep their ratio to it)")
-        self.ms = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0.5, maximum=60, singleStep=0.5, suffix=" pt")
-        self.legend = QtWidgets.QComboBox()
-        self.legend.addItems(F.LEGENDS)
-        self.despine = QtWidgets.QCheckBox("Open box (no top and right lines)")
-        self.grid = QtWidgets.QCheckBox("Grid lines")
+        pre = QtWidgets.QHBoxLayout()
+        pre.setSpacing(4)
+        for name in F.PRESETS:
+            b = QtWidgets.QPushButton(name)
+            b.setToolTip(f"{name}: its text, lines, points, ticks and size, all at once")
+            b.clicked.connect(lambda _=False, n=name: self._apply_look(F.PRESETS[n]))
+            pre.addWidget(b)
+        sl.addLayout(pre)
+        cp = QtWidgets.QHBoxLayout()
+        cp.setSpacing(4)
+        self.btn_copy_look = QtWidgets.QPushButton("Copy look")
+        self.btn_copy_look.setToolTip("Keep this figure's look (not its size) to paste on another")
+        self.btn_paste_look = QtWidgets.QPushButton("Paste look")
+        self.btn_paste_look.setToolTip("Give this figure the look you copied; its size stays")
+        self.btn_paste_look.setEnabled(False)
+        self.btn_every = QtWidgets.QPushButton("Apply to every figure")
+        self.btn_every.setToolTip("Give every figure on the Plot Canvas this look (each keeps its size)")
+        for b in (self.btn_copy_look, self.btn_paste_look, self.btn_every):
+            cp.addWidget(b)
+        sl.addLayout(cp)
+        self._copied_look: dict | None = None
+        self.btn_copy_look.clicked.connect(self._copy_look)
+        self.btn_paste_look.clicked.connect(lambda: self._copied_look and self._apply_look(self._copied_look))
+        self.btn_every.clicked.connect(self._look_to_every)
+
+        def spin(lo, hi, step, decimals=1, unit=" pt", auto=False, tip=""):
+            w = QtWidgets.QDoubleSpinBox(decimals=decimals, minimum=lo, maximum=hi, singleStep=step, suffix=unit)
+            if auto:
+                w.setSpecialValueText("Auto")
+            w.setToolTip(tip)
+            return w
+
+        def combo(items, tip=""):
+            w = QtWidgets.QComboBox()
+            for label, key in items:
+                w.addItem(label, key)
+            w.setToolTip(tip)
+            return w
+        self.family = combo([(f, f) for f in F.FAMILIES], "The figure's typeface (every label, number and title)")
+        self.font = spin(5, 96, 0.5, tip="The axis labels' size (and, on Auto, the others follow it)")
+        self.font_ticks = spin(0, 96, 0.5, auto=True, tip="The numbers along the axes; Auto: a little smaller "
+                                                          "than the labels")
+        self.font_title = spin(0, 120, 0.5, auto=True, tip="The title; Auto: a little bigger than the labels")
+        self.font_legend = spin(0, 72, 0.5, auto=True, tip="The legend; Auto: a little smaller than the labels")
+        self.bold = combo([("None", "none"), ("Title", "title"), ("Labels and title", "labels")], "What's bold")
+        self.lw = spin(0.1, 24, 0.1, decimals=2, tip="How thick the lines print (on the Canvas: a plain line's "
+                                                     "width; lines drawn thicker keep their ratio to it)")
+        self.axw = spin(0.1, 6, 0.05, decimals=2, tip="How thick the axis lines and tick marks print")
+        self.ms = spin(0.5, 60, 0.5, tip="How big the points are")
+        self.marker = combo([("● Filled circle", "circle"), ("○ Open circle", "open"), ("■ Square", "square"),
+                             ("▲ Triangle", "triangle"), ("◆ Diamond", "diamond"), ("None", "none")],
+                            "The points' shape")
+        self.cap = spin(0, 20, 0.5, auto=True, tip="How wide the ends of the error bars are; Auto: from the "
+                                                   "points' size")
+        self.err_style = combo([("Bars", "bars"), ("Shaded band", "band"), ("None", "none")],
+                               "How the spread (± SEM or ± SD, set for each series) is drawn")
+        self.box = combo([("Open (no top or right line)", "open"), ("Closed", "closed"), ("None (ticks only)", "none")],
+                         "The lines around the plot")
+        self.ticks = combo([("Outside", "out"), ("Inside", "in"), ("Across", "inout")],
+                           "Which way the tick marks point from the axis")
+        self.tick_len = spin(0, 40, 0.5, tip="How long the tick marks are (0: none)")
+        self.nticks = QtWidgets.QSpinBox(minimum=0, maximum=12)
+        self.nticks.setSpecialValueText("Auto")
+        self.nticks.setToolTip("About how many numbers along each axis; Auto: as many as fit")
+        self.grid = combo([("None", "none"), ("Across (y only)", "y"), ("Both ways", "xy")], "Grid lines")
         self.zero = QtWidgets.QCheckBox("Lines at zero")
         self.points = QtWidgets.QCheckBox("Each trial's point on the bars")
+        self.palette = combo([("The groups' own", ""), ("Colorblind-safe", "safe"), ("Grays", "gray"),
+                              ("Viridis", "viridis"), ("Bold", "bold")],
+                             "The series' colors, unless you gave one its own (Series, above)")
+        self.legend = QtWidgets.QComboBox()
+        self.legend.addItems(F.LEGENDS)
+        self.legend_frame = QtWidgets.QCheckBox("Box around it")
         self.fit = QtWidgets.QComboBox()
         for k, lab in F.FITS.items():
             self.fit.addItem(lab, k)
-        self.w_mm = QtWidgets.QDoubleSpinBox(decimals=0, minimum=20, maximum=400, suffix=" mm")
-        self.h_mm = QtWidgets.QDoubleSpinBox(decimals=0, minimum=20, maximum=400, suffix=" mm")
-        self.font.setToolTip("The axis labels' size (and, on Auto, the others follow it)")
-        self.font_ticks = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0, maximum=96, singleStep=0.5, suffix=" pt")
-        self.font_ticks.setSpecialValueText("Auto")
-        self.font_ticks.setToolTip("The numbers along the axes; Auto: a little smaller than the labels")
-        self.font_title = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0, maximum=120, singleStep=0.5, suffix=" pt")
-        self.font_title.setSpecialValueText("Auto")
-        self.font_title.setToolTip("The title; Auto: a little bigger than the labels")
-        self.ticks = QtWidgets.QComboBox()
-        for lab, key in (("Outside", "out"), ("Inside", "in"), ("Across", "inout")):
-            self.ticks.addItem(lab, key)
-        self.ticks.setToolTip("Which way the tick marks point from the axis")
-        self.tick_len = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0, maximum=40, singleStep=0.5, suffix=" pt")
-        self.tick_len.setToolTip("How long the tick marks are (0: none)")
-        g.addRow("Labels", with_slider(self.font))
-        g.addRow("Numbers", with_slider(self.font_ticks))
-        g.addRow("Title", with_slider(self.font_title))
-        g.addRow("Ticks", self.ticks)
-        g.addRow("Tick length", with_slider(self.tick_len))
-        g.addRow("Lines", with_slider(self.lw))
-        g.addRow("Points", with_slider(self.ms))
-        g.addRow("Legend", self.legend)
-        g.addRow(self.despine)
-        g.addRow(self.grid)
-        g.addRow(self.zero)
-        g.addRow(self.points)
         self.shape = QtWidgets.QComboBox()
-        for lab, a in SHAPES:
-            self.shape.addItem(lab, a)
+        for lab, a_ in SHAPES:
+            self.shape.addItem(lab, a_)
         self.shape.setToolTip("The chart's shape (height to width), on screen and on the Canvas")
-        g.addRow("Shape", self.shape)
-        g.addRow("Width", with_slider(self.w_mm))
-        g.addRow("Height", with_slider(self.h_mm))
-        sl.addLayout(g)
+        self.w_mm = spin(20, 400, 1, decimals=0, unit=" mm")
+        self.h_mm = spin(20, 400, 1, decimals=0, unit=" mm")
+        self.link_boxes: dict[str, QtWidgets.QCheckBox] = {}
+
+        def section(title: str, key: str | None = None, open_: bool = True) -> QtWidgets.QFormLayout:
+            head = QtWidgets.QWidget()
+            h = QtWidgets.QHBoxLayout(head)
+            h.setContentsMargins(0, 6, 0, 0)
+            fold = QtWidgets.QToolButton(text=title, checkable=True, checked=open_)
+            fold.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            fold.setArrowType(QtCore.Qt.ArrowType.DownArrow if open_ else QtCore.Qt.ArrowType.RightArrow)
+            fold.setAutoRaise(True)
+            f_ = fold.font()
+            f_.setBold(True)
+            fold.setFont(f_)
+            h.addWidget(fold)
+            h.addStretch(1)
+            if key:
+                link = QtWidgets.QCheckBox("🔗 every figure")
+                link.setToolTip(f"The same {title.lower()} on every figure of the Plot Canvas: change it on "
+                                "one and the others follow")
+                link.toggled.connect(lambda on, k=key: self._link_toggled(k, on))
+                h.addWidget(link)
+                self.link_boxes[key] = link
+            body = QtWidgets.QWidget()
+            form = QtWidgets.QFormLayout(body)
+            form.setContentsMargins(14, 0, 0, 2)
+            body.setVisible(open_)
+
+            def folded(on, body=body, fold=fold):
+                body.setVisible(on)
+                fold.setArrowType(QtCore.Qt.ArrowType.DownArrow if on else QtCore.Qt.ArrowType.RightArrow)
+            fold.toggled.connect(folded)
+            sl.addWidget(head)
+            sl.addWidget(body)
+            return form
+        t = section("Text", "text")
+        t.addRow("Font", self.family)
+        t.addRow("Labels", with_slider(self.font))
+        t.addRow("Numbers", with_slider(self.font_ticks))
+        t.addRow("Title", with_slider(self.font_title))
+        t.addRow("Legend", with_slider(self.font_legend))
+        t.addRow("Bold", self.bold)
+        ln = section("Lines and points", "lines")
+        ln.addRow("Lines", with_slider(self.lw))
+        ln.addRow("Axis lines", with_slider(self.axw))
+        ln.addRow("Points", with_slider(self.ms))
+        ln.addRow("Point shape", self.marker)
+        ln.addRow("Error caps", with_slider(self.cap))
+        ln.addRow("Error bars", self.err_style)
+        ax_ = section("Axes", "axes")
+        ax_.addRow("Box", self.box)
+        ax_.addRow("Ticks", self.ticks)
+        ax_.addRow("Tick length", with_slider(self.tick_len))
+        ax_.addRow("About ticks", with_slider(self.nticks))
+        ax_.addRow("Grid", self.grid)
+        ax_.addRow(self.zero)
+        ax_.addRow(self.points)
+        co = section("Colors", "colors", open_=False)
+        co.addRow("Palette", self.palette)
+        lg = section("Legend", "legend", open_=False)
+        lg.addRow("Where", self.legend)
+        lg.addRow(self.legend_frame)
+        sz = section("Size", open_=False)
+        sz.addRow("Shape", self.shape)
+        sz.addRow("Width", with_slider(self.w_mm))
+        sz.addRow("Height", with_slider(self.h_mm))
         sl.addStretch(1)
         scroll = scroll_column(self.side)
         # on the right, tabs: the figure's settings, and fitting a curve to it
@@ -356,12 +454,14 @@ class SinglePlotPage(QtWidgets.QWidget):
         for w in (self.t_title, self.t_x, self.t_y, self.x0, self.x1, self.y0, self.y1):
             w.editingFinished.connect(self._edited)
         self.ticks.currentIndexChanged.connect(self._edited)
-        for w in (self.font, self.font_ticks, self.font_title, self.tick_len, self.lw, self.ms, self.w_mm, self.h_mm):
+        for w in (self.font, self.font_ticks, self.font_title, self.font_legend, self.tick_len, self.lw, self.axw,
+                  self.ms, self.cap, self.nticks, self.w_mm, self.h_mm):
             w.valueChanged.connect(self._edited)
-        for w in (self.legend, self.kind, self.shape):
+        for w in (self.legend, self.kind, self.shape, self.family, self.bold, self.marker, self.err_style, self.box,
+                  self.grid, self.palette):
             w.currentIndexChanged.connect(self._edited)
         self.fit.currentIndexChanged.connect(self._fit_edited)
-        for w in (self.xlog, self.ylog, self.despine, self.grid, self.zero, self.points):
+        for w in (self.xlog, self.ylog, self.zero, self.points, self.legend_frame):
             w.toggled.connect(self._edited)
         self.btn_add.clicked.connect(self._add_series)
         self.btn_canvas.clicked.connect(self._to_canvas)
@@ -398,14 +498,7 @@ class SinglePlotPage(QtWidgets.QWidget):
             w.setText("" if v is None else f"{v:g}")
         self.xlog.setChecked(s["xlog"])
         self.ylog.setChecked(s["ylog"])
-        self.font.setValue(s["font"])
-        self.font_ticks.setValue(s.get("font_ticks", 0.0) or 0.0)
-        self.font_title.setValue(s.get("font_title", 0.0) or 0.0)
-        self.ticks.setCurrentIndex(max(0, self.ticks.findData(s.get("ticks", "out"))))
-        self.tick_len.setValue(s.get("tick_len", 3.5))
-        self.lw.setValue(s["lw"])
-        self.ms.setValue(s["ms"])
-        self.legend.setCurrentText(s["legend"])
+        self._show_look({**F.LOOK_DEFAULTS, **s, "box": F._box(s)})
         a = s.get("aspect")
         self.shape.setCurrentIndex(max(0, next((i for i, (_, v) in enumerate(SHAPES)
                                                 if v is not None and a is not None and abs(v - a) < 1e-3),
@@ -425,12 +518,10 @@ class SinglePlotPage(QtWidgets.QWidget):
             b.blockSignals(True)
             b.setChecked(k in (s.get("fit_show") or []))
             b.blockSignals(False)
-        self.despine.setChecked(s["despine"])
-        self.grid.setChecked(s["grid"])
-        self.zero.setChecked(s["zero"])
         self.points.setChecked(s.get("points", True))
         self.w_mm.setValue(s["w_mm"])
         self.h_mm.setValue(s["h_mm"])
+        self._show_links()
         self.h_mm.setEnabled(not live)                 # a live chart's height follows its Shape
         self._fill_series()
         self._shown = self._ui_values()              # what the boxes show now: edits are measured from this
@@ -490,13 +581,77 @@ class SinglePlotPage(QtWidgets.QWidget):
         return dict(title=self.t_title.text(), xlabel=self.t_x.text(),
                     ylabel=self.t_y.text(), xlim=[_opt_float(self.x0.text()), _opt_float(self.x1.text())],
                     ylim=[_opt_float(self.y0.text()), _opt_float(self.y1.text())], xlog=self.xlog.isChecked(),
-                    ylog=self.ylog.isChecked(), font=self.font.value(), font_ticks=self.font_ticks.value(),
-                    font_title=self.font_title.value(), ticks=self.ticks.currentData(), tick_len=self.tick_len.value(),
-                    lw=self.lw.value(), ms=self.ms.value(),
-                    legend=self.legend.currentText(), despine=self.despine.isChecked(),
-                    aspect=self.shape.currentData(),
-                    grid=self.grid.isChecked(), zero=self.zero.isChecked(), points=self.points.isChecked(),
+                    ylog=self.ylog.isChecked(), aspect=self.shape.currentData(), points=self.points.isChecked(),
+                    **self._look_values(),
                     w_mm=self.w_mm.value(), h_mm=self.h_mm.value())
+
+    def _look_values(self) -> dict:
+        """The Look boxes as figure-spec keys."""
+        box, grid = self.box.currentData(), self.grid.currentData()
+        return dict(family=self.family.currentData(), font=self.font.value(), font_ticks=self.font_ticks.value(),
+                    font_title=self.font_title.value(), font_legend=self.font_legend.value(),
+                    bold=self.bold.currentData(), lw=self.lw.value(), axw=self.axw.value(), ms=self.ms.value(),
+                    marker=self.marker.currentData(), cap=self.cap.value(), err_style=self.err_style.currentData(),
+                    box=box, despine=box == "open", ticks=self.ticks.currentData(), tick_len=self.tick_len.value(),
+                    nticks=self.nticks.value(), grid={"none": False, "y": "y", "xy": True}[grid],
+                    zero=self.zero.isChecked(), palette=self.palette.currentData(),
+                    legend=self.legend.currentText(), legend_frame=self.legend_frame.isChecked())
+
+    def _show_look(self, v: dict) -> None:
+        """Put a look in the boxes: a figure's, a preset or a copied look. What it doesn't say stays."""
+        for k, w in (("font", self.font), ("font_ticks", self.font_ticks), ("font_title", self.font_title),
+                     ("font_legend", self.font_legend), ("lw", self.lw), ("axw", self.axw), ("ms", self.ms),
+                     ("cap", self.cap), ("tick_len", self.tick_len), ("nticks", self.nticks), ("w_mm", self.w_mm),
+                     ("h_mm", self.h_mm)):
+            if v.get(k) is not None:
+                w.setValue(int(v[k]) if k == "nticks" else float(v[k]))
+        for k, w in (("family", self.family), ("bold", self.bold), ("marker", self.marker),
+                     ("err_style", self.err_style), ("box", self.box), ("ticks", self.ticks), ("palette", self.palette)):
+            if k in v:
+                w.setCurrentIndex(max(0, w.findData(v[k])))
+        if "grid" in v:
+            g = v["grid"]
+            self.grid.setCurrentIndex(self.grid.findData("y" if g == "y" else "xy" if g else "none"))
+        if "zero" in v:
+            self.zero.setChecked(bool(v["zero"]))
+        if "legend" in v:
+            self.legend.setCurrentText(v["legend"])
+        if "legend_frame" in v:
+            self.legend_frame.setChecked(bool(v["legend_frame"]))
+
+    def _apply_look(self, look: dict) -> None:
+        """A preset, or a copied look, on this figure: one redraw for all of it."""
+        if self.spec is None:
+            return
+        self._loading = True
+        try:
+            self._show_look(look)
+        finally:
+            self._loading = False
+        self._edited()
+
+    def _copy_look(self) -> None:
+        if self.spec is not None:
+            self._copied_look = F.look_of(self._look_values())
+            self.btn_paste_look.setEnabled(True)
+
+    def _look_to_every(self) -> None:
+        """This look (not the size) on every figure of the Plot Canvas."""
+        if self.spec is not None:
+            self.page.plot_canvas.set_look(F.look_of(self._look_values()))
+
+    def _show_links(self) -> None:
+        """Which sections are the same on every Canvas figure."""
+        links = self.page.plot_canvas.links
+        for key, box in self.link_boxes.items():
+            box.blockSignals(True)
+            box.setChecked(bool(links.get(key)))
+            box.blockSignals(False)
+
+    def _link_toggled(self, key: str, on: bool) -> None:
+        """A section made the same on every Canvas figure (from this one), or let go."""
+        look = F.look_of(self._look_values(), (key,)) if self.spec is not None else None
+        self.page.plot_canvas.set_link(key, on, look)
 
     def _live(self) -> bool:
         return self.focus_chart is not None and self.mode.currentIndex() == 1
@@ -553,6 +708,14 @@ class SinglePlotPage(QtWidgets.QWidget):
                 self.chart_box.set_aspect(v)
             elif k in ("font_ticks", "font_title", "ms"):
                 L[k] = v or None
+            elif k == "grid":                     # on screen: on or off; the figure: which way too
+                L["grid"] = bool(v)
+                L.setdefault("fig", {})["grid"] = v
+            elif k == "box":
+                L["despine"] = v == "open"
+                L.setdefault("fig", {})["box"] = v
+            elif k in F.LOOK_DEFAULTS:            # the figure's own: the chart on screen doesn't draw it
+                L.setdefault("fig", {})[k] = v
             elif k in self._LOOK_KEYS:
                 L[k] = list(v) if isinstance(v, list) else v
         if any(k in changed for k in ("title", "xlabel", "ylabel", "xlim", "ylim", "grid", "font", "font_ticks",

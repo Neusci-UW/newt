@@ -4,7 +4,9 @@ saves as PDF/SVG with every line and label its own object.
 
 spec = {"kind": "xy" | "bar", "series": [{"x", "y", "by_group", "style", "average", "color",
 "label"}], "title", "xlabel", "ylabel", "xlim", "ylim", "xlog", "ylog", "font", "lw", "ms",
-"grid", "legend", "despine", "zero", "fit", "w_mm", "h_mm"}
+"grid", "legend", "despine", "zero", "fit", "w_mm", "h_mm"}, and how it looks (LOOK_DEFAULTS, by
+section in SECTIONS; a figure from before they existed draws as it did): "family", "font_legend",
+"bold", "axw", "marker", "cap", "err_style", "box", "nticks", "palette", "legend_frame"
 
 data = {"rows": [trial, …], "groups": [name, …], "colors": {group: "#hex"}, "cols": {name:
 [values]}, "units": {name: unit}}
@@ -25,6 +27,67 @@ PALETTE = ["#1f5fbf", "#d1495b", "#2a9d8f", "#e9a03b", "#6a4c93", "#8a8a8a", "#3
 STYLES = {"markers": "Points", "line": "Line", "both": "Line and points"}
 AVERAGES = {"": "Every trial", "sem": "Mean ± SEM at each x", "sd": "Mean ± SD at each x", "mean": "Mean at each x"}
 LEGENDS = ["best", "upper left", "upper right", "lower left", "lower right", "outside", "off"]
+FAMILIES = ["Arial", "Helvetica", "Times New Roman", "Courier New"]
+MARKERS = {"circle": "o", "square": "s", "triangle": "^", "diamond": "D", "open": "o", "none": None}
+PALETTES = {"": None,                                         # the groups' own colors
+            "safe": ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#000000"],
+            "gray": ["#111111", "#6e6e6e", "#a8a8a8", "#3c3c3c", "#8c8c8c", "#cfcfcf"],
+            "viridis": ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"],
+            "bold": ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"]}
+# how a figure looks, beyond its sizes: what each key is when a figure doesn't say (as before them)
+LOOK_DEFAULTS = {"family": "Arial", "font_legend": 0.0, "bold": "none", "axw": 0.8, "marker": "circle",
+                 "cap": 0.0, "err_style": "bars", "nticks": 0, "palette": "", "legend_frame": False}
+# the look by section, as Single Plot shows it; a section can be the same on every Canvas figure
+SECTIONS = {"text": ("family", "font", "font_ticks", "font_title", "font_legend", "bold"),
+            "lines": ("lw", "axw", "ms", "marker", "cap", "err_style"),
+            "axes": ("box", "despine", "ticks", "tick_len", "nticks", "grid", "zero"),
+            "colors": ("palette",),
+            "legend": ("legend", "legend_frame")}
+# a whole look at once: text and lines in pt, size in mm
+PRESETS = {"Paper": {"font": 8.0, "font_ticks": 7.0, "font_title": 9.0, "font_legend": 7.0, "lw": 0.75, "axw": 0.6,
+                     "ms": 3.5, "cap": 2.0, "tick_len": 3.0, "w_mm": 85.0, "h_mm": 64.0},
+           "Poster": {"font": 18.0, "font_ticks": 16.0, "font_title": 22.0, "font_legend": 16.0, "lw": 2.0,
+                      "axw": 1.5, "ms": 8.0, "cap": 5.0, "tick_len": 6.0, "w_mm": 160.0, "h_mm": 120.0},
+           "Slide": {"font": 14.0, "font_ticks": 12.0, "font_title": 16.0, "font_legend": 12.0, "lw": 1.5, "axw": 1.2,
+                     "ms": 6.0, "cap": 4.0, "tick_len": 5.0, "w_mm": 150.0, "h_mm": 95.0},
+           "Notebook": {"font": 10.0, "font_ticks": 9.0, "font_title": 11.0, "font_legend": 9.0, "lw": 1.0,
+                        "axw": 0.8, "ms": 4.5, "cap": 3.0, "tick_len": 3.5, "w_mm": 120.0, "h_mm": 80.0}}
+
+
+def look_of(spec: dict, sections=tuple(SECTIONS)) -> dict:
+    """The figure's look in these sections (all: everything but its size and what it shows)."""
+    out = {}
+    for sec in sections:
+        for k in SECTIONS[sec]:
+            if k in spec:
+                out[k] = copy.deepcopy(spec[k])
+            elif k in LOOK_DEFAULTS:
+                out[k] = LOOK_DEFAULTS[k]
+    return out
+
+
+def _box(spec: dict) -> str:
+    """"open" (no top or right line), "closed" or "none" (no lines, the ticks stay)."""
+    return spec.get("box") or ("open" if spec.get("despine", True) else "closed")
+
+
+def _marker_kw(spec: dict, color, ms: float, lw: float) -> dict:
+    """matplotlib's marker keywords for the figure's point shape."""
+    shape = spec.get("marker", "circle")
+    kw = {"marker": MARKERS.get(shape, "o"), "markersize": ms, "markeredgewidth": 0}
+    if shape == "open":
+        kw.update(markerfacecolor="white", markeredgecolor=color, markeredgewidth=max(0.5, lw * 0.8))
+    return kw
+
+
+def _series_color(spec: dict, given: str, group_color, k: int) -> str:
+    """A series' color: its own, else the palette's (when one is picked), else its group's."""
+    pal = PALETTES.get(spec.get("palette") or "")
+    if given:
+        return given
+    if pal:
+        return pal[k % len(pal)]
+    return group_color or PALETTE[k % len(PALETTE)]
 FITS = {"": "None", **fitting.MODELS}
 
 
@@ -140,17 +203,23 @@ def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
     font = float(spec.get("font", 9.0))
     ticks_pt = float(spec.get("font_ticks") or font * 0.9)
     title_pt = float(spec.get("font_title") or font * 1.1)
+    legend_pt = float(spec.get("font_legend") or font * 0.85)
     way = spec.get("ticks", "out")                    # tick marks outside, inside or across the axis
+    axw = float(spec.get("axw", LOOK_DEFAULTS["axw"]))
+    bold = spec.get("bold", "none")
+    family = spec.get("family") or LOOK_DEFAULTS["family"]
     with mpl.rc_context({"font.size": font, "axes.labelsize": font, "axes.titlesize": title_pt,
+                         "axes.titleweight": "bold" if bold in ("title", "labels") else "normal",
+                         "axes.labelweight": "bold" if bold == "labels" else "normal",
                          "xtick.labelsize": ticks_pt, "ytick.labelsize": ticks_pt,
                          "xtick.direction": way, "ytick.direction": way,
                          "xtick.major.size": float(spec.get("tick_len", 3.5)),
                          "ytick.major.size": float(spec.get("tick_len", 3.5)),
-                         "xtick.major.width": 0.8 * k, "ytick.major.width": 0.8 * k,
+                         "xtick.major.width": axw, "ytick.major.width": axw,
                          "xtick.major.pad": 3.5 * k, "ytick.major.pad": 3.5 * k, "axes.labelpad": 4.0 * k,
-                         "axes.titlepad": 6.0 * k, "axes.linewidth": 0.8 * k,
-                         "legend.fontsize": font * 0.85,
-                         "font.family": ["Arial", "Liberation Sans", "DejaVu Sans"],   # the chart's face, by name
+                         "axes.titlepad": 6.0 * k, "axes.linewidth": axw,
+                         "legend.fontsize": legend_pt,
+                         "font.family": [family, "Arial", "Liberation Sans", "DejaVu Sans"],   # the face, by name
                          # (a generic "sans-serif" is looked up when drawn, after this context)
                          "mathtext.default": "regular", "svg.fonttype": "none", "pdf.fonttype": 42}):
         if ax is None:
@@ -221,7 +290,7 @@ def _scaled(spec: dict, data: dict) -> tuple[dict, dict, float]:
     if abs(k - 1.0) < 1e-6:
         return spec, data, 1.0
     spec = dict(spec)
-    for key in (("ms",) if spec.get("on_page") else TEXT_KEYS + ("tick_len", "lw", "ms")):
+    for key in (("ms",) if spec.get("on_page") else TEXT_KEYS + ("font_legend", "tick_len", "lw", "ms")):
         if spec.get(key):
             spec[key] = float(spec[key]) * k
     data = dict(data)
@@ -271,23 +340,26 @@ def _draw(ax, spec: dict, data: dict) -> None:
         for s in series:
             x, y = _xy(data, s)
             for gname, m in _groups(data, len(y), s.get("by_group", True)):
-                color = s.get("color") or colors.get(gname) or PALETTE[k % len(PALETTE)]
+                color = _series_color(spec, s.get("color"), colors.get(gname), k)
                 k += 1
                 label = s.get("label") or (gname if gname and len(series) == 1 else
                                            (f"{s['y']} · {gname}" if gname else s["y"]))
                 xs, ys = x[m], y[m]
                 if s.get("average"):
                     xs, ys, es = _average(xs, ys, s["average"])
-                    if s["average"] in ("sem", "sd"):
+                    how = spec.get("err_style", "bars")
+                    if s["average"] in ("sem", "sd") and how == "band":
+                        ax.fill_between(xs, ys - es, ys + es, color=color, alpha=0.2, linewidth=0, zorder=1)
+                    elif s["average"] in ("sem", "sd") and how != "none":
                         ax.errorbar(xs, ys, yerr=es, fmt="none", ecolor=color, elinewidth=lw * 0.8,
-                                    capsize=ms * 0.6)
+                                    capsize=float(spec.get("cap") or ms * 0.6))
                 else:
                     order = np.argsort(xs, kind="stable") if s.get("style") != "markers" else slice(None)
                     xs, ys = xs[order], ys[order]
                 st = s.get("style", "markers")
-                ax.plot(xs, ys, linestyle="-" if st in ("line", "both") else "none",
-                        marker="o" if st in ("markers", "both") else None, markersize=ms, linewidth=lw,
-                        color=color, markeredgewidth=0, label=mathify(label))
+                kw = _marker_kw(spec, color, ms, lw) if st in ("markers", "both") else {"marker": None}
+                ax.plot(xs, ys, linestyle="-" if st in ("line", "both") else "none", linewidth=lw,
+                        color=color, label=mathify(label), **kw)
         if spec.get("xlog"):
             ax.set_xscale("log")
     if spec.get("ylog"):
@@ -318,22 +390,28 @@ def _draw(ax, spec: dict, data: dict) -> None:
             vals = [v for v in data[key] if lo_ - 1e-9 * abs(hi_ - lo_) <= v <= hi_ + 1e-9 * abs(hi_ - lo_)]
             if len(vals) >= 2:
                 axis_.set_ticks(vals)
-    if spec.get("grid"):
-        ax.grid(True, linewidth=0.4, alpha=0.5)
-    if spec.get("despine", True):
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
-    for sp in ax.spines.values():
-        sp.set_linewidth(0.8)
+    if spec.get("nticks"):                                # about this many numbers along each axis
+        from matplotlib.ticker import MaxNLocator
+        for axis_, log in ((ax.xaxis, spec.get("xlog")), (ax.yaxis, spec.get("ylog"))):
+            if not log and not (spec.get("kind") == "bar" and axis_ is ax.xaxis):
+                axis_.set_major_locator(MaxNLocator(nbins=max(1, int(spec["nticks"]) - 1), min_n_ticks=2))
+    grid = spec.get("grid")
+    if grid:                                              # True (as before): both ways
+        ax.grid(True, axis="y" if grid == "y" else "both", linewidth=0.4, alpha=0.5)
+    box = _box(spec)
+    for side, sp in ax.spines.items():
+        sp.set_visible(box == "closed" or (box == "open" and side in ("left", "bottom")))
+        sp.set_linewidth(float(spec.get("axw", LOOK_DEFAULTS["axw"])))
     if data.get("scalebar") is not None:
         _scale_bar(ax, spec, data)
     leg = spec.get("legend", "best")
     handles, labels = ax.get_legend_handles_labels()
     if leg != "off" and len(labels) > 1:
+        frame = bool(spec.get("legend_frame"))
         if leg == "outside":
-            ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1))
+            ax.legend(frameon=frame, loc="upper left", bbox_to_anchor=(1.02, 1))
         else:
-            ax.legend(frameon=False, loc=leg)
+            ax.legend(frameon=frame, loc=leg)
 
 
 def _bars(ax, spec, data, lw, ms):
@@ -351,15 +429,17 @@ def _bars(ax, spec, data, lw, ms):
             mean = yy.mean() if yy.size else np.nan
             how = s.get("average") or "sem"
             err = (yy.std(ddof=1) / (np.sqrt(yy.size) if how == "sem" else 1)) if yy.size > 1 else np.nan
-            color = s.get("color") or colors.get(g) or PALETTE[k % len(PALETTE)]
+            color = _series_color(spec, s.get("color"), colors.get(g), k)
             xpos = k + (j - (len(series) - 1) / 2) * width
             ax.bar(xpos, mean, width * 0.9, color=color, alpha=0.75, linewidth=0,
                    label=mathify(s.get("label") or s["y"]) if k == 0 and len(series) > 1 else None)
-            if how in ("sem", "sd"):
-                ax.errorbar(xpos, mean, yerr=err, fmt="none", ecolor="0.15", elinewidth=lw * 0.8, capsize=ms * 0.8)
-            if spec.get("points", True) and yy.size:
+            if how in ("sem", "sd") and spec.get("err_style", "bars") != "none":
+                ax.errorbar(xpos, mean, yerr=err, fmt="none", ecolor="0.15", elinewidth=lw * 0.8,
+                            capsize=float(spec.get("cap") or ms * 0.8))
+            if spec.get("points", True) and yy.size and spec.get("marker", "circle") != "none":
                 jitter = (np.random.default_rng(k).random(yy.size) - 0.5) * width * 0.4
-                ax.plot(xpos + jitter, yy, "o", color="0.15", markersize=ms * 0.6, markeredgewidth=0)
+                ax.plot(xpos + jitter, yy, linestyle="none", color="0.15",
+                        **_marker_kw(spec, "0.15", ms * 0.6, lw))
     ax.set_xticks(range(len(names)))
     ax.set_xticklabels([mathify(n) for n in names])
 

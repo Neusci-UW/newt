@@ -9,6 +9,9 @@ Units are converted in this file and nowhere else:
   tick_len   tick marks in pt; on screen 1 pt = 1.33 px.
   ms         marker size in pt; None: as the chart draws them. On screen 1 pt = 2.25 px of diameter.
   title, xlabel, ylabel   "" : the chart's own.
+  fig        the figure's own look the chart doesn't draw on screen (figspec.LOOK_DEFAULTS:
+             font, bold, axis lines, point shape, error bars, box, tick count, grid, palette…),
+             kept here so the chart's figure has it.
 """
 from __future__ import annotations
 
@@ -21,7 +24,8 @@ LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None],
         "aspect": None,                    # height / width of the plot; None: it fills its room        # None: the chart's shape on screen
         "fit": "", "fit_degree": 1, "fit_line": 0, "fit_x": [None, None],
         "fit_color": "#c62828", "fit_width": 1.5, "fit_style": "dash", "fit_show": [], "fit_where": "tl",
-        "fit_span": "plot"}
+        "fit_span": "plot",
+        "fig": {}}
 
 LINE_PT = 1.2          # a figure line, in pt, at thick 1.0
 FONT_PT = 9.0          # a figure's label size when the chart's own is kept
@@ -109,6 +113,7 @@ def figure_keys(look: dict, kx: float = 1.0, ky: float = 1.0) -> dict:
         out[k] = look.get(k, LOOK[k])
     out["fit_show"] = list(look.get("fit_show") or [])
     out["fit_x"] = list(look.get("fit_x") or [None, None])
+    out.update(look.get("fig") or {})      # the figure's own look (the box, the grid's way, fonts…)
     return out
 
 

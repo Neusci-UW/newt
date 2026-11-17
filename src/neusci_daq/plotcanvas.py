@@ -29,6 +29,7 @@ PX = 4.0                          # scene units per mm
 PAPERS = {"A4 portrait": (210, 297), "A4 landscape": (297, 210), "Letter portrait": (216, 279),
           "Letter landscape": (279, 216), "Slide 16:9": (338, 190)}
 MARGIN = 12.0                     # mm
+LINKS = {"text": True, "lines": True, "axes": False, "colors": False, "legend": False}   # the same on every figure
 
 
 def _laid_out_axes(spec: dict, data: dict):
@@ -399,6 +400,9 @@ class PlotCanvasPage(QtWidgets.QWidget):
         self._text_timer = QtCore.QTimer(self, singleShot=True, interval=200)     # redraw once you stop
         self._text_timer.timeout.connect(lambda: self.set_text(self.text_pt.value()))
         self._quiet = False                               # the box set from here: don't redraw again
+        self.links = dict(LINKS)                          # sections the same on every figure
+        self.page_look: dict = {}                         # their settings
+        self._restoring = False                           # figures put back as they were saved
         self.text_pt.valueChanged.connect(lambda *_: None if self._quiet else self._text_timer.start())
         text_row = with_slider(self.text_pt)
         text_row.setMinimumWidth(170)
@@ -523,14 +527,16 @@ class PlotCanvasPage(QtWidgets.QWidget):
                   linked: bool = True, edited: "Panel | None" = None) -> Panel:
         spec = F.on_page(spec, data)
         charts = [q for q in self.panels if q.spec.get("kind") != "image" and q is not edited]
-        if spec.get("kind") != "image":                   # every figure's text the same size
-            pt = float(spec.get("font") or 9.0)
-            if edited is not None and edited in self.panels and abs(pt - self.text_pt.value()) > 1e-6:
-                self.set_text(pt, but=edited)             # you changed this one's: the page's follows
+        if spec.get("kind") != "image" and not self._restoring:     # the linked sections, the same everywhere
+            keys = self.linked_keys()
+            if edited is not None and edited in self.panels:
+                changed = {k: spec.get(k) for k in keys if k in spec and spec.get(k) != edited.spec.get(k)}
+                if changed:
+                    self.set_look(changed, but=edited)    # you changed this one's: the others follow
             elif not charts:
-                self._show_text(pt)                       # the first figure sets the page's
+                self._take_look(spec)                     # the first figure sets the page's
             else:
-                spec = F.with_text(spec, self.text_pt.value())
+                spec = {**spec, **{k: v for k, v in self.page_look.items() if k in keys}}
         if edited is not None and edited in self.panels:
             edited.spec, edited.data = spec, data
             edited.rerender()
@@ -619,7 +625,48 @@ class PlotCanvasPage(QtWidgets.QWidget):
             if p is not but and p.spec.get("kind") != "image" and abs(float(p.spec.get("font") or 9) - pt) > 1e-6:
                 p.spec = F.with_text(p.spec, pt)
                 p.rerender()
+        charts = [p for p in self.panels if p.spec.get("kind") != "image"]
+        if charts and self.links.get("text"):
+            self.page_look.update(F.look_of(charts[0].spec, ("text",)))
         self.scene.update()                               # the panel letters follow
+
+    # -- the look the figures share: sections linked across the page (figspec.SECTIONS) ----------
+    def linked_keys(self) -> list[str]:
+        return [k for sec, on in self.links.items() if on and sec in F.SECTIONS for k in F.SECTIONS[sec]]
+
+    def _take_look(self, spec: dict) -> None:
+        """The page's shared look from this figure (the first on the page)."""
+        self.page_look = F.look_of(spec, [sec for sec, on in self.links.items() if on and sec in F.SECTIONS])
+        if spec.get("font"):
+            self._show_text(float(spec["font"]))
+
+    def set_look(self, look: dict, but: "Panel | None" = None) -> None:
+        """These look settings on every figure (but `but`, which has them already); those of
+        linked sections become the page's, for figures added later."""
+        keys = set(self.linked_keys())
+        self.page_look.update({k: v for k, v in look.items() if k in keys})
+        if look.get("font"):
+            self._show_text(float(look["font"]))
+        for p in self.panels:
+            if p is but or p.spec.get("kind") == "image":
+                continue
+            new = {**p.spec, **look}
+            if new != p.spec:
+                p.spec = new
+                p.rerender()
+        self.scene.update()
+
+    def set_link(self, section: str, on: bool, look: dict | None = None) -> None:
+        """Make a section the same on every figure (from `look`, the figure you're on, else the
+        first), or let each figure keep its own."""
+        self.links = {**self.links, section: bool(on)}
+        if not on:
+            return
+        if look is None:
+            charts = [p for p in self.panels if p.spec.get("kind") != "image"]
+            look = F.look_of(charts[0].spec, (section,)) if charts else {}
+        if look:
+            self.set_look(look)
 
     def edit(self, p: Panel | None) -> None:
         if p is None:
@@ -806,7 +853,7 @@ class PlotCanvasPage(QtWidgets.QWidget):
     # -- saving with the session ---------------------------------------------------------------
     def state(self) -> dict:
         return {"paper": self.paper.currentText(), "letters": self.letters.isChecked(),
-                "text_pt": self.text_pt.value(),
+                "text_pt": self.text_pt.value(), "links": dict(self.links), "look": dict(self.page_look),
                 "panels": [p.state() for p in self.panels], "annotations": [a.state() for a in self.annotations]}
 
     def restore(self, s: dict | None) -> None:
@@ -823,11 +870,17 @@ class PlotCanvasPage(QtWidgets.QWidget):
         self.letters.setChecked(s.get("letters", True))
         if s.get("text_pt"):
             self._show_text(float(s["text_pt"]))
-        for d in s.get("panels", []):
-            try:
-                self.add_panel(d["spec"], d["data"], (d["x_mm"], d["y_mm"]), d.get("linked", True))
-            except (KeyError, TypeError):
-                continue
+        self.links = {**LINKS, **{k: bool(v) for k, v in (s.get("links") or {}).items() if k in LINKS}}
+        self.page_look = dict(s.get("look") or {})
+        self._restoring = True                            # each as it was saved, not made alike again
+        try:
+            for d in s.get("panels", []):
+                try:
+                    self.add_panel(d["spec"], d["data"], (d["x_mm"], d["y_mm"]), d.get("linked", True))
+                except (KeyError, TypeError):
+                    continue
+        finally:
+            self._restoring = False
         for d in s.get("annotations", []):
             try:
                 self._add_annotation(d)

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Appearance mockup</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 "IBM Plex Sans",system-ui,sans-serif;padding:20px 16px 40px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}}
+h1{font-size:20px;margin:0 0 4px;grid-column:1/-1}
+.note{grid-column:1/-1;color:var(--muted);border-left:3px solid var(--accent);padding:6px 10px;margin:0;background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.card h2{font-size:14px;margin:0 0 8px}
+.paper{background:#fff;border:1px solid var(--line);border-radius:4px;display:flex;justify-content:center;padding:12px;overflow:auto}
+.paper svg{display:block}
+.thumbs{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+.thumbs .paper{padding:4px}
+.cap{color:var(--muted);font-size:12px;margin:4px 0}
+.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+button,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
+button.on{background:var(--accent);color:var(--surface);border-color:var(--accent)}
+details{border-top:1px solid var(--line);padding:6px 0}
+details:first-of-type{border-top:0}
+summary{cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;list-style:none}
+summary::before{content:"▸";color:var(--muted);width:10px}
+details[open] summary::before{content:"▾"}
+summary .link{margin-left:auto;font-weight:400;font-size:12px;color:var(--muted);display:flex;gap:4px;align-items:center}
+.r{display:grid;grid-template-columns:96px minmax(0,1fr) 62px;gap:6px;align-items:center;margin:5px 0}
+.r input[type=range]{width:100%;accent-color:var(--accent)}
+.r .v{font-variant-numeric:tabular-nums;text-align:right;color:var(--muted)}
+.r2{display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px;align-items:center;margin:5px 0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:0;border-radius:0;background:transparent;padding:2px 8px}
+.seg button.on{background:var(--accent);color:var(--surface)}
+.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chip{width:18px;height:18px;border-radius:4px;border:1px solid var(--line);cursor:pointer;padding:0}
+.new{outline:2px dashed var(--accent);outline-offset:2px;border-radius:6px}
+ol{margin:4px 0 0 18px;padding:0}li{margin:3px 0}
+</style></head><body>
+<div class="wrap">
+<h1>Plot appearance controls</h1>
+<p class="note">Mock-up of Single Plot's <b>Figure</b> tab, reorganized. Every number has a slider; everything prints in pt. A 🔗 on a section keeps it the same on every figure of the Canvas (Text is linked already). Presets set a whole look at once; Copy look / Paste look move one figure's look to others. The figure on the left and the Canvas thumbnails below it follow live.</p>
+
+<div>
+  <div class="card">
+    <h2>Figure <span class="cap" id="sizecap"></span></h2>
+    <div class="paper"><svg id="fig"></svg></div>
+    <div class="cap">The Canvas: the other figures follow the linked sections.</div>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+</div>
+
+<div class="card" id="panel">
+  <div class="presets new" style="padding:4px">
+    <span class="cap" style="margin:0 4px 0 0">Look</span>
+    <button data-p="paper">Paper</button><button data-p="poster">Poster</button><button data-p="slide">Slide</button>
+    <button data-p="notebook">Notebook</button>
+  </div>
+  <div class="presets"><button id="copy">Copy look</button><button id="paste" disabled>Paste look</button><button id="every">Apply to every figure</button></div>
+
+  <details open><summary>Text<span class="link"><input type="checkbox" data-link="text" checked>🔗 every figure</span></summary>
+    <div class="r2"><span>Font</span><select id="family"><option>Arial</option><option>Helvetica</option><option>Times New Roman</option><option>Courier New</option></select></div>
+    <div class="r"><span>Labels</span><input type="range" id="font" min="5" max="36" step="0.5"><span class="v" id="font_v"></span></div>
+    <div class="r"><span>Numbers</span><input type="range" id="ticksz" min="5" max="36" step="0.5"><span class="v" id="ticksz_v"></span></div>
+    <div class="r"><span>Title</span><input type="range" id="title" min="5" max="40" step="0.5"><span class="v" id="title_v"></span></div>
+    <div class="r new"><span>Legend</span><input type="range" id="legsz" min="5" max="30" step="0.5"><span class="v" id="legsz_v"></span></div>
+    <div class="r2 new"><span>Bold</span><div class="seg" id="bold"><button data-v="none">None</button><button data-v="title">Title</button><button data-v="labels">Labels and title</button></div></div>
+  </details>
+
+  <details open><summary>Lines and points<span class="link"><input type="checkbox" data-link="lines" checked>🔗 every figure</span></summary>
+    <div class="r"><span>Lines</span><input type="range" id="lw" min="0.1" max="4" step="0.05"><span class="v" id="lw_v"></span></div>
+    <div class="r new"><span>Axis lines</span><input type="range" id="axw" min="0.1" max="3" step="0.05"><span class="v" id="axw_v"></span></div>
+    <div class="r"><span>Points</span><input type="range" id="ms" min="0" max="14" step="0.5"><span class="v" id="ms_v"></span></div>
+    <div class="r2 new"><span>Point shape</span><div class="seg" id="marker"><button data-v="circle">●</button><button data-v="square">■</button><button data-v="triangle">▲</button><button data-v="open">○</button><button data-v="none">none</button></div></div>
+    <div class="r new"><span>Error caps</span><input type="range" id="cap" min="0" max="10" step="0.5"><span class="v" id="cap_v"></span></div>
+    <div class="r2 new"><span>Error bars</span><div class="seg" id="err"><button data-v="sem">± SEM</button><button data-v="sd">± SD</button><button data-v="band">band</button><button data-v="none">none</button></div></div>
+  </details>
+
+  <details open><summary>Axes<span class="link"><input type="checkbox" data-link="axes">🔗 every figure</span></summary>
+    <div class="r2"><span>Box</span><div class="seg" id="box"><button data-v="open">Open</button><button data-v="closed">Closed</button><button data-v="bar">Scale bar</button></div></div>
+    <div class="r2"><span>Ticks</span><div class="seg" id="tickdir"><button data-v="out">Outside</button><button data-v="in">Inside</button><button data-v="inout">Across</button></div></div>
+    <div class="r"><span>Tick length</span><input type="range" id="ticklen" min="0" max="10" step="0.5"><span class="v" id="ticklen_v"></span></div>
+    <div class="r new"><span>About ticks</span><input type="range" id="nticks" min="2" max="10" step="1"><span class="v" id="nticks_v"></span></div>
+    <div class="r2"><span>Grid</span><div class="seg" id="grid"><button data-v="none">None</button><button data-v="y">Across</button><button data-v="xy">Both</button></div></div>
+    <div class="r2"><span></span><label><input type="checkbox" id="zero"> Line at zero</label></div>
+  </details>
+
+  <details><summary>Colors<span class="link"><input type="checkbox" data-link="colors">🔗 every figure</span></summary>
+    <div class="r2 new"><span>Palette</span><select id="pal"><option value="safe">Colorblind-safe</option><option value="gray">Grays</option><option value="viridis">Viridis</option><option value="bold">Bold</option></select></div>
+    <div class="r2"><span>Each series</span><div class="chips" id="chips"></div></div>
+  </details>
+
+  <details><summary>Legend</summary>
+    <div class="r2"><span>Where</span><div class="seg" id="legpos"><button data-v="tr">Top right</button><button data-v="tl">Top left</button><button data-v="out">Beside</button><button data-v="none">None</button></div></div>
+    <div class="r2 new"><span></span><label><input type="checkbox" id="frame"> Box around it</label></div>
+  </details>
+
+  <details><summary>Size</summary>
+    <div class="r"><span>Width</span><input type="range" id="w" min="40" max="180" step="1"><span class="v" id="w_v"></span></div>
+    <div class="r"><span>Height</span><input type="range" id="h" min="30" max="140" step="1"><span class="v" id="h_v"></span></div>
+  </details>
+</div>
+
+<div class="card" style="grid-column:1/-1">
+  <h2>To decide</h2>
+  <ol>
+    <li><b>Presets:</b> are Paper, Poster, Slide and Notebook the right four, with these sizes (Paper 8 pt and 0.75 pt lines; Poster 18 pt and 2 pt)?</li>
+    <li><b>Linking:</b> Text is linked across the Canvas now. Link Lines too by default, and Axes and Colors only when ticked?</li>
+    <li><b>Live charts too?</b> These same controls in a chart's settings on Analysis, or only in Single Plot?</li>
+    <li><b>Anything missing:</b> axis breaks, a second y axis, number formats (decimals), per-series line style (dashed)?</li>
+  </ol>
+</div>
+</div>
+<script>
+const PX = 3.2, PT = PX * 0.3528;          // preview: px per mm, px per pt
+const PALS = {safe: ["#0072B2", "#D55E00", "#009E73", "#CC79A7"], gray: ["#111", "#666", "#999", "#bbb"],
+  viridis: ["#440154", "#31688e", "#35b779", "#fde725"], bold: ["#d62728", "#1f77b4", "#2ca02c", "#9467bd"]};
+const PRESETS = {
+  paper: {font: 8, ticksz: 7, title: 9, legsz: 7, lw: 0.75, axw: 0.6, ms: 3.5, cap: 2, ticklen: 3, w: 85, h: 64},
+  poster: {font: 18, ticksz: 16, title: 22, legsz: 16, lw: 2, axw: 1.5, ms: 8, cap: 5, ticklen: 6, w: 160, h: 120},
+  slide: {font: 14, ticksz: 12, title: 16, legsz: 12, lw: 1.5, axw: 1.2, ms: 6, cap: 4, ticklen: 5, w: 150, h: 95},
+  notebook: {font: 10, ticksz: 9, title: 11, legsz: 9, lw: 1, axw: 0.8, ms: 4.5, cap: 3, ticklen: 3.5, w: 120, h: 80}};
+let S = {family: "Arial", ...PRESETS.notebook, bold: "title", marker: "circle", err: "sem", box: "open", tickdir: "out",
+  nticks: 5, grid: "none", zero: false, pal: "safe", colors: null, legpos: "tr", frame: false};
+const LINKS = {text: ["family", "font", "ticksz", "title", "legsz", "bold"], lines: ["lw", "axw", "ms", "marker", "cap", "err"],
+  axes: ["box", "tickdir", "ticklen", "nticks", "grid", "zero"], colors: ["pal", "colors"]};
+// the other figures on the Canvas, each with its own look where it isn't linked
+let others = [{...S, font: 12, lw: 1.6, box: "closed", pal: "bold", w: 70, h: 52, kind: "trace"},
+              {...S, font: 6, lw: 0.5, grid: "xy", w: 70, h: 52, kind: "bars"}];
+let copied = null;
+const $ = id => document.getElementById(id);
+const data = {x: [0.1, 0.2, 0.3, 0.5, 0.7, 1, 1.5, 2, 3, 4], series: [
+  {name: "Control", y: [0.2, 0.6, 1.4, 2.6, 3.4, 3.9, 4.1, 4.2, 4.25, 4.3], e: 0.25},
+  {name: "TTX 1 µM", y: [0.1, 0.2, 0.3, 0.7, 1.1, 1.6, 2.1, 2.4, 2.6, 2.7], e: 0.2}]};
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / Math.max(1, n - 1), mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || 10 * mag, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+function marker(x, y, r, shape, c) {
+  if (shape === "none" || r <= 0) return "";
+  if (shape === "square") return `<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" fill="${c}"/>`;
+  if (shape === "triangle") return `<path d="M${x},${y - r * 1.2}L${x + r * 1.1},${y + r * 0.8}L${x - r * 1.1},${y + r * 0.8}Z" fill="${c}"/>`;
+  if (shape === "open") return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${c}" stroke-width="${Math.max(0.6, r / 3)}"/>`;
+  return `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
+}
+function draw(s, scale = 1, kind = "xy") {
+  const W = s.w * PX * scale, H = s.h * PX * scale, pt = PT * scale, ff = `font-family="${s.family}"`;
+  const bw = s.bold === "labels" ? "bold" : "normal", tw = s.bold === "none" ? "normal" : "bold";
+  const colors = s.colors || PALS[s.pal];
+  const L = (s.font * 3.2 + s.ticksz * 2.6) * pt + 6 * scale, B = (s.font * 1.6 + s.ticksz * 1.6) * pt + 8 * scale;
+  const T = (s.title * 1.8) * pt + 4 * scale, R = (s.legpos === "out" ? 60 * scale : 10 * scale);
+  const pw = Math.max(20, W - L - R), ph = Math.max(20, H - T - B);
+  const xl = 0, xh = 4.2, yl = kind === "trace" ? -1 : 0, yh = 4.8;
+  const X = v => L + (v - xl) / (xh - xl) * pw, Y = v => T + ph - (v - yl) / (yh - yl) * ph;
+  const tl = s.ticklen * pt, dir = s.tickdir === "in" ? -1 : 1, across = s.tickdir === "inout";
+  let g = "";
+  const xt = niceTicks(xl, xh, s.nticks), yt = niceTicks(yl, yh, s.nticks);
+  if (s.grid !== "none") {
+    yt.forEach(v => g += `<line x1="${L}" x2="${L + pw}" y1="${Y(v)}" y2="${Y(v)}" stroke="#ddd" stroke-width="${0.5 * pt}"/>`);
+    if (s.grid === "xy") xt.forEach(v => g += `<line x1="${X(v)}" x2="${X(v)}" y1="${T}" y2="${T + ph}" stroke="#ddd" stroke-width="${0.5 * pt}"/>`);
+  }
+  if (s.zero && yl < 0) g += `<line x1="${L}" x2="${L + pw}" y1="${Y(0)}" y2="${Y(0)}" stroke="#888" stroke-width="${s.axw * pt}" stroke-dasharray="${3 * pt}"/>`;
+  // the data
+  if (kind === "bars") {
+    data.series.forEach((sr, k) => {
+      const bx = L + pw * (0.25 + k * 0.4), bh = sr.y[7] / yh * ph;
+      g += `<rect x="${bx}" y="${T + ph - bh}" width="${pw * 0.25}" height="${bh}" fill="${colors[k]}" opacity=".85"/>`;
+      g += `<line x1="${bx + pw * 0.125}" x2="${bx + pw * 0.125}" y1="${Y(sr.y[7] - sr.e * 2)}" y2="${Y(sr.y[7] + sr.e * 2)}" stroke="#222" stroke-width="${s.lw * pt}"/>`;
+    });
+  } else if (kind === "trace") {
+    data.series.forEach((sr, k) => {
+      let d = ""; for (let i = 0; i <= 200; i++) { const x = i / 200 * 4.2, y = (k ? 1.8 : 3) * Math.exp(-((x - 1.2) ** 2) / 0.08) - 0.5 * Math.exp(-((x - 1.7) ** 2) / 0.2) + (k ? 0 : 0.2);
+        d += `${i ? "L" : "M"}${X(x).toFixed(1)},${Y(y).toFixed(1)}`; }
+      g += `<path d="${d}" fill="none" stroke="${colors[k]}" stroke-width="${s.lw * pt}"/>`;
+    });
+  } else {
+    data.series.forEach((sr, k) => {
+      const c = colors[k], e = s.err === "sd" ? sr.e * 2 : sr.e;
+      if (s.err === "band") {
+        let up = "", dn = "";
+        data.x.forEach((x, i) => { up += `${i ? "L" : "M"}${X(x)},${Y(sr.y[i] + e)}`; });
+        [...data.x].reverse().forEach((x, i) => { dn += `L${X(x)},${Y(sr.y[data.x.length - 1 - i] - e)}`; });
+        g += `<path d="${up}${dn}Z" fill="${c}" opacity=".18"/>`;
+      } else if (s.err !== "none") {
+        data.x.forEach((x, i) => {
+          g += `<line x1="${X(x)}" x2="${X(x)}" y1="${Y(sr.y[i] - e)}" y2="${Y(sr.y[i] + e)}" stroke="${c}" stroke-width="${s.lw * 0.8 * pt}"/>`;
+          if (s.cap > 0) [sr.y[i] - e, sr.y[i] + e].forEach(v => g += `<line x1="${X(x) - s.cap * pt}" x2="${X(x) + s.cap * pt}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-width="${s.lw * 0.8 * pt}"/>`);
+        });
+      }
+      g += `<path d="${data.x.map((x, i) => `${i ? "L" : "M"}${X(x)},${Y(sr.y[i])}`).join("")}" fill="none" stroke="${c}" stroke-width="${s.lw * pt}"/>`;
+      data.x.forEach((x, i) => g += marker(X(x), Y(sr.y[i]), s.ms * pt / 2, s.marker, c));
+    });
+  }
+  // axes
+  const aw = s.axw * pt;
+  if (s.box === "bar") {
+    const bx = L + pw - 40 * scale, by = T + ph + 6 * scale;
+    g += `<path d="M${bx},${by - 30 * scale}V${by}H${bx + 30 * scale}" fill="none" stroke="#111" stroke-width="${aw * 1.5}"/>`;
+    g += `<text x="${bx + 15 * scale}" y="${by + s.ticksz * pt + 2}" text-anchor="middle" font-size="${s.ticksz * pt}" ${ff}>1 s</text>`;
+    g += `<text x="${bx - 4 * scale}" y="${by - 15 * scale}" text-anchor="end" font-size="${s.ticksz * pt}" ${ff}>1 mV</text>`;
+  } else {
+    g += `<path d="M${L},${T}V${T + ph}H${L + pw}" fill="none" stroke="#111" stroke-width="${aw}"/>`;
+    if (s.box === "closed") g += `<path d="M${L},${T}H${L + pw}V${T + ph}" fill="none" stroke="#111" stroke-width="${aw}"/>`;
+    xt.forEach(v => {
+      const y0 = T + ph, y1 = y0 + tl * dir, ya = across ? y0 - tl : y0;
+      g += `<line x1="${X(v)}" x2="${X(v)}" y1="${ya}" y2="${across ? y0 + tl : y1}" stroke="#111" stroke-width="${aw}"/>`;
+      g += `<text x="${X(v)}" y="${y0 + Math.max(0, tl) + s.ticksz * pt + 2}" text-anchor="middle" font-size="${s.ticksz * pt}" ${ff}>${v}</text>`;
+    });
+    yt.forEach(v => {
+      const x1 = L - tl * dir;
+      g += `<line x1="${across ? L + tl : L}" x2="${across ? L - tl : x1}" y1="${Y(v)}" y2="${Y(v)}" stroke="#111" stroke-width="${aw}"/>`;
+      g += `<text x="${L - Math.max(0, tl) - 3}" y="${Y(v) + s.ticksz * pt * 0.35}" text-anchor="end" font-size="${s.ticksz * pt}" ${ff}>${v}</text>`;
+    });
+    g += `<text x="${L + pw / 2}" y="${H - 4 * scale}" text-anchor="middle" font-size="${s.font * pt}" font-weight="${bw}" ${ff}>Stimulus (V)</text>`;
+    g += `<text transform="translate(${s.font * pt + 2},${T + ph / 2}) rotate(-90)" text-anchor="middle" font-size="${s.font * pt}" font-weight="${bw}" ${ff}>Peak V<tspan baseline-shift="sub" font-size="${s.font * pt * 0.7}">m</tspan> (mV)</text>`;
+  }
+  g += `<text x="${L + pw / 2}" y="${T - 6 * scale}" text-anchor="middle" font-size="${s.title * pt}" font-weight="${tw}" ${ff}>${kind === "xy" ? "Response size" : kind === "trace" ? "Compound action potential" : "Peak at 2 V"}</text>`;
+  // legend
+  if (s.legpos !== "none" && kind !== "bars") {
+    const lx = s.legpos === "out" ? L + pw + 8 * scale : s.legpos === "tl" ? L + 8 * scale : L + pw - 70 * scale;
+    let ly = T + 6 * scale, leg = "";
+    data.series.forEach((sr, k) => {
+      leg += `<line x1="${lx}" x2="${lx + 14 * scale}" y1="${ly + s.legsz * pt * 0.4}" y2="${ly + s.legsz * pt * 0.4}" stroke="${colors[k]}" stroke-width="${s.lw * pt}"/>`;
+      leg += `<text x="${lx + 18 * scale}" y="${ly + s.legsz * pt * 0.75}" font-size="${s.legsz * pt}" ${ff}>${sr.name}</text>`;
+      ly += s.legsz * pt * 1.4;
+    });
+    if (s.frame) g += `<rect x="${lx - 4 * scale}" y="${T + 2 * scale}" width="${70 * scale}" height="${ly - T}" fill="#fff" stroke="#999" stroke-width="${0.5 * pt}"/>`;
+    g += leg;
+  }
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="color:#111">${g}</svg>`;
+}
+function render() {
+  $("fig").outerHTML = draw(S).replace("<svg ", '<svg id="fig" ');
+  $("sizecap").textContent = `${S.w} × ${S.h} mm`;
+  for (const k of ["font", "ticksz", "title", "legsz", "lw", "axw", "ms", "cap", "ticklen", "nticks", "w", "h"]) {
+    $(k).value = S[k];
+    $(k + "_v").textContent = k === "nticks" ? `${S[k]}` : k === "w" || k === "h" ? `${S[k]} mm` : `${S[k]} pt`;
+  }
+  for (const id of ["bold", "marker", "err", "box", "tickdir", "grid", "legpos"])
+    $(id).querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === S[id]));
+  $("family").value = S.family; $("pal").value = S.pal; $("zero").checked = S.zero; $("frame").checked = S.frame;
+  const colors = S.colors || PALS[S.pal];
+  $("chips").innerHTML = data.series.map((sr, k) => `<label title="${sr.name}"><input type="color" class="chip" data-k="${k}" value="${colors[k]}"></label> <span class="cap">${sr.name}</span>`).join(" ");
+  // the Canvas: linked sections come from this figure
+  const linked = [...document.querySelectorAll("[data-link]")].filter(c => c.checked).flatMap(c => LINKS[c.dataset.link]);
+  $("thumbs").innerHTML = [{...S, kind: "xy"}, ...others].map((o, i) => {
+    const look = i ? {...o, ...Object.fromEntries(linked.map(k => [k, S[k]]))} : o;
+    return `<div class="paper" title="${i ? "another figure" : "this figure"}">${draw(look, 0.55, o.kind)}</div>`;
+  }).join("");
+}
+function set(k, v) { S[k] = v; render(); }
+for (const k of ["font", "ticksz", "title", "legsz", "lw", "axw", "ms", "cap", "ticklen", "nticks", "w", "h"])
+  $(k).addEventListener("input", e => set(k, +e.target.value));
+for (const id of ["bold", "marker", "err", "box", "tickdir", "grid", "legpos"])
+  $(id).addEventListener("click", e => { if (e.target.dataset.v) set(id, e.target.dataset.v); });
+$("family").onchange = e => set("family", e.target.value);
+$("pal").onchange = e => { S.colors = null; set("pal", e.target.value); };
+$("zero").onchange = e => set("zero", e.target.checked);
+$("frame").onchange = e => set("frame", e.target.checked);
+$("chips").addEventListener("input", e => { const c = [...(S.colors || PALS[S.pal])]; c[+e.target.dataset.k] = e.target.value; S.colors = c; render(); });
+document.querySelectorAll("[data-link]").forEach(c => c.onchange = render);
+document.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { Object.assign(S, PRESETS[b.dataset.p]);
+  document.querySelectorAll("[data-p]").forEach(x => x.classList.toggle("on", x === b)); render(); });
+$("copy").onclick = () => { copied = {...S}; $("paste").disabled = false; };
+$("paste").onclick = () => { if (copied) { S = {...copied, w: S.w, h: S.h}; render(); } };
+$("every").onclick = () => { others = others.map(o => ({...o, ...S, w: o.w, h: o.h, kind: o.kind})); render(); };
+render();
+</script>
+</body></html>

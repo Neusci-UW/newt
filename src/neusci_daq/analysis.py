@@ -590,6 +590,23 @@ def wave_signature(y: np.ndarray, fs: float) -> tuple | None:
     return "wave", float(freq), float(amp), float(mid), float(np.sqrt(np.mean(d ** 2)) / amp)
 
 
+def bin_average(y: np.ndarray, fs: float, bin_ms: float) -> np.ndarray:
+    """The trace averaged in bins bin_ms long, each bin's average held across it (steps), so it
+    keeps its length and timing; the last bin, if short, is the average of what's in it.
+    Missing samples are left out of their bin. 0 (or under two samples): the trace as it is."""
+    y = np.asarray(y, float)
+    n = int(round(bin_ms / 1000 * fs))
+    if n < 2 or y.size < 2:
+        return y
+    full = -(-y.size // n) * n
+    padded = np.full(full, np.nan)
+    padded[:y.size] = y
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)      # a bin with no samples stays missing
+        means = np.nanmean(padded.reshape(-1, n), axis=1)
+    return np.repeat(means, n)[:y.size]
+
+
 def stimulus_present(y: np.ndarray) -> bool:
     """Whether a stimulus channel shows more than noise: its biggest swing from where it
     sits is at least 10 times the noise. The noise is from sample-to-sample steps, so a

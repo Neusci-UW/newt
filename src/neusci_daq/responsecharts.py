@@ -55,6 +55,11 @@ class ResponseChart(Chart):
         self.d_smooth.setValue(0.2)
         self.d_smooth.setToolTip("Differentiating amplifies noise: average over this long first (0 = none)")
         self.field("smooth", "Smooth for d/dt", self.d_smooth)
+        self.bin = UnitSpinBox(0, 10000, "ms", step=1)
+        self.bin.setSpecialValueText("Off")
+        self.bin.setToolTip("Average each trace in bins this long (each bin drawn at its average), to see "
+                            "slow changes through the noise. Off: every sample")
+        self.field("bin", "Average in bins", self.bin)
         self.layout_mode = QtWidgets.QComboBox()
         self.layout_mode.setToolTip("Show the channels on separate axes, in group and trial colors, or the "
                                     "average of each on one plot, scaled to fit")
@@ -293,11 +298,13 @@ class ResponseChart(Chart):
             if not ys:
                 continue
             unit = page.unit_of(name)
+            binned = lambda y: A.bin_average(y, fs, self.bin.value())      # Average in bins (Off: as it is)
             if c == 0:
-                series.append((name, unit, {b: np.asarray(y, float) for b, y in ys.items()}, (name, c)))
+                series.append((name, unit, {b: binned(y) for b, y in ys.items()}, (name, c)))
             else:
                 series.append((f"{name} {SERIES[c][0]}", f"{unit}/s" if c == 1 else f"{unit}/s²",
-                               {b: A.derivative(y, fs, c, self.d_smooth.value()) for b, y in ys.items()}, (name, c)))
+                               {b: binned(A.derivative(y, fs, c, self.d_smooth.value())) for b, y in ys.items()},
+                               (name, c)))
         if not series:
             self._note_spikes()
             return

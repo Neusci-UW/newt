@@ -82,6 +82,11 @@ class StimulusChart(SpikeChart):
         self.stim_items: list[OverlayCurve] = []  # in the colors of the responses
         self.stim_onsets = pg.ScatterPlotItem(size=10, symbol="t1", pen=None, brush=pg.mkBrush("#E69F00"))
         sp.addItem(self.stim_onsets)
+        self.bin = UnitSpinBox(0, 10000, "ms", step=1)
+        self.bin.setSpecialValueText("Off")
+        self.bin.setToolTip("Average the stimulus in bins this long (each bin drawn at its average). Off: "
+                            "every sample")
+        self.field("bin", "Average in bins", self.bin)
 
     def empty(self) -> bool:
         return not self.page.how() or not self.blocks()
@@ -118,6 +123,7 @@ class StimulusChart(SpikeChart):
         if not traces:
             return
         fs = self.data[chosen[0]]["sample_rate"]
+        traces = {i: A.bin_average(y, fs, self.bin.value()) for i, y in traces.items()}   # Average in bins
         Y = np.full((len(traces), max(len(y) for y in traces.values())), np.nan)
         for r, y in enumerate(traces.values()):
             Y[r, :len(y)] = y

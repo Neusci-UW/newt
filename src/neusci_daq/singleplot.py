@@ -487,22 +487,18 @@ class SinglePlotPage(QtWidgets.QWidget):
         if s.get("title"):
             pis[0].setTitle(_html_sub(s["title"]), size=f"{title_pt}pt")
         # line widths and point sizes, scaled from what the chart draws (1.2 pt is its own size)
-        k_lw = float(s.get("lw", 1.2)) / 1.2
+        # Lines and Grid are the chart's own line thickness and grid (one setting, not two)
+        want = float(s.get("lw", 1.2)) / 1.2
+        look = getattr(chart, "look", None)
+        if look is not None and (abs(float(look.get("thick", 1.0)) - want) > 1e-6
+                                 or bool(look.get("grid")) != bool(s.get("grid"))):
+            look["thick"], look["grid"] = want, bool(s.get("grid"))
+            chart.set_look("thick", want)             # redraws its pens; this runs again after
+            return
         marker_px = float(s.get("ms", 4.0)) * 2.25
         for pi in pis:
             for it in pi.items:
-                if isinstance(it, pg.PlotDataItem) and it is not getattr(chart, "_sp_fit_item", None):
-                    pen = it.opts.get("pen")
-                    if pen is None:
-                        continue
-                    pen = pg.mkPen(pen)
-                    base = getattr(it, "_sp_base_w", None)
-                    if base is None:
-                        base = it._sp_base_w = pen.widthF() or 1.0
-                    if abs(pen.widthF() - base * k_lw) > 1e-6:
-                        pen.setWidthF(base * k_lw)
-                        it.setPen(pen)
-                elif isinstance(it, pg.ScatterPlotItem) and len(it.data):
+                if isinstance(it, pg.ScatterPlotItem) and len(it.data):
                     it.setSize(marker_px)
             # an open box (left and bottom axes) or a closed one; log axes; lines at zero
             for side in ("top", "right"):
@@ -699,6 +695,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         self._fig_lay.removeWidget(self.right)
         self.right.insertTab(0, self.page.side_scroll, "Chart")
         self.page.side_scroll.show()
+        self.page.side.look.hide()                    # thickness, grid, ranges: in the Figure tab instead
         self.focus_side.addWidget(self.right)
         self.right.setCurrentIndex(0)
         if getattr(chart, "fig_spec", None) is None:
@@ -707,6 +704,9 @@ class SinglePlotPage(QtWidgets.QWidget):
             except Exception:
                 base = F.new_spec(kind="curves")
             base.update(title="", xlabel="", ylabel="", xlim=[None, None], ylim=[None, None], auto_size=True)
+            look = getattr(chart, "look", {}) or {}
+            base["lw"] = round(1.2 * float(look.get("thick", 1.0)), 2)     # its own line thickness and grid
+            base["grid"] = bool(look.get("grid", True))
             chart.fig_spec = base
         orig = chart.apply_look
 
@@ -804,6 +804,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         except RuntimeError:                     # its frame went (the chart was closed)
             pass
         self.page.side_scroll.hide()
+        self.page.side.look.show()
         self.mode.setCurrentIndex(0)
         prev = getattr(self, "_prev", (None, {}, None))
         self.spec, self.data, self.editing = prev[0], prev[1], prev[2]

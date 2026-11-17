@@ -370,6 +370,8 @@ class SettingsPanel(QtWidgets.QWidget):
                              f"<b>{n} charts picked</b><br>{', '.join(c.name for c in charts)}" if n else "")
         self.heading.setVisible(bool(n))
         self.look.show_for(charts)
+        if getattr(self.page.single_plot, "focus_chart", None) is not None:
+            self.look.hide()                      # in Single Plot, its Figure tab sets these
         self.multi.setVisible(n > 1)
         self.btn_remove.setText(f"Remove {n} charts")
         self.page.canvas.options.setVisible(n == 1)

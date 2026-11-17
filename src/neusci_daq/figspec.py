@@ -404,7 +404,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             curves.append({"x": [float(v) for v in x * kx], "y": [float(v) for v in y * ky],
                            "color": color.name() if color is not None else "",
                            "alpha": round(color.alphaF(), 3) if color is not None else 1.0,
-                           "name": it.name() or "", "width": round(width * 0.5, 3), "points": bool(sym),
+                           "name": it.name() or "", "width": round(width * 0.35, 3), "points": bool(sym),
                            "z": float(it.zValue())})
     curves.sort(key=lambda c: c["z"])
 

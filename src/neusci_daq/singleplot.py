@@ -486,6 +486,41 @@ class SinglePlotPage(QtWidgets.QWidget):
             pi.showGrid(x=bool(s.get("grid")), y=bool(s.get("grid")), alpha=0.25)
         if s.get("title"):
             pis[0].setTitle(_html_sub(s["title"]), size=f"{title_pt}pt")
+        # line widths and point sizes, scaled from what the chart draws (1.2 pt is its own size)
+        k_lw = float(s.get("lw", 1.2)) / 1.2
+        marker_px = float(s.get("ms", 4.0)) * 2.25
+        for pi in pis:
+            for it in pi.items:
+                if isinstance(it, pg.PlotDataItem) and it is not getattr(chart, "_sp_fit_item", None):
+                    pen = it.opts.get("pen")
+                    if pen is None:
+                        continue
+                    pen = pg.mkPen(pen)
+                    base = getattr(it, "_sp_base_w", None)
+                    if base is None:
+                        base = it._sp_base_w = pen.widthF() or 1.0
+                    if abs(pen.widthF() - base * k_lw) > 1e-6:
+                        pen.setWidthF(base * k_lw)
+                        it.setPen(pen)
+                elif isinstance(it, pg.ScatterPlotItem) and len(it.data):
+                    it.setSize(marker_px)
+            # an open box (left and bottom axes) or a closed one; log axes; lines at zero
+            for side in ("top", "right"):
+                if s.get("despine", True):
+                    pi.hideAxis(side)
+                else:
+                    pi.showAxis(side)
+                    pi.getAxis(side).setStyle(showValues=False)
+            pi.setLogMode(x=bool(s.get("xlog")), y=bool(s.get("ylog")))
+            zero = getattr(pi, "_sp_zero", None)
+            if s.get("zero") and zero is None:
+                pi._sp_zero = [pg.InfiniteLine(0, angle=a_, pen=pg.mkPen("#888", width=1)) for a_ in (0, 90)]
+                for ln in pi._sp_zero:
+                    pi.addItem(ln, ignoreBounds=True)
+            elif not s.get("zero") and zero is not None:
+                for ln in zero:
+                    pi.removeItem(ln)
+                pi._sp_zero = None
         x0, x1 = (list(s.get("xlim") or []) + [None, None])[:2]
         if x0 is not None and x1 is not None and x1 > x0:
             main.setXRange(x0 / kx, x1 / kx, padding=0)

@@ -11,7 +11,8 @@ written plainly; I_B comes out with a true subscript.
 Send to Canvas puts a copy on the Plot Canvas, to lay out with others; Save figure… saves
 it on its own (PDF, SVG, PNG, TIFF).
 
-Chart focus: Quick charts ▾ opens any quick chart here, big, with its settings beside it.
+Chart focus: Quick charts ▾ opens a new quick chart here, big, with its settings beside it;
+Active charts ▾ opens one already made.
 Make a figure turns what it shows into a figure to finish and send to the Canvas. Back to
 the whiteboard puts it back where it was.
 """
@@ -121,6 +122,41 @@ class _SeriesRow(QtWidgets.QFrame):
         self.changed.emit()
 
 
+def _remove_fit_text(chart) -> None:
+    t = getattr(chart, "_sp_fit_text", None)
+    if t is not None:
+        try:
+            vb = t.parentItem()
+            if vb is not None and hasattr(vb, "sigResized"):
+                vb.sigResized.disconnect(t._place)
+            if t.scene() is not None:
+                t.scene().removeItem(t)
+        except (RuntimeError, TypeError):
+            pass
+        chart._sp_fit_text = None
+
+
+def _put_fit_text(chart, vb, html: str, color: str, where: str, mode: str) -> None:
+    """The fit's text (Fit tab: Write) in a corner of the live chart's plot, staying there as
+    you zoom and pan."""
+    from . import style as st, theme
+    back = QtGui.QColor(theme.THEMES[theme.DARK if mode == st.DARK else theme.LIGHT].background)
+    back.setAlpha(215)                            # the plot's own background, so it reads in either theme
+    right, bottom = "r" in where, "b" in where
+    t = pg.TextItem(html=f"<span style='color:{color}'>{html}</span>", anchor=(1 if right else 0, 1 if bottom else 0),
+                    fill=pg.mkBrush(back))
+    t.setParentItem(vb)
+    t.setZValue(40)
+
+    def place(*_):
+        r = vb.boundingRect()
+        t.setPos(r.right() - 6 if right else r.left() + 6, r.bottom() - 6 if bottom else r.top() + 6)
+    t._place = place
+    vb.sigResized.connect(place)
+    place()
+    chart._sp_fit_text = t
+
+
 def _swatch(c: str) -> QtGui.QPixmap:
     p = QtGui.QPixmap(12, 12)
     p.fill(QtGui.QColor(c))
@@ -152,7 +188,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         fcol = QtWidgets.QVBoxLayout()
         fbar = QtWidgets.QHBoxLayout()
         self.btn_back = QtWidgets.QPushButton("◀ Figures")
-        self.btn_back.setToolTip("Back to the figure you were making (the chart stays in Quick charts › Your charts)")
+        self.btn_back.setToolTip("Back to the figure you were making (the chart stays in Active charts)")
         self.focus_title = QtWidgets.QLabel()
         self.focus_title.setMinimumWidth(0)          # long names shrink, never widen the window
         self.focus_title.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
@@ -161,6 +197,7 @@ class SinglePlotPage(QtWidgets.QWidget):
                                    "fits) before it goes to the Canvas")
         fbar.addWidget(self.btn_back)
         fbar.addWidget(self._quick_button())
+        fbar.addWidget(self._active_button())
         self._fbar = fbar                        # the "only the selection" tick goes here (page.only_selection_box)
         fbar.addWidget(self.focus_title, 1)
         fbar.addWidget(self.btn_figure)
@@ -186,6 +223,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         left = QtWidgets.QVBoxLayout()
         bar = QtWidgets.QHBoxLayout()
         bar.addWidget(self._quick_button())
+        bar.addWidget(self._active_button())
         self.title = QtWidgets.QLabel()
         bar.addWidget(self.title, 1)
         self.btn_canvas = QtWidgets.QPushButton("Send to Canvas")
@@ -374,6 +412,15 @@ class SinglePlotPage(QtWidgets.QWidget):
         fx = (list(s.get("fit_x") or []) + [None, None])[:2]
         self.fit_x0.setText("" if fx[0] is None else f"{fx[0]:g}")
         self.fit_x1.setText("" if fx[1] is None else f"{fx[1]:g}")
+        self.fit_color.setIcon(QtGui.QIcon(_swatch(s.get("fit_color") or F.FIT_LOOK["fit_color"])))
+        self.fit_width.setValue(float(s.get("fit_width", F.FIT_LOOK["fit_width"])))
+        self.fit_style.setCurrentIndex(max(0, self.fit_style.findData(s.get("fit_style", "dash"))))
+        self.fit_where.setCurrentIndex(max(0, self.fit_where.findData(s.get("fit_where", "tl"))))
+        self.fit_span.setCurrentIndex(max(0, self.fit_span.findData(s.get("fit_span", "plot"))))
+        for k, b in self.fit_show.items():
+            b.blockSignals(True)
+            b.setChecked(k in (s.get("fit_show") or []))
+            b.blockSignals(False)
         self.despine.setChecked(s["despine"])
         self.grid.setChecked(s["grid"])
         self.zero.setChecked(s["zero"])
@@ -478,7 +525,8 @@ class SinglePlotPage(QtWidgets.QWidget):
 
     # -- the live chart: its look is chart.look (chartstyle), the same record its figure reads --
     _LOOK_KEYS = {"title", "xlabel", "ylabel", "xlog", "ylog", "font", "font_ticks", "font_title", "ticks",
-                  "tick_len", "ms", "despine", "grid", "zero", "legend", "fit", "fit_degree", "fit_line", "fit_x"}
+                  "tick_len", "ms", "despine", "grid", "zero", "legend", "fit", "fit_degree", "fit_line", "fit_x",
+                  *F.FIT_LOOK}
 
     def _to_look(self, changed: dict) -> None:
         """Settings changed in the Figure or Fit tab, into the chart's look (its one record)."""
@@ -544,19 +592,48 @@ class SinglePlotPage(QtWidgets.QWidget):
         old = getattr(chart, "_sp_fit_item", None)
         if old is not None:
             try:
-                old.getViewBox() and old.getViewBox().removeItem(old)
-            except (RuntimeError, AttributeError):
+                vb = old.getViewBox()
+                if vb is not None:
+                    if getattr(old, "_follow", None) is not None:
+                        vb.sigXRangeChanged.disconnect(old._follow)
+                    vb.removeItem(old)
+            except (RuntimeError, AttributeError, TypeError):
                 pass
             chart._sp_fit_item = None
+        _remove_fit_text(chart)
         got = F.do_fit(s, self.data) if s.get("fit") else None
         if got is not None:
             _, f, xu = got
             xs = np.linspace(float(np.nanmin(xu)), float(np.nanmax(xu)), 300)
+            color = s.get("fit_color") or F.FIT_LOOK["fit_color"]
+            style = {"dash": QtCore.Qt.PenStyle.DashLine, "dot": QtCore.Qt.PenStyle.DotLine}.get(
+                s.get("fit_style"), QtCore.Qt.PenStyle.SolidLine)
             item = pg.PlotDataItem(xs / kx, f.predict(xs) / ky,
-                                   pen=pg.mkPen("#c62828", width=2, style=QtCore.Qt.PenStyle.DashLine))
+                                   pen=pg.mkPen(color, width=float(s.get("fit_width", 1.5)) * CS.PT_PX, style=style))
             item.setZValue(30)
-            main.addItem(item)
+            item._follow = None
+            if s.get("fit_span", "plot") == "plot":       # across the whole plot, as you zoom and pan too
+                xlog = bool(s.get("xlog"))
+
+                def follow(*_, item=item, vb=main.vb, f=f):
+                    lo, hi = vb.viewRange()[0]
+                    if xlog:                              # the view's x is log10 of the data's
+                        xx = np.logspace(lo, hi, 300) * kx
+                    else:
+                        xx = np.linspace(lo, hi, 300) * kx
+                    with np.errstate(all="ignore"):
+                        item.setData(xx / kx, f.predict(xx) / ky)
+                item._follow = follow
+                main.addItem(item, ignoreBounds=True)     # the curve doesn't move the view
+                follow()
+                main.vb.sigXRangeChanged.connect(follow)
+            else:
+                main.addItem(item)
             chart._sp_fit_item = item
+            text = F.fit_text(s, f)
+            if text:
+                _put_fit_text(chart, main.vb, "<br>".join(text), color, s.get("fit_where", "tl"), self.page._mode)
+        self._show_fit()                          # what it can fit through may have changed (its groups, say)
 
     def figure_of_chart(self) -> tuple[dict, dict]:
         """The live chart as a figure: what it shows, in its look (the same record it draws from)."""
@@ -630,6 +707,36 @@ class SinglePlotPage(QtWidgets.QWidget):
         f.addRow("Through", self.fit_line)
         f.addRow("x from", _row(self.fit_x0, QtWidgets.QLabel("to"), self.fit_x1))
         f.addRow("", use)
+        # how the fitted curve looks, and what's written beside it
+        self.fit_color = QtWidgets.QPushButton("Color…")
+        self.fit_color.setToolTip("The fitted curve's color (and its text's)")
+        self.fit_color.clicked.connect(self._pick_fit_color)
+        self.fit_width = QtWidgets.QDoubleSpinBox(decimals=2, minimum=0.25, maximum=6, singleStep=0.25, suffix=" pt")
+        self.fit_width.setToolTip("How thick the fitted curve is")
+        self.fit_style = QtWidgets.QComboBox()
+        for k, lab in F.FIT_STYLES.items():
+            self.fit_style.addItem(lab, k)
+        f.addRow("Line", _row(self.fit_color, self.fit_width, self.fit_style))
+        self.fit_span = QtWidgets.QComboBox()
+        for k, lab in F.FIT_SPANS.items():
+            self.fit_span.addItem(lab, k)
+        self.fit_span.setToolTip("Draw the fitted curve across the whole plot, or only between the first and last "
+                                 "points it went through (a curve can run off far past the data)")
+        f.addRow("Across", self.fit_span)
+        self.fit_show = {}
+        for k, lab in F.FIT_SHOW.items():
+            b = QtWidgets.QCheckBox(lab)
+            b.toggled.connect(self._fit_edited)
+            self.fit_show[k] = b
+        self.fit_show["r"].setToolTip("For a straight line, the correlation coefficient (signed like the slope); "
+                                      "for other curves, √R²")
+        self.fit_show["coef"].setToolTip("Each coefficient ± its standard error")
+        f.addRow("Write", _row(*self.fit_show.values()))
+        self.fit_where = QtWidgets.QComboBox()
+        for k, lab in F.FIT_WHERE.items():
+            self.fit_where.addItem(lab, k)
+        self.fit_where.setToolTip("Which corner of the plot the text goes in")
+        f.addRow("In the", self.fit_where)
         v.addLayout(f)
         self.fit_result = QtWidgets.QLabel("Pick a model to fit.")
         self.fit_result.setWordWrap(True)
@@ -644,6 +751,10 @@ class SinglePlotPage(QtWidgets.QWidget):
         v.addStretch(1)
         self.fit_degree.valueChanged.connect(self._fit_edited)
         self.fit_line.currentIndexChanged.connect(self._fit_edited)
+        self.fit_width.valueChanged.connect(self._fit_edited)
+        self.fit_style.currentIndexChanged.connect(self._fit_edited)
+        self.fit_where.currentIndexChanged.connect(self._fit_edited)
+        self.fit_span.currentIndexChanged.connect(self._fit_edited)
         for e in (self.fit_x0, self.fit_x1):
             e.editingFinished.connect(self._fit_edited)
         use.clicked.connect(self._fit_use_view)
@@ -654,13 +765,25 @@ class SinglePlotPage(QtWidgets.QWidget):
             return
         self.spec.update(fit=self.fit.currentData(), fit_degree=self.fit_degree.value(),
                          fit_line=max(0, self.fit_line.currentIndex()),
-                         fit_x=[_opt_float(self.fit_x0.text()), _opt_float(self.fit_x1.text())])
+                         fit_x=[_opt_float(self.fit_x0.text()), _opt_float(self.fit_x1.text())],
+                         fit_width=self.fit_width.value(), fit_style=self.fit_style.currentData(),
+                         fit_where=self.fit_where.currentData(), fit_span=self.fit_span.currentData(),
+                         fit_show=[k for k, b in self.fit_show.items() if b.isChecked()])
         self.fit_degree.setEnabled(self.spec["fit"] == "poly")
         if self._live():
-            self._to_look({k: self.spec[k] for k in ("fit", "fit_degree", "fit_line", "fit_x")})
+            self._to_look({k: self.spec[k] for k in ("fit", "fit_degree", "fit_line", "fit_x", *F.FIT_LOOK)})
         else:
             self.draw()
         self._show_fit()
+
+    def _pick_fit_color(self) -> None:
+        if self.spec is None:
+            return
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.spec.get("fit_color") or F.FIT_LOOK["fit_color"]), self)
+        if c.isValid():
+            self.spec["fit_color"] = c.name()
+            self.fit_color.setIcon(QtGui.QIcon(_swatch(c.name())))
+            self._fit_edited()
 
     def _fit_use_view(self) -> None:
         lo, hi = self.spec.get("xlim") or [None, None] if self.spec else (None, None)
@@ -733,10 +856,33 @@ class SinglePlotPage(QtWidgets.QWidget):
         b.setMenu(menu)
         return b
 
-    def _fill_quick(self, menu: QtWidgets.QMenu) -> None:
-        from .canvas import GROUPS, KINDS
+    def _active_button(self) -> QtWidgets.QPushButton:
+        """Active charts ▾: the charts already made (on the whiteboard), each to open here."""
+        b = QtWidgets.QPushButton("Active charts")
+        b.setToolTip("The charts you've made: pick one to open it here")
+        menu = QtWidgets.QMenu(b)
+        menu.setToolTipsVisible(True)
+        menu.aboutToShow.connect(lambda: self._fill_active(menu))
+        b.setMenu(menu)
+        return b
+
+    def _fill_active(self, menu: QtWidgets.QMenu) -> None:
         menu.clear()
-        canvas = self.page.canvas
+        here = list(self.page.canvas.here())
+        if not here:
+            menu.addAction("No charts yet: make one in Quick charts").setEnabled(False)
+        for chart in here:
+            name = getattr(chart, "name", "") or chart.kind
+            a = menu.addAction(name)
+            a.setCheckable(True)
+            a.setChecked(chart is self.focus_chart)           # the one open here
+            a.setToolTip(f"Open this {chart.kind} chart here")
+            a.triggered.connect(lambda _=False, ch=chart: self.focus(ch))
+
+    def _fill_quick(self, menu: QtWidgets.QMenu) -> None:
+        """A new chart of any kind (the ones made are in Active charts)."""
+        from .canvas import GROUPS, KINDS, TOP
+        menu.clear()
 
         def fill(into, entries):
             for e in entries:
@@ -751,22 +897,11 @@ class SinglePlotPage(QtWidgets.QWidget):
                 a.setToolTip(c.tip)
                 a.triggered.connect(lambda _=False, k=c.kind: self.open_quick(k, new=True))
 
-        # the charts already made, each to open here; then a new one of any kind
-        here = list(canvas.here())
-        head = menu.addAction(f"Your charts ({len(here)})" if here else "No charts yet: make one below")
-        head.setEnabled(False)
-        for chart in here:
-            name = getattr(chart, "name", "") or chart.kind
-            a = menu.addAction(("● " if chart is self.focus_chart else "    ") + name)
-            a.setToolTip(f"Open this {chart.kind} chart here")
-            a.triggered.connect(lambda _=False, ch=chart: self.focus(ch))
-        menu.addSeparator()
-        new = menu.addAction("New chart")
-        new.setEnabled(False)
         for group, entries in GROUPS.items():
             sub = menu.addMenu(group)
             sub.setToolTipsVisible(True)
             fill(sub, entries)
+        fill(menu, TOP)
 
     def open_quick(self, kind: str, new: bool = False) -> None:
         """A quick chart of this kind, here in chart focus: a new one (new), else the one already

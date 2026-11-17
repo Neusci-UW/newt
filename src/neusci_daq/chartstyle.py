@@ -19,7 +19,9 @@ LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None],
         "ms": None, "despine": True, "zero": False, "legend": "best",
         "w_mm": None, "h_mm": None,
         "aspect": None,                    # height / width of the plot; None: it fills its room        # None: the chart's shape on screen
-        "fit": "", "fit_degree": 1, "fit_line": 0, "fit_x": [None, None]}
+        "fit": "", "fit_degree": 1, "fit_line": 0, "fit_x": [None, None],
+        "fit_color": "#c62828", "fit_width": 1.5, "fit_style": "dash", "fit_show": [], "fit_where": "tl",
+        "fit_span": "plot"}
 
 LINE_PT = 1.2          # a figure line, in pt, at thick 1.0
 FONT_PT = 9.0          # a figure's label size when the chart's own is kept
@@ -103,8 +105,9 @@ def figure_keys(look: dict, kx: float = 1.0, ky: float = 1.0) -> dict:
             out[key] = [lo * k_, hi * k_]
     if look.get("w_mm"):                   # its width; the height comes from the plot's shape
         out["w_mm"] = float(look["w_mm"])
-    for k in ("fit", "fit_degree", "fit_line"):
+    for k in ("fit", "fit_degree", "fit_line", "fit_color", "fit_width", "fit_style", "fit_where", "fit_span"):
         out[k] = look.get(k, LOOK[k])
+    out["fit_show"] = list(look.get("fit_show") or [])
     out["fit_x"] = list(look.get("fit_x") or [None, None])
     return out
 

@@ -21,22 +21,23 @@ from . import style
 from .plotzoom import AxisGroup
 from .responsecharts import (FitChart, LoopChart, PhaseChart, PsthChart, ResponseChart, ResponseCycleChart,
                              SpikeCycleChart, StaChart, StimulusCycleChart)
-from .spikecharts import (IntervalsChart, PcaChart, RasterChart, RateChart, ScatterChart, SizesChart, StimulusChart,
-                          WaveformsChart)
+from .padcharts import BarsChart, ScatterChart
+from .spikecharts import IntervalsChart, PcaChart, RasterChart, RateChart, SizesChart, StimulusChart, WaveformsChart
 from .waveformview import PhasePlotChart, SlopeChart, VoltsChart
 
-CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart, ScatterChart,
-          ResponseChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
+CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart,
+          ScatterChart, BarsChart, ResponseChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
           LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart)
 KINDS = {c.kind: c for c in CHARTS}
 # the Add chart menu: what you're asking of the data, then (in a dict) a narrower question
 GROUPS = {"Raw recording": ("Response", "Stimulus", "Stimulus fit"),
           "Spikes": ("Raster", "Rate",
                      {"Spike shape": ("Waveforms", "V", "dV/dt", "V against dV/dt", "AP sizes", "PCA map"),
-                      "Timing": ("Intervals",)}, "Scatter"),
+                      "Timing": ("Intervals",)}),
           "Around a stimulus": ("Stimulus-triggered rate", "Spike-triggered average"),
           "Cycles and phase": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase",
                                "Response against stimulus")}
+TOP = ("Scatter", "Bars")               # charts in the menu itself, after the GROUPS
 BOARD = "Board"                    # the board you work on; Save… keeps it as a layout of your own
 SIZE = {"Response": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
 
@@ -444,6 +445,8 @@ class ChartCanvas(QtWidgets.QWidget):
 
         for group, entries in GROUPS.items():
             fill(self._submenu(menu, group, entries), entries)
+        menu.addSeparator()
+        fill(menu, TOP)
 
     def _submenu(self, menu: QtWidgets.QMenu, title: str, entries) -> QtWidgets.QMenu:
         """A submenu, its title saying how many of its charts are open."""

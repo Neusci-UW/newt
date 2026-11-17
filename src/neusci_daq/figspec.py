@@ -28,12 +28,46 @@ LEGENDS = ["best", "upper left", "upper right", "lower left", "lower right", "ou
 FITS = {"": "None", **fitting.MODELS}
 
 
+FIT_LOOK = {"fit_color": "#c62828", "fit_width": 1.5,    # the fitted curve: its color, width (pt), line
+            "fit_style": "dash", "fit_show": [], "fit_where": "tl",   # and what's written beside it, where
+            "fit_span": "plot"}                       # drawn across the whole plot, or just the fitted points
+FIT_SPANS = {"plot": "Whole plot", "data": "Fitted points"}
+FIT_STYLES = {"dash": "Dashed", "solid": "Solid", "dot": "Dotted"}
+FIT_SHOW = {"eq": "Function", "coef": "Coefficients", "r2": "R²", "r": "R"}
+FIT_WHERE = {"tl": "Top left", "tr": "Top right", "bl": "Bottom left", "br": "Bottom right"}
+_MPL_STYLE = {"dash": "--", "solid": "-", "dot": ":"}
+
+
+def fit_R(f) -> float:
+    """R: for a straight line, the correlation coefficient (its sign the slope's); for any
+    other model, √R² (how well the curve follows the points)."""
+    r = float(np.sqrt(max(f.r2, 0.0)))
+    if f.model == "poly" and len(f.params) == 2:
+        r *= 1.0 if f.params[1] >= 0 else -1.0
+    return r
+
+
+def fit_text(spec: dict, f) -> list[str]:
+    """What's written by the fitted curve, line by line, as chosen (Fit tab): the function,
+    each coefficient ± its standard error, R², R."""
+    show = set(spec.get("fit_show") or [])
+    out = [f.equation] if "eq" in show else []
+    if "coef" in show:
+        out += [f"{n} = {v:.4g} ± {e:.2g}" for n, v, e in f.table()]
+    if "r2" in show:
+        out.append(f"R² = {f.r2:.4f}")
+    if "r" in show:
+        out.append(f"R = {fit_R(f):.4f}")
+    return out
+
+
 def new_spec(x: str = "", y: str = "", kind: str = "xy") -> dict:
     return {"kind": kind, "series": [new_series(x, y)] if y else [], "title": "", "xlabel": "", "ylabel": "",
             "xlim": [None, None], "ylim": [None, None], "xlog": False, "ylog": False,
             "font": 9.0, "font_ticks": 0.0, "font_title": 0.0, "ticks": "out", "tick_len": 3.5,
             "lw": 1.2, "ms": 4.0, "grid": False, "legend": "best", "despine": True,
             "zero": False, "fit": "", "fit_degree": 1, "fit_line": 0, "fit_x": [None, None],
+            **{k: list(v) if isinstance(v, list) else v for k, v in FIT_LOOK.items()},
             "w_mm": 80.0, "h_mm": 60.0, "points": True}
 
 
@@ -167,9 +201,24 @@ def _draw(ax, spec: dict, data: dict) -> None:
         got = do_fit(spec, data)
         if got is not None:
             _, f, x = got
-            xs = np.linspace(np.nanmin(x), np.nanmax(x), 300)
-            ax.plot(xs, f.predict(xs), "--", color="#c62828", linewidth=lw * 1.2, zorder=8,
-                    label=f"fit (R² = {f.r2:.3f})")
+            xl, yl = ax.get_xlim(), ax.get_ylim()
+            lim = [v for v in (spec.get("xlim") or [None, None])]
+            lo, hi = (lim[0] if lim[0] is not None else xl[0], lim[1] if lim[1] is not None else xl[1]) \
+                if spec.get("fit_span", "plot") == "plot" else (np.nanmin(x), np.nanmax(x))
+            xs = np.geomspace(lo, hi, 300) if spec.get("xlog") and lo > 0 else np.linspace(lo, hi, 300)
+            color = spec.get("fit_color") or FIT_LOOK["fit_color"]
+            ax.plot(xs, f.predict(xs), _MPL_STYLE.get(spec.get("fit_style"), "--"), color=color,
+                    linewidth=float(spec.get("fit_width", FIT_LOOK["fit_width"])), zorder=8, label="fit")
+            ax.set_xlim(xl)                           # the curve doesn't move the axes
+            ax.set_ylim(yl)
+            text = fit_text(spec, f)
+            if text:
+                where = spec.get("fit_where", "tl")
+                ax.text(0.97 if "r" in where else 0.03, 0.03 if "b" in where else 0.97, "\n".join(text),
+                        transform=ax.transAxes, ha="right" if "r" in where else "left",
+                        va="bottom" if "b" in where else "top", color=color, zorder=9,
+                        fontsize=float(spec.get("font", 9) or 9) * 0.9,
+                        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.8, "pad": 2})
     else:
         for s in series:
             x, y = _xy(data, s)
@@ -213,6 +262,9 @@ def _draw(ax, spec: dict, data: dict) -> None:
         if lim and any(v is not None for v in lim):
             setter(*[v if v is not None else None for v in lim])
     for key, axis_, log in (("xticks", ax.xaxis, spec.get("xlog")), ("yticks", ax.yaxis, spec.get("ylog"))):
+        if data.get(key) and data.get(key + "_text") and not log:     # its named ticks, each with its name
+            axis_.set_ticks(data[key], data[key + "_text"])
+            continue
         if data.get(key) and not log:                     # a live chart's own tick numbers
             lo_, hi_ = sorted((ax.get_xlim() if key == "xticks" else ax.get_ylim()))
             vals = [v for v in data[key] if lo_ - 1e-9 * abs(hi_ - lo_) <= v <= hi_ + 1e-9 * abs(hi_ - lo_)]
@@ -582,6 +634,11 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     for key, ax_, k_, length in (("xticks", bottom, kx, bottom.width()), ("yticks", left, ky, left.height())):
         if "scalebar" in data_ticks:
             break
+        custom = getattr(ax_, "_tickLevels", None)       # ticks of its own, named (groups, 90°)
+        if custom and custom[0]:
+            data_ticks[key] = [round(float(v) * k_, 12) for v, _ in custom[0]]
+            data_ticks[key + "_text"] = [str(s) for _, s in custom[0]]
+            continue
         try:                                              # the numbers the chart labels its axes with
             lo_, hi_ = ax_.range
             levels = ax_.tickValues(lo_, hi_, length)
@@ -603,6 +660,10 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     data = {"curves": curves, "marks": marks, "bands": bands, **data_ticks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
             "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item),
             "pt_px": pt_px, "lw0": float(spec.get("lw", 1.2))}
+    sets = getattr(chart, "fit_sets", None)            # a chart of points: its series and groups, to fit
+    if callable(sets):
+        data["points"] = [{"name": n, "x": [float(v) * kx for v in x], "y": [float(v) * ky for v in y]}
+                          for n, x, y in sets()]
     return spec, data
 
 
@@ -632,6 +693,8 @@ def fit_lines(spec: dict, data: dict) -> list[tuple[str, np.ndarray, np.ndarray]
     """What a fit can go through: [(name, x, y)], each line or series of the figure (each group
     of a series split by group; a chart's every line, its averages first)."""
     out = []
+    if spec.get("kind") == "curves" and "points" in data:     # a chart of points names what can be fitted
+        return [(p["name"], np.asarray(p["x"], float), np.asarray(p["y"], float)) for p in data["points"]]
     if spec.get("kind") == "curves":
         curves = data.get("curves", [])
         bold = [k for k, c in enumerate(curves) if c.get("width", 1) >= max((d.get("width", 1) for d in curves),
@@ -696,7 +759,7 @@ def fit_report(spec: dict, data: dict) -> str:
     rows = "".join(f"<tr><td><b>{n}</b></td><td align=right>{v:.5g}</td><td>± {e:.3g}</td></tr>"
                    for n, v, e in f.table())
     return (f"<b>{name}</b><br>{f.equation}<br><table cellspacing=4>{rows}</table>"
-            f"R² = {f.r2:.4f} &nbsp; n = {f.n}")
+            f"R² = {f.r2:.4f} &nbsp; R = {fit_R(f):.4f} &nbsp; n = {f.n}")
 
 
 def _fit(ax, model, x, y, color, lw):

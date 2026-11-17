@@ -27,7 +27,6 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import datapad as D
-from . import figspec
 from . import padmodel as P
 from . import style
 from .simplestim import DIM
@@ -1104,6 +1103,7 @@ class PadView(QtWidgets.QWidget):
 
     columns_changed = QtCore.Signal()
     table_changed = QtCore.Signal()
+    went_stale = QtCore.Signal()            # its trials or groups changed; it works the table out when next shown
 
     def __init__(self, page):
         super().__init__()
@@ -1174,7 +1174,7 @@ class PadView(QtWidgets.QWidget):
         menu.addAction("Python", lambda: self.add_column("python"))
         self.btn_col.setMenu(menu)
         self.btn_plot = QtWidgets.QPushButton("Plot…")
-        self.btn_plot.setToolTip("Make a figure of columns in Single Plot")
+        self.btn_plot.setToolTip("Plot columns in a live chart: Y against X (Scatter) or by group (Bars)")
         self.btn_scatter = QtWidgets.QPushButton("Scatter")
         self.btn_scatter.hide()                 # shown once two columns are picked (click, then ⌘-click)
         self.btn_recipe = QtWidgets.QToolButton(text="Recipe ▾")
@@ -1348,8 +1348,15 @@ class PadView(QtWidgets.QWidget):
 
     def refresh(self) -> None:
         self._stale = True
+        self.went_stale.emit()
         if self.isVisible():
             self._timer.start()
+
+    def fresh(self) -> None:
+        """Work the table out now if it's waiting to be (the DataPad hidden, a chart of it showing)."""
+        if self._stale:
+            self._timer.stop()
+            self._recompute()
 
     def showEvent(self, ev):
         super().showEvent(ev)
@@ -1881,7 +1888,7 @@ class PadView(QtWidgets.QWidget):
         self.btn_scatter.setVisible(pair is not None)
         if pair:
             x, y = (P.html_name(self._shown_name(n)) for n in pair)
-            self.btn_scatter.setToolTip(f"{y} against {x}, one point per row, in Single Plot")
+            self.btn_scatter.setToolTip(f"{y} against {x}, one point per row, in a Scatter chart")
 
     def _header_menu(self, idx: int, at: QtCore.QPoint) -> None:
         """Right-click a column: edit it, plot, or scatter it against another."""
@@ -1900,12 +1907,17 @@ class PadView(QtWidgets.QWidget):
         menu.exec(at)
 
     def scatter(self, x: str, y: str) -> None:
-        """Y against X, one point per row, in a square plot, in Single Plot."""
-        spec = figspec.new_spec(kind="xy")
-        spec["series"] = [figspec.new_series(x, y)]
-        spec["points"] = True
-        spec["aspect"] = 1.0
-        self.page.open_plot(spec)
+        """Y against X, one point per row: a Scatter chart (live, on the whiteboard) of these
+        columns, opened big in chart focus. Make a figure there turns it into a figure."""
+        self._open_chart("Scatter", x, [y])
+
+    def _open_chart(self, kind: str, *chosen) -> None:
+        """A new Scatter or Bars chart (padcharts.py) of the columns chosen here, big in chart focus."""
+        chart = self.page.canvas.add(kind)
+        if chart is None:
+            return
+        chart.choose(*chosen)
+        self.page.single_plot.focus(chart)
 
     def rename(self, c: P.Column, new: str) -> None:
         old = c.name
@@ -2206,19 +2218,28 @@ class PadView(QtWidgets.QWidget):
             it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(QtCore.Qt.CheckState.Unchecked)
             ys.addItem(it)
-        cur = self.current()
-        y_default = cur.name if cur is not None and cur.name in names else names[-1]
-        ys.item(names.index(y_default)).setCheckState(QtCore.Qt.CheckState.Checked)
-        if len(names) >= 2:
-            x.setCurrentIndex(1 if names[0] != y_default else 2)
+        for box in (kind, x):                       # nothing chosen for you: you choose what to plot
+            box.setPlaceholderText("Choose…")
+            box.setCurrentIndex(-1)
         ys.setMaximumHeight(160)
         f.addRow("Kind", kind)
         f.addRow("X", x)
         f.addRow("Y", ys)
-        kind.currentIndexChanged.connect(lambda *_: x.setEnabled(kind.currentData() == "xy"))
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok
                                         | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
-        bb.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Open in Single Plot")
+        ok = bb.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        ok.setText("Open chart")
+
+        def ready(*_) -> None:
+            """Open only once the kind, the Y columns and (for Y against X) the X are chosen."""
+            x.setEnabled(kind.currentData() != "bar")
+            ticked = any(ys.item(k).checkState() == QtCore.Qt.CheckState.Checked for k in range(ys.count()))
+            ok.setEnabled(kind.currentIndex() >= 0 and ticked and (kind.currentData() == "bar" or x.currentIndex() >= 0))
+
+        kind.currentIndexChanged.connect(ready)
+        x.currentIndexChanged.connect(ready)
+        ys.itemChanged.connect(ready)
+        ready()
         bb.accepted.connect(dlg.accept)
         bb.rejected.connect(dlg.reject)
         f.addRow(bb)
@@ -2228,10 +2249,10 @@ class PadView(QtWidgets.QWidget):
                   if ys.item(k).checkState() == QtCore.Qt.CheckState.Checked]
         if not picked:
             return
-        spec = figspec.new_spec(kind=kind.currentData())
-        spec["series"] = [figspec.new_series(x.currentData() if kind.currentData() == "xy" else "", y)
-                          for y in picked]
-        self.page.open_plot(spec)
+        if kind.currentData() == "bar":
+            self._open_chart("Bars", picked)
+        else:
+            self._open_chart("Scatter", x.currentData(), picked)
 
 
 def _rename(expr: str, old: str, new: str) -> str:

@@ -100,7 +100,9 @@ class WheelViewBox(pg.ViewBox):
             if not item.isVisible() or not hasattr(item, "dataBounds"):
                 continue
             try:
-                b = item.dataBounds(axis)
+                b = _time_ends(item) if axis == 0 else None
+                if b is None:
+                    b = item.dataBounds(axis)
             except Exception:
                 continue
             if b is None or b[0] is None or b[1] is None:
@@ -262,6 +264,18 @@ def light_curve(item: pg.PlotDataItem) -> pg.PlotDataItem:
     item.opts["autoDownsampleFactor"] = 1.0
     item.updateItems()
     return item
+
+
+def _time_ends(item) -> tuple[float, float] | None:
+    """Where a trace starts and ends in time, from all of it: what's drawn is only what's in
+    view (clipped to it), so its bounds would stop zooming out at the view itself."""
+    if not isinstance(item, pg.PlotDataItem):
+        return None
+    x = item.getOriginalDataset()[0]
+    if x is None or not len(x):
+        return None
+    a, b = float(x[0]), float(x[-1])
+    return (min(a, b), max(a, b)) if np.isfinite(a) and np.isfinite(b) else None
 
 
 class TraceCurve(pg.PlotDataItem):

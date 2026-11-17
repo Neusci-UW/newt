@@ -257,8 +257,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.body.addWidget(self.rail)
         self.body.addWidget(self.drawer)
         self.body.addWidget(self.pad_view, 1)
-        self.side_scroll.hide()                       # the whiteboard's panel: not used (charts are figures now)
-        self.single_plot.adopt_chart_options()        # each chart's own settings: Single Plot's Chart tab
+        self.side_scroll.hide()                       # shown in Single Plot's chart focus, where charts change
         lay.addLayout(self.body, 1)
         self.open_panel(self.main.settings.value("analysis/panel", "trials"))
 

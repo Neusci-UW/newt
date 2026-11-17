@@ -143,6 +143,41 @@ class SinglePlotPage(QtWidgets.QWidget):
         fig_lay = QtWidgets.QHBoxLayout(fig_page)
         fig_lay.setContentsMargins(0, 0, 0, 0)
         self.mode.addWidget(fig_page)
+        focus_page = QtWidgets.QWidget()
+        fl = QtWidgets.QHBoxLayout(focus_page)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fcol = QtWidgets.QVBoxLayout()
+        fbar = QtWidgets.QHBoxLayout()
+        self.btn_back = QtWidgets.QPushButton("◀ Figures")
+        self.btn_back.setToolTip("Back to the figure you were making (the chart stays in Quick charts › Your charts)")
+        self.focus_title = QtWidgets.QLabel()
+        self.focus_title.setMinimumWidth(0)          # long names shrink, never widen the window
+        self.focus_title.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
+        self.btn_figure = QtWidgets.QPushButton("Edit as figure…")
+        self.btn_figure.setToolTip("Optional: what this chart shows now, as a figure to restyle (fonts, ticks, "
+                                   "fits) before it goes to the Canvas")
+        fbar.addWidget(self.btn_back)
+        fbar.addWidget(self._quick_button())
+        self._fbar = fbar                        # the "only the selection" tick goes here (page.only_selection_box)
+        fbar.addWidget(self.focus_title, 1)
+        fbar.addWidget(self.btn_figure)
+        fcol.addLayout(fbar)
+        self._fbar2 = QtWidgets.QHBoxLayout()        # a second row: what the charts show (page's ticks)
+        self._fbar2.addStretch(1)
+        fcol.addLayout(self._fbar2)
+        self.focus_holder = QtWidgets.QVBoxLayout()
+        fcol.addLayout(self.focus_holder, 1)
+        fl.addLayout(fcol, 1)
+        self.focus_side = QtWidgets.QVBoxLayout()
+        fl.addLayout(self.focus_side)
+        self.mode.addWidget(focus_page)
+        self.btn_back.clicked.connect(lambda: self.leave_focus(switch=False))
+        self.btn_figure.clicked.connect(self._chart_figure)
+        self.btn_chart_canvas = QtWidgets.QPushButton("Send to Canvas")
+        self.btn_chart_canvas.setToolTip("Put this chart on the Plot Canvas, as it looks now (its zoom, lines, markers "
+                                         "and threshold), in one step")
+        self.btn_chart_canvas.clicked.connect(self._chart_to_canvas)
+        fbar.addWidget(self.btn_chart_canvas)
         left = QtWidgets.QVBoxLayout()
         bar = QtWidgets.QHBoxLayout()
         bar.addWidget(self._quick_button())
@@ -155,9 +190,6 @@ class SinglePlotPage(QtWidgets.QWidget):
         for b in (self.btn_copy, self.btn_save, self.btn_canvas):
             bar.addWidget(b)
         left.addLayout(bar)
-        self._fbar2 = QtWidgets.QHBoxLayout()        # what the charts show: only the selection, baseline, gains
-        self._fbar2.addStretch(1)
-        left.addLayout(self._fbar2)
         self.area = QtWidgets.QWidget()
         self.area.setStyleSheet("background: #e9ebee")
         al = QtWidgets.QGridLayout(self.area)
@@ -266,14 +298,6 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.right.setMaximumWidth(340)
         self.right.addTab(scroll, "Figure")
         self.right.addTab(self._fit_tab(), "Fit")
-        # a quick chart's own settings (its channels, averages or trials, spikes…): the figure follows them
-        self.chart_tab = QtWidgets.QWidget()
-        self._chart_lay = QtWidgets.QVBoxLayout(self.chart_tab)
-        self._chart_lay.setContentsMargins(0, 0, 0, 0)
-        self.right.addTab(self.chart_tab, "Chart")
-        self.right.setTabVisible(self.right.indexOf(self.chart_tab), False)
-        self._regen = QtCore.QTimer(self, singleShot=True, interval=150)
-        self._regen.timeout.connect(lambda: self._chart_figure(fresh=False))
         fig_lay.addWidget(self.right)
 
         for w in (self.t_title, self.t_x, self.t_y, self.x0, self.x1, self.y0, self.y1):
@@ -294,9 +318,9 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.show_spec(None)
 
     # -- the figure -------------------------------------------------------------------------
-    def show_spec(self, spec: dict | None, keep_chart: bool = False) -> None:
-        if not keep_chart:                       # a figure of DataPad columns (or none): no chart behind it
-            self._detach_chart()
+    def show_spec(self, spec: dict | None) -> None:
+        if self.focus_chart is not None:
+            self.leave_focus(switch=False)
         self.spec = spec
         has = spec is not None
         self.side.setEnabled(has)
@@ -344,9 +368,8 @@ class SinglePlotPage(QtWidgets.QWidget):
         for w in (self.kind, self.btn_add):
             w.setVisible(not drawn)
         self.from_chart.setVisible(drawn)
-        self.from_chart.setText("A quick chart's lines, markers and threshold. What it shows (channels, averages "
-                                "or trials, spikes…) is set in the Chart tab, and the figure follows it." if drawn
-                                else "")
+        self.from_chart.setText("The lines of a quick chart, as they were when you made the figure. "
+                                "Make it again from the chart to update it." if drawn else "")
         self._loading = False
         self.data_changed()
 
@@ -438,7 +461,7 @@ class SinglePlotPage(QtWidgets.QWidget):
     def showEvent(self, ev):
         super().showEvent(ev)
         self.page.dock_panels(self.outer)          # pick trials and colors here too
-        if self.spec is not None:
+        if self.spec is not None and self.mode.currentIndex() == 0:
             self.data_changed()
 
     def hideEvent(self, ev):
@@ -523,63 +546,28 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.fit_result.setText(F.fit_report(self.spec, self.data) if self.spec.get("fit") else
                                 "Pick a model to fit: the fitted curve shows on the figure as a red dashed line.")
 
-    # -- a quick chart, as a figure ----------------------------------------------------------------
+    # -- chart focus --------------------------------------------------------------------------
     def focus(self, chart) -> None:
-        """Open a quick chart here as a figure, with the look controls (Figure, Fit) and the
-        chart's own settings (Chart). The figure follows the chart's settings and the trials."""
+        """Open a whiteboard chart here, big, with its settings."""
+        if self.focus_chart is chart:
+            self.page.show_sub("singleplot")
+            return
+        self.leave_focus(switch=False)
+        frame = chart.dock
+        if frame is None:
+            return
+        self.focus_chart, self._home = chart, frame
+        frame.layout().removeWidget(chart)
+        self.focus_holder.addWidget(chart, 1)
+        chart.show()
+        self.focus_side.addWidget(self.page.side_scroll)
+        self.page.side_scroll.show()
+        self.page.canvas.select(chart)
+        self.focus_title.setText(f"<b>{getattr(chart, 'name', '')}</b> · its settings are on the right")
+        self.mode.setCurrentIndex(1)
         self.page.show_sub("singleplot")
-        if self.focus_chart is chart and self.spec is not None:
-            return
-        self._detach_chart()
-        self.focus_chart = chart
-        self.page.canvas.select(chart)                # its settings show in the Chart tab
-        orig = chart.refresh
-
-        def refresh(*a, _orig=orig, **k):              # its settings or the trials changed: the figure follows
-            _orig(*a, **k)
-            if self.focus_chart is chart:
-                self._regen.start()
-        chart.refresh = refresh
-        chart._sp_orig_refresh = orig
-        self.editing = None
-        self._chart_figure(fresh=True)
-        self.right.setTabVisible(self.right.indexOf(self.chart_tab), True)
-
-    def adopt_chart_options(self) -> None:
-        """The charts' settings (one page per chart) live in the Chart tab, not beside a whiteboard."""
-        opts = self.page.canvas.options
-        opts.setParent(None)
-        self._chart_lay.addWidget(scroll_column(opts))
-        opts.show()
-
-    def _detach_chart(self) -> None:
-        chart, self.focus_chart = self.focus_chart, None
-        if chart is not None and hasattr(chart, "_sp_orig_refresh"):
-            chart.refresh = chart._sp_orig_refresh
-            del chart._sp_orig_refresh
-        if hasattr(self, "chart_tab"):
-            self.right.setTabVisible(self.right.indexOf(self.chart_tab), False)
-
-    def _chart_figure(self, fresh: bool = False) -> None:
-        """The chart's lines, markers and labels now, as the figure (fresh: a new figure; else the
-        look you've set stays and only the numbers change)."""
-        chart = self.focus_chart
-        if chart is None:
-            return
-        try:
-            chart.redraw()                             # it draws off screen: the figure is what you see
-            spec, data = F.from_chart(chart, view=False)
-        except Exception as e:
-            self.title.setText(f"<b>{getattr(chart, 'name', '')}</b> · can't draw it: {e}")
-            return
-        self.data = data
-        if fresh or self.spec is None or self.spec.get("kind") != "curves":
-            self.show_spec(spec, keep_chart=True)
-        else:
-            self.data_changed()
-
-    def leave_focus(self, switch: bool = True) -> None:   # kept for callers: there's no whiteboard to go back to
-        self._detach_chart()
+        if hasattr(chart, "refresh"):
+            chart.refresh()
 
     def _quick_button(self) -> QtWidgets.QPushButton:
         """Quick charts ▾: any whiteboard chart (Response, Raster, Rate…), opened here to look at
@@ -637,6 +625,48 @@ class SinglePlotPage(QtWidgets.QWidget):
             chart = canvas.add(kind)
         if chart is not None:
             self.focus(chart)
+
+    def leave_focus(self, switch: bool = True) -> None:
+        chart = self.focus_chart
+        if chart is None:
+            return
+        self.focus_chart = None
+        self.focus_holder.removeWidget(chart)
+        home = self._home
+        try:
+            home.layout().addWidget(chart, 1)
+            chart.show()
+        except RuntimeError:                     # its frame went (the chart was closed)
+            pass
+        self.page.side_scroll.hide()
+        self.mode.setCurrentIndex(0)
+        if switch:
+            self.page.show_sub("analysis")
+
+    def _chart_to_canvas(self) -> None:
+        """The chart, as it looks now, straight onto the Plot Canvas (no stop in figure editing)."""
+        if self.focus_chart is None:
+            return
+        try:
+            spec, data = F.from_chart(self.focus_chart)
+        except Exception as e:
+            QtWidgets.QMessageBox.information(self, "Send to Canvas", f"Can't make a figure of it: {e}")
+            return
+        self.page.plot_canvas.add_panel(spec, data, linked=False)
+        self.page.show_sub("plotcanvas")
+
+    def _chart_figure(self) -> None:
+        if self.focus_chart is None:
+            return
+        try:
+            spec, data = F.from_chart(self.focus_chart)
+        except Exception as e:
+            QtWidgets.QMessageBox.information(self, "Make a figure", f"Can't make a figure of it: {e}")
+            return
+        self.leave_focus(switch=False)
+        self.editing = None
+        self.data = data
+        self.show_spec(spec)
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)

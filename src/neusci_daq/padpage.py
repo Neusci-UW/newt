@@ -1431,7 +1431,7 @@ class PadView(QtWidgets.QWidget):
         else:
             keep, x = np.ones(len(t), bool), t
         side = self.page.raw.marker_side(ev.amplitude[m])
-        lift = 0.05 * float(np.nanmax(y) - np.nanmin(y) or 1.0)
+        lift = 0.10 * float(np.nanmax(y) - np.nanmin(y) or 1.0)      # well clear of the AP
         self.preview.show_spikes(x[keep], (y[k] + side * lift)[keep], self.page.raw.brushes(units[keep]),
                                  side[keep])
 

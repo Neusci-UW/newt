@@ -459,10 +459,14 @@ class ResponseChart(Chart):
             side = self.finder.marker_side(ev.amplitude[show])
             h = self._event_heights(ev)[show]
             ok = np.isfinite(h)
-            lift = 0.05 * float(np.nanmax(h) - np.nanmin(h)) if ok.sum() > 1 else 0.0
-            if not lift:
-                (_, _), (y0, y1) = self.plots()[0].getPlotItem().getViewBox().viewRange()
-                lift = 0.05 * (y1 - y0)
+            # well clear of the AP: a tenth of the traces' height (their full swing, spikes included)
+            spans = []
+            for b in np.unique(ev.block[show])[:5]:
+                y = self._trace(int(b))
+                if y is not None and np.isfinite(y).any():
+                    spans.append(float(np.nanmax(y) - np.nanmin(y)))
+            span = max(spans) if spans else (float(np.nanmax(h) - np.nanmin(h)) if ok.sum() > 1 else 1.0)
+            lift = 0.10 * (span or 1.0)
             self.marks.setData(ev.t[show], h + side * lift, brush=self.finder.brushes(ev.unit[show]),
                                size=self.mark_size.value(), symbol=["t" if s > 0 else "t1" for s in side],
                                pen=pg.mkPen(self._fg(), width=1) if hl else pg.mkPen(None))

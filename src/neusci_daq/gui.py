@@ -963,7 +963,13 @@ def run(cfg: Config, config_path: str | Path | None = None, open_path: str | Non
     saved = QtCore.QSettings("neusci", "neusci-daq-visualizer").value("plot_theme", theme.DARK)
     style.apply(app, style.DARK if saved == theme.DARK else style.LIGHT)
     w = MainWindow(cfg, config_path=config_path)
-    w.resize(1300, 200 + 180 * len(cfg.channels))    # the size it goes back to if un-maximized
+    # The size it goes back to if un-maximized: always smaller than the display it opens
+    # on (less the menu bar and Dock), and centred on it.
+    room = w.screen().availableGeometry()
+    size = QtCore.QSize(min(1300, int(room.width() * 0.85)),
+                        min(200 + 180 * len(cfg.channels), int(room.height() * 0.85)))
+    w.setGeometry(QtWidgets.QStyle.alignedRect(QtCore.Qt.LayoutDirection.LeftToRight,
+                                               QtCore.Qt.AlignmentFlag.AlignCenter, size, room))
     w.showMaximized()                                  # open filling the screen
     if open_path:
         opener.waiting.append(str(Path(open_path).resolve()))

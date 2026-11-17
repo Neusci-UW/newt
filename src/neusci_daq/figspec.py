@@ -344,6 +344,14 @@ def _marker_px(it, d) -> float:
     return float(it.opts.get("size", 7) or 7)
 
 
+def paper_font(spec: dict) -> float:
+    """The label size in pt as it prints, at the figure's width."""
+    f = float(spec.get("font", 9.0))
+    if spec.get("w0_mm") and spec.get("w_mm"):
+        f *= float(spec["w_mm"]) / float(spec["w0_mm"])
+    return f
+
+
 def _pt(css, default: float) -> float:
     """A CSS font size ('9pt', '12px') in pt; a pixel is a point in Qt's logical units."""
     if not css:
@@ -488,7 +496,15 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     look = getattr(chart, "look", None)
     if look is not None:                                  # its look: the same record the chart draws from
         from . import chartstyle
-        spec.update(chartstyle.figure_keys(look, kx, ky))
+        keys = chartstyle.figure_keys(look, kx, ky)
+        if spec.get("w0_mm"):                             # text sizes you set are pt on the figure at its width
+            w_fig = float(keys.get("w_mm") or spec["w_mm"])
+            for key in ("font", "font_ticks", "font_title"):
+                if key in keys:
+                    keys[key] = keys[key] * float(spec["w0_mm"]) / w_fig
+        spec.update(keys)
+        if wpx > 50 and hpx > 50:
+            spec["h_mm"] = round(float(spec["w_mm"]) * hpx / wpx, 1)
     # lines and markers keep their size against the plot: a screen pixel of a plot wpx wide is
     # w_mm / wpx of the figure (fonts stay in pt, to be read on paper)
     pt_px = 72.0 / dpi if wpx > 50 else 0.35            # at the design size: a screen pixel in pt

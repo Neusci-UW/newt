@@ -17,7 +17,8 @@ LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None],
         "title": "", "xlabel": "", "ylabel": "", "xlog": False, "ylog": False,
         "font": None, "font_ticks": None, "font_title": None, "ticks": "out", "tick_len": 3.5,
         "ms": None, "despine": True, "zero": False, "legend": "best",
-        "w_mm": None, "h_mm": None,        # None: the chart's shape on screen
+        "w_mm": None, "h_mm": None,
+        "aspect": None,                    # height / width of the plot; None: it fills its room        # None: the chart's shape on screen
         "fit": "", "fit_degree": 1, "fit_line": 0, "fit_x": [None, None]}
 
 LINE_PT = 1.2          # a figure line, in pt, at thick 1.0
@@ -47,12 +48,23 @@ def thick_of(pt: float) -> float:
     return float(pt) / LINE_PT
 
 
-def fonts(look: dict) -> tuple[float | None, float | None, float | None]:
-    """(labels, numbers, title) in pt; None where the chart keeps its own."""
+FIG_MM = 120.0         # a figure's width on the Canvas unless you set one
+
+
+def fonts(look: dict, scale: float = 1.0) -> tuple[float | None, float | None, float | None]:
+    """(labels, numbers, title) in pt on the figure, × scale; None where the chart keeps its own."""
     lab = look.get("font")
     tick = look.get("font_ticks") or (lab * 0.9 if lab else None)
     title = look.get("font_title") or (lab * 1.1 if lab else None)
-    return lab, tick, title
+    return tuple(v * scale if v else None for v in (lab, tick, title))
+
+
+def screen_scale(look: dict, wpx: float, dpi: float) -> float:
+    """Text sizes are pt on the figure (FIG_MM wide, or the size you set); the chart on screen
+    is wider, so its text is that much bigger, keeping the same proportions."""
+    if wpx < 50 or not dpi:
+        return 1.0
+    return (wpx / dpi * 25.4) / float(look.get("w_mm") or FIG_MM)
 
 
 def tick_px(look: dict) -> int:
@@ -87,8 +99,8 @@ def figure_keys(look: dict, kx: float = 1.0, ky: float = 1.0) -> dict:
         lo, hi = (list(look.get(axis) or []) + [None, None])[:2]
         if lo is not None and hi is not None:
             out[key] = [lo * k_, hi * k_]
-    if look.get("w_mm") and look.get("h_mm"):
-        out["w_mm"], out["h_mm"] = float(look["w_mm"]), float(look["h_mm"])
+    if look.get("w_mm"):                   # its width; the height comes from the plot's shape
+        out["w_mm"] = float(look["w_mm"])
     for k in ("fit", "fit_degree", "fit_line"):
         out[k] = look.get(k, LOOK[k])
     out["fit_x"] = list(look.get("fit_x") or [None, None])

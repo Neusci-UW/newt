@@ -169,6 +169,8 @@ class SinglePlotPage(QtWidgets.QWidget):
         self._fbar2.addStretch(1)
         fcol.addLayout(self._fbar2)
         self.focus_holder = QtWidgets.QVBoxLayout()
+        self.chart_box = _AspectBox()                 # the chart, at the shape you chose
+        self.focus_holder.addWidget(self.chart_box, 1)
         fcol.addLayout(self.focus_holder, 1)
         fl.addLayout(fcol, 1)
         self.focus_side = QtWidgets.QVBoxLayout()
@@ -291,6 +293,11 @@ class SinglePlotPage(QtWidgets.QWidget):
         g.addRow(self.grid)
         g.addRow(self.zero)
         g.addRow(self.points)
+        self.shape = QtWidgets.QComboBox()
+        for lab, a in SHAPES:
+            self.shape.addItem(lab, a)
+        self.shape.setToolTip("The chart's shape (height to width), on screen and on the Canvas")
+        g.addRow("Shape", self.shape)
         g.addRow("Size", _row(self.w_mm, QtWidgets.QLabel("×"), self.h_mm))
         sl.addLayout(g)
         sl.addStretch(1)
@@ -309,7 +316,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.ticks.currentIndexChanged.connect(self._edited)
         for w in (self.font, self.font_ticks, self.font_title, self.tick_len, self.lw, self.ms, self.w_mm, self.h_mm):
             w.valueChanged.connect(self._edited)
-        for w in (self.legend, self.kind):
+        for w in (self.legend, self.kind, self.shape):
             w.currentIndexChanged.connect(self._edited)
         self.fit.currentIndexChanged.connect(self._fit_edited)
         for w in (self.xlog, self.ylog, self.despine, self.grid, self.zero, self.points):
@@ -355,6 +362,10 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.lw.setValue(s["lw"])
         self.ms.setValue(s["ms"])
         self.legend.setCurrentText(s["legend"])
+        a = s.get("aspect")
+        self.shape.setCurrentIndex(max(0, next((i for i, (_, v) in enumerate(SHAPES)
+                                                if v is not None and a is not None and abs(v - a) < 1e-3),
+                                               0 if a is None else -1)))
         self.fit.setCurrentIndex(max(0, self.fit.findData(s["fit"])))
         self.fit_degree.setValue(int(s.get("fit_degree", 1)))
         self.fit_degree.setEnabled(s.get("fit") == "poly")
@@ -367,6 +378,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.points.setChecked(s.get("points", True))
         self.w_mm.setValue(s["w_mm"])
         self.h_mm.setValue(s["h_mm"])
+        self.h_mm.setEnabled(not live)                 # a live chart's height follows its Shape
         self._fill_series()
         self._shown = self._ui_values()              # what the boxes show now: edits are measured from this
         drawn = s["kind"] == "curves"
@@ -429,6 +441,7 @@ class SinglePlotPage(QtWidgets.QWidget):
                     font_title=self.font_title.value(), ticks=self.ticks.currentData(), tick_len=self.tick_len.value(),
                     lw=self.lw.value(), ms=self.ms.value(),
                     legend=self.legend.currentText(), despine=self.despine.isChecked(),
+                    aspect=self.shape.currentData(),
                     grid=self.grid.isChecked(), zero=self.zero.isChecked(), points=self.points.isChecked(),
                     w_mm=self.w_mm.value(), h_mm=self.h_mm.value())
 
@@ -479,16 +492,23 @@ class SinglePlotPage(QtWidgets.QWidget):
                 lo, hi = (list(v or []) + [None, None])[:2]
                 kk = kx if k == "xlim" else ky
                 L[k[0]] = [lo / kk, hi / kk] if lo is not None and hi is not None and hi > lo else [None, None]
-            elif k in ("w_mm", "h_mm"):
-                L["w_mm"], L["h_mm"] = self.spec["w_mm"], self.spec["h_mm"]
+            elif k == "w_mm":                     # its width on the Canvas; the height follows the shape
+                L["w_mm"] = v
+            elif k == "aspect":
+                L["aspect"] = v
+                self.chart_box.set_aspect(v)
             elif k in ("font_ticks", "font_title", "ms"):
                 L[k] = v or None
             elif k in self._LOOK_KEYS:
                 L[k] = list(v) if isinstance(v, list) else v
-        if any(k in changed for k in ("title", "xlabel", "ylabel", "xlim", "ylim", "grid")):
+        if any(k in changed for k in ("title", "xlabel", "ylabel", "xlim", "ylim", "grid", "font", "font_ticks",
+                                      "font_title")):
             chart.refresh()                       # its own labels, view and grid, drawn again under the look
         chart.apply_look()
         chart.saved()
+        if "aspect" in changed or "w_mm" in changed:     # the chart's own text, in pt on the figure, changed
+            QtCore.QTimer.singleShot(150, lambda: self.focus_chart is chart and self.show_spec(self._live_spec(chart),
+                                                                                                 live=True))
 
     def _live_spec(self, chart) -> dict:
         """What the Figure tab shows for a live chart: its look, ranges left auto shown blank."""
@@ -496,6 +516,12 @@ class SinglePlotPage(QtWidgets.QWidget):
         L = chart.look
         kx, ky = float(self.data.get("kx", 1.0) or 1.0), float(self.data.get("ky", 1.0) or 1.0)
         spec.update(title=L.get("title", ""), xlabel=L.get("xlabel", ""), ylabel=L.get("ylabel", ""))
+        if spec.get("w0_mm"):                     # text sizes shown as pt on the figure, at its width
+            k = float(spec["w_mm"]) / float(spec["w0_mm"])
+            for key in ("font", "font_ticks", "font_title"):
+                if spec.get(key):
+                    spec[key] = round(float(spec[key]) * k * 2) / 2
+        spec["aspect"] = L.get("aspect")
         for key, axis, k_ in (("xlim", "x", kx), ("ylim", "y", ky)):
             lo, hi = (list(L.get(axis) or []) + [None, None])[:2]
             spec[key] = [lo * k_, hi * k_] if lo is not None and hi is not None else [None, None]
@@ -666,7 +692,7 @@ class SinglePlotPage(QtWidgets.QWidget):
             return
         self.focus_chart, self._home = chart, frame
         frame.layout().removeWidget(chart)
-        self.focus_holder.addWidget(chart, 1)
+        self.chart_box.put(chart, chart.look.get("aspect"))
         chart.show()
         self.page.canvas.select(chart)
         # beside it: the chart's own settings (Chart), and the look (Figure) and Fit, on this chart
@@ -762,7 +788,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.focus_side.removeWidget(self.right)
         self._fig_lay.addWidget(self.right)
         self.page.side_scroll.setParent(self.page)
-        self.focus_holder.removeWidget(chart)
+        self.chart_box.take()
         home = self._home
         try:
             home.layout().addWidget(chart, 1)
@@ -830,6 +856,64 @@ class SinglePlotPage(QtWidgets.QWidget):
 
     def state(self) -> dict | None:
         return F.clone(self.spec) if self.spec else None
+
+
+SHAPES = [("Fill the window", None), ("4 : 3", 0.75), ("3 : 2", 2 / 3), ("16 : 9", 9 / 16),
+          ("1 : 1 square", 1.0), ("3 : 4 tall", 4 / 3), ("2 : 3 tall", 1.5)]
+
+
+class _AspectBox(QtWidgets.QWidget):
+    """Holds the live chart at a chosen shape (height / width), centred; None fills the box."""
+
+    def __init__(self):
+        super().__init__()
+        self.child, self.aspect = None, None
+
+    def put(self, w, aspect=None) -> None:
+        self.child, self.aspect = w, aspect
+        w.setParent(self)
+        w.show()
+        self._place()
+
+    def take(self):
+        w, self.child = self.child, None
+        return w
+
+    def set_aspect(self, aspect) -> None:
+        self.aspect = aspect
+        self._place()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._place()
+
+    def _place(self) -> None:
+        if self.child is None:
+            return
+        r = self.rect()
+        if self.aspect:                           # the plot itself at that shape; the chart's bars and
+            try:                                  # any other plots it stacks keep their own height
+                plot = self.child.plots()[self.child.main_plot()]
+                extra = max(0, self.child.height() - plot.height())
+            except Exception:
+                extra = 0
+            w = min(r.width(), int((r.height() - extra) / self.aspect))
+            h = int(w * self.aspect) + extra
+            r = QtCore.QRect(r.x() + (r.width() - w) // 2, r.y() + (r.height() - h) // 2, w, h)
+        if r != self.child.geometry():
+            self.child.setGeometry(r)
+            if self.aspect:                       # its parts settle, then the plot's true share is known
+                QtCore.QTimer.singleShot(0, self._settle)
+
+    def _settle(self) -> None:
+        if self.child is None or not self.aspect:
+            return
+        try:
+            plot = self.child.plots()[self.child.main_plot()]
+        except Exception:
+            return
+        if plot.width() and abs(plot.height() / plot.width() - self.aspect) > 0.02:
+            self._place()
 
 
 def _head(text: str) -> QtWidgets.QLabel:

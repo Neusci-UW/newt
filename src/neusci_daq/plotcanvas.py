@@ -99,7 +99,7 @@ class Panel(QtWidgets.QGraphicsObject):
         if self.letter and self.canvas.letters.isChecked():
             f = QtGui.QFont()
             f.setBold(True)
-            f.setPixelSize(int(self.spec.get("font", 9) * 1.4 / 72 * 25.4 * PX))
+            f.setPixelSize(int(F.paper_font(self.spec) * 1.4 / 72 * 25.4 * PX))
             p.setFont(f)
             p.setPen(QtGui.QColor("black"))
             p.drawText(QtCore.QPointF(2, f.pixelSize()), self.letter)
@@ -756,7 +756,7 @@ class PlotCanvasPage(QtWidgets.QWidget):
             ax = fig.add_axes(rect)
             F.draw(fig, p.spec, p.data, ax=ax)
             if self.letters.isChecked():
-                fig.text(px / W, 1 - py / H, p.letter, fontsize=p.spec.get("font", 9) * 1.4,
+                fig.text(px / W, 1 - py / H, p.letter, fontsize=F.paper_font(p.spec) * 1.4,
                          fontweight="bold", va="top", ha="left")
         self._export_annotations(fig, W, H)
         fig.savefig(path, dpi=dpi, facecolor="white")

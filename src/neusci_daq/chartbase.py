@@ -435,13 +435,16 @@ class Chart(View):
         L = self.look
         k = float(L["thick"])
         pis = [pw.getPlotItem() if hasattr(pw, "getPlotItem") else pw for pw in plots]
-        lab_pt, tick_pt, title_pt = CS.fonts(L)
+        m = self.main_plot() if pis else 0
+        main_w = plots[m] if plots else None
+        scale = CS.screen_scale(L, main_w.width(), main_w.logicalDpiX()) \
+            if main_w is not None and hasattr(main_w, "logicalDpiX") else 1.0
+        lab_pt, tick_pt, title_pt = CS.fonts(L, scale)
         tf = None
         if tick_pt:
             tf = QtGui.QFont()
             tf.setPointSizeF(tick_pt)
         mpx = CS.marker_px(L)
-        m = self.main_plot() if pis else 0
         for n, pi in enumerate(pis):
             if not L["grid"]:
                 pi.showGrid(x=False, y=False)     # on: the chart draws its own grid
@@ -492,6 +495,22 @@ class Chart(View):
                 for it in pi.items:
                     if isinstance(it, pg.ScatterPlotItem) and len(it.data):
                         it.setSize(mpx)
+        if lab_pt:                                # every other text on it follows the size too
+            lf = QtGui.QFont()
+            lf.setPointSizeF(lab_pt * 0.85)
+            for pi in pis:
+                t = pi.titleLabel.text if getattr(pi, "titleLabel", None) is not None else ""
+                if t and not (pi is pis[m] and L.get("title")):
+                    pi.titleLabel.setText(t, size=f"{title_pt}pt")
+                for it in pi.items:
+                    texts = [it] if isinstance(it, pg.TextItem) else \
+                        [c for c in it.childItems() if isinstance(c, pg.TextItem)] if isinstance(it, pg.InfiniteLine) else []
+                    for t_ in texts:
+                        t_.setFont(lf)
+                leg = getattr(pi, "legend", None)
+                if leg is not None:
+                    for _, lab in getattr(leg, "items", []):
+                        lab.setText(lab.text, size=f"{lab_pt * 0.85}pt")
         if pis and L.get("title"):
             pis[m].setTitle(CS.html_sub(L["title"]), **({"size": f"{title_pt}pt"} if title_pt else {}))
         if plots:

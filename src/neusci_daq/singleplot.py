@@ -368,6 +368,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.w_mm.setValue(s["w_mm"])
         self.h_mm.setValue(s["h_mm"])
         self._fill_series()
+        self._shown = self._ui_values()              # what the boxes show now: edits are measured from this
         drawn = s["kind"] == "curves"
         for w in (self.kind, self.btn_add):
             w.setVisible(not drawn)
@@ -409,23 +410,27 @@ class SinglePlotPage(QtWidgets.QWidget):
         if self._loading or self.spec is None:
             return
         s = self.spec
-        before = F.clone(s)
         kind = s["kind"] if s.get("kind") in ("curves", "image") else self.kind.currentData()   # a chart stays a chart
         if (self.w_mm.value(), self.h_mm.value()) != (s.get("w_mm"), s.get("h_mm")):
             s["auto_size"] = False                # a size you set: kept (else a chart's comes from its shape)
-        s.update(kind=kind, title=self.t_title.text(), xlabel=self.t_x.text(),
-                 ylabel=self.t_y.text(), xlim=[_opt_float(self.x0.text()), _opt_float(self.x1.text())],
-                 ylim=[_opt_float(self.y0.text()), _opt_float(self.y1.text())], xlog=self.xlog.isChecked(),
-                 ylog=self.ylog.isChecked(), font=self.font.value(), font_ticks=self.font_ticks.value(),
-                 font_title=self.font_title.value(), ticks=self.ticks.currentData(), tick_len=self.tick_len.value(),
-                 lw=self.lw.value(), ms=self.ms.value(),
-                 legend=self.legend.currentText(), despine=self.despine.isChecked(),
-                 grid=self.grid.isChecked(), zero=self.zero.isChecked(), points=self.points.isChecked(),
-                 w_mm=self.w_mm.value(), h_mm=self.h_mm.value())
-        if self._live():
-            self._to_look({k: v for k, v in s.items() if before.get(k) != v})
+        ui = self._ui_values()
+        s.update(kind=kind, **ui)
+        if self._live():                          # only what you changed (the boxes round what they show)
+            shown, self._shown = getattr(self, "_shown", {}), ui
+            self._to_look({k: v for k, v in ui.items() if shown.get(k) != v})
             return
         self.draw()
+
+    def _ui_values(self) -> dict:
+        return dict(title=self.t_title.text(), xlabel=self.t_x.text(),
+                    ylabel=self.t_y.text(), xlim=[_opt_float(self.x0.text()), _opt_float(self.x1.text())],
+                    ylim=[_opt_float(self.y0.text()), _opt_float(self.y1.text())], xlog=self.xlog.isChecked(),
+                    ylog=self.ylog.isChecked(), font=self.font.value(), font_ticks=self.font_ticks.value(),
+                    font_title=self.font_title.value(), ticks=self.ticks.currentData(), tick_len=self.tick_len.value(),
+                    lw=self.lw.value(), ms=self.ms.value(),
+                    legend=self.legend.currentText(), despine=self.despine.isChecked(),
+                    grid=self.grid.isChecked(), zero=self.zero.isChecked(), points=self.points.isChecked(),
+                    w_mm=self.w_mm.value(), h_mm=self.h_mm.value())
 
     def _live(self) -> bool:
         return self.focus_chart is not None and self.mode.currentIndex() == 1

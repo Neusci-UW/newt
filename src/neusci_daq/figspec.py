@@ -233,7 +233,11 @@ def _curves(ax, spec, data, lw):
     for k, c in enumerate(data.get("curves", [])):
         x, y = np.asarray(c["x"], float), np.asarray(c["y"], float)
         st = "o" if c.get("points") else None
-        ax.plot(x, y, color=c.get("color") or PALETTE[k % len(PALETTE)], linewidth=lw * c.get("width", 1.0),
+        if "width_px" in c:                       # as on screen; Lines (lw) scales from what it was then
+            width = c["width_px"] * float(data.get("pt_px", 0.35)) * lw / float(data.get("lw0", lw) or lw)
+        else:                                     # an older figure
+            width = lw * c.get("width", 1.0)
+        ax.plot(x, y, color=c.get("color") or PALETTE[k % len(PALETTE)], linewidth=width,
                 alpha=float(c.get("alpha", 1.0)), marker=st, markersize=float(spec.get("ms", 4)),
                 linestyle="none" if c.get("points") else "-", markeredgewidth=0,
                 label=mathify(c.get("name", "")) or None)
@@ -245,7 +249,7 @@ def _marks_and_lines(ax, spec, data, lw):
         sym = np.asarray(m.get("symbols", []), object)
         x, y = np.asarray(m["x"], float), np.asarray(m["y"], float)
         cols, alphas = m.get("colors", []), m.get("alpha", [])
-        size = float(m.get("size", 7.0)) * 0.75          # screen pixels to points
+        size = float(m.get("size", 7.0)) * float(data.get("pt_px", 0.75))   # screen pixels to points
         for s_ in (set(sym.tolist()) if len(sym) else {"o"}):
             k = np.flatnonzero(sym == s_) if len(sym) else np.arange(len(x))
             from matplotlib.colors import to_rgba
@@ -402,7 +406,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             curves.append({"x": [float(v) for v in x * kx], "y": [float(v) for v in y * ky],
                            "color": color.name() if color is not None else "",
                            "alpha": round(color.alphaF(), 3) if color is not None else 1.0,
-                           "name": it.name() or "", "width": round(width * 0.35, 3), "points": bool(sym),
+                           "name": it.name() or "", "width_px": round(width, 3), "points": bool(sym),
                            "z": float(it.zValue())})
     curves.sort(key=lambda c: c["z"])
 
@@ -419,12 +423,12 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     # the plot's own title (its channel, Ch2), and the shape it has on screen
     own = (item.titleLabel.text or "").strip() if getattr(item, "titleLabel", None) is not None else ""
     spec["title"] = re.sub("<[^>]+>", "", own) if own else ""
-    vb = item.getViewBox()
-    r = vb.sceneBoundingRect()
-    wpx, hpx = r.width(), r.height()
+    pw = plots[pis.index(item)]                       # the whole plot on screen, axes and labels too
+    wpx, hpx = (pw.width(), pw.height()) if hasattr(pw, "width") and callable(pw.width) else \
+        (item.sceneBoundingRect().width(), item.sceneBoundingRect().height())
     if wpx > 50 and hpx > 50:
         spec["w_mm"] = 120.0
-        spec["h_mm"] = round(max(40.0, min(160.0, 120.0 * hpx / wpx + 18)), 1)    # + room for the labels
+        spec["h_mm"] = round(max(40.0, min(200.0, 120.0 * hpx / wpx)), 1)
     if view:
         spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
     spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
@@ -434,6 +438,9 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     if look is not None:                                  # its look: the same record the chart draws from
         from . import chartstyle
         spec.update(chartstyle.figure_keys(look, kx, ky))
+    # lines and markers keep their size against the plot: a screen pixel of a plot wpx wide is
+    # w_mm / wpx of the figure (fonts stay in pt, to be read on paper)
+    pt_px = float(spec["w_mm"]) / wpx * 72 / 25.4 if wpx > 50 else 0.35
     for ln in lines:                                      # its label, if the chart wrote one (threshold 340 mV)
         for it in item.items:
             if isinstance(it, pg.InfiniteLine) and abs(float(it.value()) * ky - ln["y"]) < 1e-12:
@@ -441,7 +448,8 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
                 if lab is not None and lab.isVisible():
                     ln["label"] = lab.toPlainText()
     data = {"curves": curves, "marks": marks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
-            "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item)}
+            "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item),
+            "pt_px": pt_px, "lw0": float(spec.get("lw", 1.2))}
     return spec, data
 
 

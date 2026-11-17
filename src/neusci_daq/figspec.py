@@ -469,7 +469,12 @@ def _bars(ax, spec, data, lw, ms):
 
 
 def _curves(ax, spec, data, lw):
-    """A whiteboard chart's lines, as they were when it was made a figure."""
+    """A whiteboard chart's lines, as they were when it was made a figure (and the shaded bands
+    around its averages)."""
+    for f in data.get("fills", []):
+        ax.fill_between(np.asarray(f["x"], float), np.asarray(f["lo"], float), np.asarray(f["hi"], float),
+                        color=f.get("color") or "#888888", alpha=float(f.get("alpha", 0.2)), linewidth=0,
+                        zorder=1)
     for k, c in enumerate(data.get("curves", [])):
         x, y = np.asarray(c["x"], float), np.asarray(c["y"], float)
         st = "o" if c.get("points") else None
@@ -663,8 +668,22 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
                     kx = 1.0
                 else:
                     ky = 1.0
-    curves, marks, lines, bands = [], [], [], []
+    curves, marks, lines, bands, fills = [], [], [], [], []
     for it in item.items:
+        if isinstance(it, pg.FillBetweenItem) and it.isVisible():
+            edges = getattr(it, "curves", None) or ()     # a shaded band (an average's ± SD): its two edges
+            got = []
+            for c in edges[:2]:
+                xy = c.getOriginalDataset() if hasattr(c, "getOriginalDataset") else c.getData()
+                got.append((np.asarray(xy[0], float), np.asarray(xy[1], float)) if xy[0] is not None else None)
+            if len(got) == 2 and all(g is not None and len(g[0]) for g in got) and len(got[0][0]) == len(got[1][0]):
+                (x, y1), (_, y2) = got
+                step = max(1, int(np.ceil(len(x) / (2 * max_points))))      # the same points of each edge
+                c = it.brush().color()
+                fills.append({"x": [float(v) for v in x[::step] * kx], "lo": [float(v) for v in y2[::step] * ky],
+                              "hi": [float(v) for v in y1[::step] * ky], "color": c.name(),
+                              "alpha": round(c.alphaF(), 3), "z": float(it.zValue())})
+            continue
         if isinstance(it, pg.BarGraphItem) and it.isVisible() and len(it.opts.get("x0") or []):
             o = it.opts                                   # the raster's group colors: each bar its row, a fixed width
             px = item.getViewBox().viewPixelSize()[0] or 1.0
@@ -692,6 +711,8 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
         p = pg.mkPen(pen) if pen is not None else None
         color = p.color() if p is not None else None
         sym = it.opts.get("symbol") is not None and (p is None or p.style() == QtCore_NoPen())
+        if p is not None and p.style() == QtCore_NoPen() and it.opts.get("symbol") is None:
+            continue                                      # drawn as nothing: a shaded band's edge
         if color is None or not color.alpha() or (p is not None and p.style() == QtCore_NoPen()):
             brush = it.opts.get("symbolBrush")
             color = pg.mkBrush(brush).color() if brush is not None else color
@@ -813,7 +834,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             data_ticks[key] = [round(float(v) * k_, 12) for v in vals]
         except Exception:
             pass
-    data = {"curves": curves, "marks": marks, "bands": bands, **data_ticks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
+    data = {"curves": curves, "fills": fills, "marks": marks, "bands": bands, **data_ticks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
             "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item),
             "pt_px": pt_px, "lw0": float(spec.get("lw", 1.2))}
     sets = getattr(chart, "fit_sets", None)            # a chart of points: its series and groups, to fit

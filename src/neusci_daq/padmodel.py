@@ -38,6 +38,7 @@ import numpy as np
 from . import datapad as D
 from . import fitting
 from . import stim as stimmod
+from . import stimmeasures as SM
 
 KINDS = {"measure": "Measure a channel", "level": "Stimulus level", "duration": "Segment length",
          "info": "Trial info", "formula": "Formula", "python": "Python"}
@@ -536,6 +537,51 @@ def sent_segments(stimuli: list[dict] | None,
             out.append((prefix + stimmod.letter(j), start + at / rate, start + (at + n) / rate, p))
             at += n
             t0 += n * 1000.0 / rate if p.get("kind") == "file" else stimmod._part_ms(p)
+    return out
+
+
+def found_segments(y, fs: float, min_ms: float = 1.0) -> list[tuple[str, float, float, dict]]:
+    """Segments read off a stimulus channel, for a trial that didn't save what it sent (one
+    imported from LabChart, say): the trace cut wherever it jumps (by more than a third of its
+    biggest swing from rest), each stretch a base where it sits at rest, else a step at its
+    level: [(A, start, end, part), (B, …)…] in s, as sent_segments. Jumps within min_ms are one
+    edge; neighbours at the same level are one segment. [] if it never jumps."""
+    y = np.nan_to_num(np.asarray(y, float))
+    rest = SM.rest_level(y)
+    if rest is None or y.size < 3:
+        return []
+    swing = float(np.max(np.abs(y - rest)))
+    if not swing > 0:
+        return []
+    jumps = np.flatnonzero(np.abs(np.diff(y)) > swing / 3) + 1
+    near = max(1, int(round(min_ms / 1000 * fs)))
+    cuts: list[int] = []
+    for j in jumps:                                     # an edge over a few samples: one cut, where it ends
+        if cuts and j - cuts[-1] <= near:
+            cuts[-1] = int(j)
+        else:
+            cuts.append(int(j))
+    if not cuts:
+        return []
+    edges = [0] + cuts + [y.size]
+    stretches = []                                      # (start, end, level), same-level neighbours joined
+    for a, b in zip(edges[:-1], edges[1:]):
+        if b <= a:
+            continue
+        level = float(np.median(y[a:b]))
+        if stretches and abs(level - stretches[-1][2]) < 0.05 * swing:
+            a0, _, _ = stretches[-1]
+            stretches[-1] = (a0, b, float(np.median(y[a0:b])))
+        else:
+            stretches.append((a, b, level))
+    if len(stretches) < 2:
+        return []
+    out = []
+    for k, (a, b, level) in enumerate(stretches):
+        at_rest = abs(level - rest) < 0.05 * swing
+        part = {"kind": "base" if at_rest else "step", "level": 0.0 if at_rest else round(level, 6),
+                "dur": (b - a) / fs * 1000, "found": True}
+        out.append((stimmod.letter(k), a / fs, b / fs, part))
     return out
 
 

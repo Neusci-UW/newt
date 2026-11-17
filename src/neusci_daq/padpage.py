@@ -67,8 +67,14 @@ class PageSource(P.Source):
         if not (0 <= i < len(page.blocks)) or page.blocks[i] is None:
             return []
         ch = page.stim_channel.currentData() or ""         # each stimulus is lined up on it
-        return page.main.store.memo(page._paths[i], ("pad segments", ch),
-                                    lambda: P.sent_segments(page.blocks[i].get("stimuli"), page.send_onsets(i)))
+
+        def work():
+            got = P.sent_segments(page.blocks[i].get("stimuli"), page.send_onsets(i))
+            if got or not ch:
+                return got
+            y = page.trace(i, ch)                          # none saved: read them off the stimulus channel
+            return P.found_segments(y, float(page.blocks[i]["sample_rate"])) if y is not None else []
+        return page.main.store.memo(page._paths[i], ("pad segments", ch, "found"), work)
 
     def spikes(self, i, units=None):
         """Spike times (s) the spike sorter found in trial i: of the units ticked in the Spikes
@@ -194,7 +200,8 @@ class SegStrip(QtWidgets.QWidget):
         if not self.segs:
             p.setPen(QtGui.QColor(c["text"]))
             p.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter,
-                       "No Complex Stimulus segments in this trial: windows are stretches of time")
+                       "No segments in this trial (none saved, and the stimulus channel never jumps): "
+                       "windows are stretches of time")
             p.end()
             return
         for letter, t0, t1, part in self.segs:
@@ -444,6 +451,58 @@ class Preview(QtWidgets.QWidget):
         self.strip.segs = segs
         self.strip.setVisible(not phase)
         self.strip.update()
+        self.p_resp.enableAutoRange(axis="x")
+
+    def show_average(self, trials: list[int], title: str) -> None:
+        """The average of these trials, stimulus and response, sample by sample from each
+        trial's start (bold), over the trials themselves (faint), in trial time."""
+        src = self.view.src
+        t = self.colors
+        faint = QtGui.QColor(t["wave"])
+        faint.setAlpha(45)
+        self.xf = ("trial",)
+        for key, plot, ch in (("stim", self.p_stim, self.stim_ch.currentText()),
+                              ("resp", self.p_resp, self.resp_ch.currentText())):
+            got = [g for g in (src.trace(i, ch) for i in trials) if g is not None]
+            pieces = []
+            if got:
+                fs = got[0][1]
+                n = max(len(y) for y, _ in got)
+                Y = np.full((len(got), n), np.nan)
+                for r, (y, _) in enumerate(got):
+                    Y[r, :len(y)] = y
+                x = np.arange(n) / fs
+                pieces = [(x[:len(y)], y, False) for y, _ in got] if len(got) > 1 else []
+                with np.errstate(all="ignore"):
+                    pieces.append((x, np.nanmean(Y, axis=0), True))
+            curves = self._curves[key]
+            while len(curves) < len(pieces):
+                c = pg.PlotDataItem()
+                c.setDownsampling(auto=True, method="peak")
+                c.setClipToView(True)
+                plot.addItem(c)
+                curves.append(c)
+            for k, c in enumerate(curves):
+                if k >= len(pieces):
+                    c.setData([], [])
+                    c.hide()
+                    continue
+                x, y, bold = pieces[k]
+                c.setPen(pg.mkPen(t["wave"], width=2) if bold else pg.mkPen(faint, width=1))
+                c.setZValue(10 if bold else 1)
+                c.setData(x, y)
+                c.show()
+            plot.getAxis("left").setLabel(ch, src.unit(ch))
+        self.p_resp.getAxis("bottom").setLabel("time", "s")
+        for p, b in self._bands:
+            p.removeItem(b)
+        self._bands = []
+        self.strip.segs = src.segments(trials[0]) if trials else []
+        self.strip.setVisible(True)
+        self.strip.update()
+        self.show_spikes(np.array([]), np.array([]), [])
+        self.show_window(set(), None, "")
+        self.info.setText(title)
         self.p_resp.enableAutoRange(axis="x")
 
     def show_baseline(self, region: tuple[float, float] | None) -> None:
@@ -1413,6 +1472,15 @@ class PadView(QtWidgets.QWidget):
         return self.page.index()
 
     def draw_preview(self, force: bool = False) -> None:
+        k = self.cur_row - len(self.tab.rows)
+        rows = getattr(self, "_sum_rows", [])
+        if 0 <= k < len(rows) and rows[k][1]:         # a summary row picked: its average
+            title, trials = rows[k]
+            key = ("avg", tuple(trials), self.preview.stim_ch.currentText(), self.preview.resp_ch.currentText())
+            if force or key != self._shown:
+                self._shown = key
+                self.preview.show_average(trials, title)
+            return
         i = self.preview_trial()
         if not (0 <= i < len(self.page.blocks)) or self.page.blocks[i] is None:
             return
@@ -2012,7 +2080,9 @@ class PadView(QtWidgets.QWidget):
         cols, tab = self.pad.columns, self.tab
         excl = self.excluded()
         by = self.summary.currentData()
-        sums = P.summarize(self._included_table(), self.src, by) if by is not None and cols else []
+        inc = self._included_table()
+        sums = P.summarize(inc, self.src, by) if by is not None and cols else []
+        self._sum_rows = self._summary_trials(inc, by, sums)
         t = self.table
         t.blockSignals(True)
         t.setUpdatesEnabled(False)
@@ -2089,6 +2159,24 @@ class PadView(QtWidgets.QWidget):
         self.header.viewport().update()
         self._mark_row()
 
+    def _summary_trials(self, tab: P.Table, by, sums: list) -> list[tuple[str, list[int]]]:
+        """Each summary row's (title, trials), keyed as P.summarize keys them."""
+        if by == "group":
+            keys = [self.src.group(r.trial)[0] for r in tab.rows]
+        elif by in tab.values:
+            keys = [P.fmt(v) for v in tab.values[by]]
+        elif by in tab.text:
+            keys = list(tab.text[by])
+        else:
+            keys = ["all" for _ in tab.rows]
+        out = []
+        for g, _ in sums:
+            trials = list(dict.fromkeys(r.trial for r, k in zip(tab.rows, keys) if k == g))
+            title = ("Average of all rows" if by == "all" else f"Average of {g or '(no group)'}" if by == "group"
+                     else f"Average where {self._shown_name(by)} = {g}")
+            out.append((f"{title} · {len(trials)} trial{'' if len(trials) == 1 else 's'}", trials))
+        return out
+
     def _shown_name(self, name: str) -> str:
         c = self.pad.get(name)
         return c.shown() if c else name
@@ -2129,7 +2217,15 @@ class PadView(QtWidgets.QWidget):
             self.table.scrollToItem(self.table.item(self.cur_row, 1))
 
     def _cell_clicked(self, r: int, col: int) -> None:
-        if r >= len(self.tab.rows) or col == 0:
+        if r >= len(self.tab.rows):                 # a summary row: its trials' average in the preview
+            k = r - len(self.tab.rows)
+            rows = getattr(self, "_sum_rows", [])
+            if k < len(rows) and rows[k][1]:
+                self.cur_row = r
+                self._shown = None
+                self.draw_preview()
+            return
+        if col == 0:
             return
         self.cur_row = r
         if self.first_col <= col < self.first_col + len(self.pad.columns):

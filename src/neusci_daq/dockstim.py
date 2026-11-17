@@ -176,7 +176,7 @@ class DockedStimulator(QtWidgets.QFrame):
             self.type_buttons[d["mode"]].setChecked(True)
             self.ramp.setChecked(d["ramp"])
             units = self.main.cfg.stim_units or "V"
-            self.ramp.setText(f"Raise {d['ramp_by']:+g} {units} each")
+            self.ramp.setText(f"Raise {d['ramp_by']:+g} {units} each, to {d['ramp_to']:g} {units}")
             mode = d["mode"]
             for key, w in self.boxes.items():
                 w.setVisible(key in FIELDS[mode])
@@ -233,8 +233,11 @@ class DockedStimulator(QtWidgets.QFrame):
             self.last.setText(msg)
         else:
             self.last.setStyleSheet(f"color: {t['subtle']}")
-            self.last.setText(state if not ok or page.repeating else
-                              (f"Last: {' · '.join(last.split('   ')[:2])}" if last else "Ready"))
+            text = (state if not ok or page.repeating else
+                    (f"Last: {' · '.join(last.split('   ')[:2])}" if last else "Ready"))
+            if msg and ok and not page.repeating:        # why repeating stopped, a preset loaded, …
+                text = f"{msg}\n{text}"
+            self.last.setText(text)
 
     def _fold(self, folded: bool) -> None:
         self.body.setVisible(not folded)

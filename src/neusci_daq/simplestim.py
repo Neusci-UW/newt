@@ -35,7 +35,7 @@ MAX_CYCLES = 500               # a triangle wave is made of ramps: 3 per cycle
 DELAY_MS = 2.0                 # 0 V before the first pulse, so the recorded stimulus has a clear start
 DIM = {style.LIGHT: "#d9822b", style.DARK: "#f0a35a"}
 DEFAULTS = dict(mode="single", level=2.0, width=0.2, interval=20.0, rate=20.0, count=5,
-                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0, offset=0.0,
+                every=2.0, ramp=False, ramp_by=0.2, ramp_to=10.0, freq=10.0, dur=500.0, offset=0.0,
                 windows=False, before=100.0, after=500.0, repeats=0)
 
 
@@ -601,7 +601,12 @@ class SimpleStimPage(QtWidgets.QWidget):
         if (by > 0 and nxt > to + 1e-9) or (by < 0 and nxt < to - 1e-9) or by == 0:
             if self.repeating:
                 self.halt()
-                self.show_message(f"Reached {self.level.value():g} {self.main.cfg.stim_units or 'V'}: stopped.")
+                units = self.main.cfg.stim_units or "V"
+                if self.rep_sent <= 1:
+                    self.show_message(f"Stopped after one: {self.level.value():g} {units} is already Raise's limit "
+                                      f"({to:g} {units}). Untick Raise, or raise its limit on Simple Stimulus.")
+                else:
+                    self.show_message(f"Reached {self.level.value():g} {units}, Raise's limit: stopped.")
             return
         self.level.setValue(nxt)
 

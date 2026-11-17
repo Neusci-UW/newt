@@ -509,10 +509,14 @@ class AnalysisPage(QtWidgets.QWidget):
                              "sel": self.baseline_sel.to_dict() if self.baseline_sel is not None else None}}
 
     def _digest(self) -> str:
-        """What there is to save, as one string, to tell if it's changed."""
+        """What there is to save, as one string, to tell if it's changed. A column's automatic
+        title is left out: it follows what the column measures, and is only filled in when
+        the DataPad works out its table (so it changes just by opening a session)."""
         ev = self.raw.events
         spikes = (ev.t.tobytes() + ev.unit.tobytes()) if ev is not None else b""
-        return hashlib.sha1(json.dumps(self._analysis_state(), sort_keys=True).encode() + spikes).hexdigest()
+        state = self._analysis_state()
+        state["pad"]["columns"] = [{**c, "title": ""} if c.get("title_auto") else c for c in state["pad"]["columns"]]
+        return hashlib.sha1(json.dumps(state, sort_keys=True).encode() + spikes).hexdigest()
 
     def save_analysis(self) -> bool:
         """Save the analysis in the session's folder, beside its recordings. False if there's no

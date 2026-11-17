@@ -495,13 +495,24 @@ class Chart(View):
                 for it in pi.items:
                     if isinstance(it, pg.ScatterPlotItem) and len(it.data):
                         it.setSize(mpx)
+        if pis and L.get("title"):
+            pis[m].setTitle(CS.html_sub(L["title"]), **({"size": f"{title_pt}pt"} if title_pt else {}))
         if lab_pt:                                # every other text on it follows the size too
             lf = QtGui.QFont()
             lf.setPointSizeF(lab_pt * 0.85)
+            dpi = main_w.logicalDpiY() if main_w is not None and hasattr(main_w, "logicalDpiY") else 72
             for pi in pis:
                 t = pi.titleLabel.text if getattr(pi, "titleLabel", None) is not None else ""
                 if t and not (pi is pis[m] and L.get("title")):
                     pi.titleLabel.setText(t, size=f"{title_pt}pt")
+                if t or (pi is pis[m] and L.get("title")):    # its row grows with it, clear of the plot
+                    row = int(title_pt * dpi / 72 * 1.5) + 4
+                    pi.titleLabel.setMaximumHeight(row)
+                    pi.layout.setRowFixedHeight(0, row)
+                bar = getattr(pi, "_scale_bar", None)
+                if bar is not None:
+                    bar.font_px = lab_pt * 0.85 * dpi / 72
+                    bar.refresh()
                 for it in pi.items:
                     texts = [it] if isinstance(it, pg.TextItem) else \
                         [c for c in it.childItems() if isinstance(c, pg.TextItem)] if isinstance(it, pg.InfiniteLine) else []
@@ -511,8 +522,6 @@ class Chart(View):
                 if leg is not None:
                     for _, lab in getattr(leg, "items", []):
                         lab.setText(lab.text, size=f"{lab_pt * 0.85}pt")
-        if pis and L.get("title"):
-            pis[m].setTitle(CS.html_sub(L["title"]), **({"size": f"{title_pt}pt"} if title_pt else {}))
         if plots:
             self._apply_ranges(pis[m].vb)
         apply_texts(self)

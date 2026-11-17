@@ -64,6 +64,8 @@ class ScaleBar(pg.GraphicsObject):
         self.gap = gap                            # dragged this far from its corner (pixels)
         self.px = self.py = 0.0
         self.x_text = self.y_text = ""
+        self.font_px = 11.0                       # its numbers' size (a chart's look may set it)
+        self.dx = self.dy = 0.0                   # the bar's lengths, in data units
         self.setParentItem(plot)
         self.setZValue(1000)
         self.vb.sigRangeChanged.connect(self.refresh)
@@ -84,15 +86,16 @@ class ScaleBar(pg.GraphicsObject):
         self.x_text = self.y_text = ""
         if self.x_unit:
             dx = _round_down((x1 - x0) * 0.15)
-            self.px, self.x_text = dx / (x1 - x0) * w, with_unit(dx, self.x_unit)
+            self.px, self.x_text, self.dx = dx / (x1 - x0) * w, with_unit(dx, self.x_unit), dx
         if self.y_unit:
             dy = _round_down((y1 - y0) * 0.3)
-            self.py, self.y_text = dy / (y1 - y0) * h, with_unit(dy, self.y_unit)
+            self.py, self.y_text, self.dy = dy / (y1 - y0) * h, with_unit(dy, self.y_unit), dy
         self.setPos(self.corner() + QtCore.QPointF(*self.gap))
         self.update()
 
     def boundingRect(self) -> QtCore.QRectF:
-        return QtCore.QRectF(-24, -self.py - 4, self.px + 64, self.py + 26)
+        t = self.font_px * 1.5
+        return QtCore.QRectF(-t - 10, -self.py - 4, self.px + 64 + t * 4, self.py + t + 12)
 
     def paint(self, p, *_) -> None:
         p.setPen(pg.mkPen(self.color, width=2.5))
@@ -101,17 +104,18 @@ class ScaleBar(pg.GraphicsObject):
         if self.px:
             p.drawLine(QtCore.QPointF(0, 0), QtCore.QPointF(self.px, 0))
         f = p.font()
-        f.setPixelSize(11)
+        f.setPixelSize(max(1, int(round(self.font_px))))
         f.setBold(True)
         p.setFont(f)
         centere = QtCore.Qt.AlignmentFlag.AlignCenter
+        t = self.font_px * 1.5
         if self.px:
-            p.drawText(QtCore.QRectF(self.px / 2 - 40, 3, 80, 16), centere, self.x_text)
+            p.drawText(QtCore.QRectF(self.px / 2 - t * 4, 3, t * 8, t), centere, self.x_text)
         if self.py:
             p.save()
-            p.translate(-14, -self.py / 2)
+            p.translate(-3 - t / 2, -self.py / 2)
             p.rotate(-90)
-            p.drawText(QtCore.QRectF(-40, -8, 80, 16), centere, self.y_text)
+            p.drawText(QtCore.QRectF(-t * 4, -t / 2, t * 8, t), centere, self.y_text)
             p.restore()
 
     def mouseDragEvent(self, ev) -> None:

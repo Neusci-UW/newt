@@ -223,6 +223,8 @@ def _draw(ax, spec: dict, data: dict) -> None:
             ax.spines[side].set_visible(False)
     for sp in ax.spines.values():
         sp.set_linewidth(0.8)
+    if data.get("scalebar") is not None:
+        _scale_bar(ax, spec, data)
     leg = spec.get("legend", "best")
     handles, labels = ax.get_legend_handles_labels()
     if leg != "off" and len(labels) > 1:
@@ -273,6 +275,34 @@ def _curves(ax, spec, data, lw):
                 alpha=float(c.get("alpha", 1.0)), marker=st, markersize=float(spec.get("ms", 4)),
                 linestyle="none" if c.get("points") else "-", markeredgewidth=0,
                 label=mathify(c.get("name", "")) or None)
+
+
+def _scale_bar(ax, spec, data) -> None:
+    """The chart's scale bar in place of its axes: an L just outside the plot's bottom left
+    corner, a round length of each unit, labelled."""
+    sb = data["scalebar"]
+    for side in ax.spines.values():
+        side.set_visible(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.grid(False)
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    xl = sb["dx"] / (x1 - x0) if sb.get("dx") and x1 > x0 else 0.0
+    yl = sb["dy"] / (y1 - y0) if sb.get("dy") and y1 > y0 else 0.0
+    c0, c1 = -0.02, -0.03
+    width = 2.5 * float(data.get("pt_px", 0.75))
+    size = float(spec.get("font", 9.0)) * 0.85
+    kw = dict(transform=ax.transAxes, clip_on=False, color="black", linewidth=width, solid_capstyle="butt")
+    if xl:
+        ax.plot([c0, c0 + xl], [c1, c1], **kw)
+        ax.text(c0 + xl / 2, c1 - 0.015, sb.get("x_text", ""), transform=ax.transAxes, ha="center", va="top",
+                fontsize=size, fontweight="bold")
+    if yl:
+        ax.plot([c0, c0], [c1, c1 + yl], **kw)
+        ax.text(c0 - 0.015, c1 + yl / 2, sb.get("y_text", ""), transform=ax.transAxes, ha="right", va="center",
+                rotation=90, fontsize=size, fontweight="bold")
 
 
 def _marks_and_lines(ax, spec, data, lw):
@@ -517,7 +547,14 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
                 if lab is not None and lab.isVisible():
                     ln["label"] = lab.toPlainText()
     data_ticks = {}
+    bar = getattr(item, "_scale_bar", None)
+    if bar is not None or not left.isVisible():           # axes swapped for a scale bar: the figure too
+        data_ticks["scalebar"] = {"dx": float(getattr(bar, "dx", 0.0)) * kx, "dy": float(getattr(bar, "dy", 0.0)) * ky,
+                                  "x_text": getattr(bar, "x_text", ""), "y_text": getattr(bar, "y_text", ""),
+                                  "font_px": float(getattr(bar, "font_px", 11.0))}
     for key, ax_, k_, length in (("xticks", bottom, kx, bottom.width()), ("yticks", left, ky, left.height())):
+        if "scalebar" in data_ticks:
+            break
         try:                                              # the numbers the chart labels its axes with
             lo_, hi_ = ax_.range
             levels = ax_.tickValues(lo_, hi_, length)

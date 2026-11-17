@@ -703,7 +703,8 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.page.side.look.hide()                    # thickness, grid, ranges: in the Figure tab instead
         self.focus_side.addWidget(self.right)
         self.right.setCurrentIndex(0)
-        self._hook = lambda: QtCore.QTimer.singleShot(0, self._apply_live) if self.focus_chart is chart else None
+        self._hook = lambda: (QtCore.QTimer.singleShot(0, self._apply_live), self.chart_box.recheck()) \
+            if self.focus_chart is chart else None
         chart.look_hooks.append(self._hook)           # it redrew: the fitted curve over it again
         self.focus_title.setText(f"<b>{getattr(chart, 'name', '')}</b> · its settings are on the right")
         self.mode.setCurrentIndex(1)
@@ -863,17 +864,21 @@ SHAPES = [("Fill the window", None), ("4 : 3", 0.75), ("3 : 2", 2 / 3), ("16 : 9
 
 
 class _AspectBox(QtWidgets.QWidget):
-    """Holds the live chart at a chosen shape (height / width), centred; None fills the box."""
+    """Holds the live chart so its main plot has a chosen shape (height / width), centred;
+    None fills the box. The chart's bars and other stacked plots share its height, so the
+    size is found in a few steps, each measuring what the plot got."""
 
     def __init__(self):
         super().__init__()
         self.child, self.aspect = None, None
+        self._size = None                         # (w, h) of the chart, while shaped
+        self._steps = 0
 
     def put(self, w, aspect=None) -> None:
         self.child, self.aspect = w, aspect
         w.setParent(self)
         w.show()
-        self._place()
+        self._restart()
 
     def take(self):
         w, self.child = self.child, None
@@ -881,29 +886,34 @@ class _AspectBox(QtWidgets.QWidget):
 
     def set_aspect(self, aspect) -> None:
         self.aspect = aspect
-        self._place()
+        self._restart()
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        self._restart()
+
+    def _restart(self) -> None:
+        self._size, self._steps = None, 0
         self._place()
 
     def _place(self) -> None:
         if self.child is None:
             return
         r = self.rect()
-        if self.aspect:                           # the plot itself at that shape; the chart's bars and
-            try:                                  # any other plots it stacks keep their own height
-                plot = self.child.plots()[self.child.main_plot()]
-                extra = max(0, self.child.height() - plot.height())
-            except Exception:
-                extra = 0
-            w = min(r.width(), int((r.height() - extra) / self.aspect))
-            h = int(w * self.aspect) + extra
-            r = QtCore.QRect(r.x() + (r.width() - w) // 2, r.y() + (r.height() - h) // 2, w, h)
-        if r != self.child.geometry():
+        if not self.aspect:
             self.child.setGeometry(r)
-            if self.aspect:                       # its parts settle, then the plot's true share is known
-                QtCore.QTimer.singleShot(0, self._settle)
+            return
+        w, h = self._size or (r.width(), int(r.width() * self.aspect))
+        h = min(h, r.height())
+        self.child.setGeometry(QtCore.QRect(r.x() + (r.width() - w) // 2, r.y() + (r.height() - h) // 2, w, h))
+        if self._steps < 6:                       # once its layout has settled, measure the plot
+            QtCore.QTimer.singleShot(80, self._settle)
+
+    def recheck(self) -> None:
+        """The chart redrew (its plots may be new): check the shape again."""
+        if self.aspect and self.child is not None:
+            self._steps = min(self._steps, 3)
+            QtCore.QTimer.singleShot(80, self._settle)
 
     def _settle(self) -> None:
         if self.child is None or not self.aspect:
@@ -912,8 +922,22 @@ class _AspectBox(QtWidgets.QWidget):
             plot = self.child.plots()[self.child.main_plot()]
         except Exception:
             return
-        if plot.width() and abs(plot.height() / plot.width() - self.aspect) > 0.02:
-            self._place()
+        r = self.rect()
+        cw, ch, pw_, ph = self.child.width(), self.child.height(), plot.width(), plot.height()
+        if not (cw and ch and pw_ and ph):
+            return
+        target = pw_ * self.aspect
+        if abs(ph - target) <= 2:
+            return
+        self._steps += 1
+        share = max(0.15, ph / ch)                # how much of the chart's height the plot gets
+        h = ch + (target - ph) / share
+        w = cw
+        if h > r.height():                        # too tall for the room: narrower instead
+            w = int(cw * r.height() / h)
+            h = r.height()
+        self._size = (max(50, int(w)), max(50, int(h)))
+        self._place()
 
 
 def _head(text: str) -> QtWidgets.QLabel:

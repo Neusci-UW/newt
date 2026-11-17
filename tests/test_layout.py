@@ -199,7 +199,7 @@ def test_line_thickness_works_while_recording_and_is_saved(app, win, tmp_path):
     win.btn_rec.setChecked(False)
     win.btn_run.setChecked(False)
     back = config.load(config.save(win.cfg, tmp_path / "c.toml"))
-    assert back.channels[0].width == 3 and back.channels[1].width == 1.0
+    assert back.channels[0].width == 3 and back.channels[1].width == 5.0
     cfg = make_cfg(tmp_path)
     cfg.channels[0].width = 25
     with pytest.raises(ValueError, match="0.5 and 20"):

@@ -8,11 +8,11 @@ so the config and analysis code can use this module without it.
 """
 from __future__ import annotations
 
-# Trace colors, in the order new channels get them. Based on the Okabe-Ito
-# color-blind-safe palette, ordered so the first few are bright on black.
-PALETTE = ("#E69F00", "#56B4E9", "#009E73", "#F0E442",
-           "#D55E00", "#CC79A7", "#FFFFFF", "#3D8FD1")
-PALETTE_NAMES = ("Orange", "Sky blue", "Green", "Yellow", "Red-orange", "Pink", "White", "Blue")
+# Trace colors, in the order new channels get them: fully saturated hues spread around the
+# wheel, ordered so the first few are bright on black.
+PALETTE = ("#FF8000", "#00BFFF", "#00FF00", "#FFFF00",
+           "#FF0000", "#FF00FF", "#FFFFFF", "#0040FF")
+PALETTE_NAMES = ("Orange", "Sky blue", "Green", "Yellow", "Red", "Magenta", "White", "Blue")
 # what can be picked: the palette, then black (never given out on its own; on a black plot
 # it's drawn light, as white is drawn dark on a white one)
 CHOICES = PALETTE + ("#000000",)

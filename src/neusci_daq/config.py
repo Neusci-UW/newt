@@ -43,7 +43,7 @@ class Channel:
     range: tuple[float, float] = USB6003_RANGE
     enabled: bool = True
     color: str = ""               # "#rrggbb"; empty = next palette color
-    width: float = 1.0            # trace thickness in px (display only)
+    width: float = 5.0            # trace thickness in px (display only)
 
     def to_units(self, volts):
         return volts * self.scale + self.offset

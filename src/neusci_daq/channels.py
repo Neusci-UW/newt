@@ -188,7 +188,7 @@ class ChannelStrip(QtWidgets.QFrame):
         # Line thickness: typed, 0.5-20 px. Display only, so it works while recording.
         self.line_width = QtWidgets.QDoubleSpinBox(minimum=LINE_MIN, maximum=LINE_MAX, decimals=1, singleStep=0.5)
         self.line_width.setSuffix(" px")
-        self.line_width.setValue(float(getattr(row.ch, "width", 1.0)))
+        self.line_width.setValue(float(getattr(row.ch, "width", 5.0)))
         self.line_width.setKeyboardTracking(False)
         self.line_width.setToolTip(f"Line thickness ({LINE_MIN:g}–{LINE_MAX:g} px)")
 

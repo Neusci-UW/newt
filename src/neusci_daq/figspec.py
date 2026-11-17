@@ -36,10 +36,11 @@ PALETTES = {"": None,                                         # the groups' own 
             "bold": ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"]}
 # how a figure looks, beyond its sizes: what each key is when a figure doesn't say (as before them)
 LOOK_DEFAULTS = {"family": "Arial", "font_legend": 0.0, "bold": "none", "axw": 0.8, "marker": "circle",
-                 "cap": 0.0, "err_style": "bars", "nticks": 0, "palette": "", "legend_frame": False}
+                 "cap": 0.0, "err_style": "bars", "nticks": 0, "palette": "", "legend_frame": False,
+                 "smooth": 0}
 # the look by section, as Single Plot shows it; a section can be the same on every Canvas figure
 SECTIONS = {"text": ("family", "font", "font_ticks", "font_title", "font_legend", "bold"),
-            "lines": ("lw", "axw", "ms", "marker", "cap", "err_style"),
+            "lines": ("lw", "axw", "ms", "marker", "cap", "err_style", "smooth"),
             "axes": ("box", "despine", "ticks", "tick_len", "nticks", "grid", "zero"),
             "colors": ("palette",),
             "legend": ("legend", "legend_frame")}
@@ -63,6 +64,23 @@ def look_of(spec: dict, sections=tuple(SECTIONS)) -> dict:
                 out[k] = copy.deepcopy(spec[k])
             elif k in LOOK_DEFAULTS:
                 out[k] = LOOK_DEFAULTS[k]
+    return out
+
+
+def smoothed(y, n: int) -> np.ndarray:
+    """A line averaged over n neighbouring points (a moving average centred on each point, the
+    ends over what there is); missing points are left out. Under 3: the line as it is."""
+    y = np.asarray(y, float)
+    n = int(n or 0)
+    if n < 3 or y.size < 3:
+        return y
+    ok = np.isfinite(y)
+    k = np.ones(min(n, y.size))
+    total = np.convolve(np.where(ok, y, 0.0), k, mode="same")
+    count = np.convolve(ok.astype(float), k, mode="same")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.where(count > 0, total / np.maximum(count, 1), np.nan)
+    out[~ok] = np.nan                                     # a gap stays a gap
     return out
 
 
@@ -357,9 +375,15 @@ def _draw(ax, spec: dict, data: dict) -> None:
                     order = np.argsort(xs, kind="stable") if s.get("style") != "markers" else slice(None)
                     xs, ys = xs[order], ys[order]
                 st = s.get("style", "markers")
-                kw = _marker_kw(spec, color, ms, lw) if st in ("markers", "both") else {"marker": None}
-                ax.plot(xs, ys, linestyle="-" if st in ("line", "both") else "none", linewidth=lw,
-                        color=color, label=mathify(label), **kw)
+                n = int(spec.get("smooth") or 0)
+                if n >= 3 and st in ("line", "both"):    # the line smoothed; the points stay where they are
+                    ax.plot(xs, smoothed(ys, n), linestyle="-", linewidth=lw, color=color, label=mathify(label))
+                    if st == "both":
+                        ax.plot(xs, ys, linestyle="none", color=color, **_marker_kw(spec, color, ms, lw))
+                else:
+                    kw = _marker_kw(spec, color, ms, lw) if st in ("markers", "both") else {"marker": None}
+                    ax.plot(xs, ys, linestyle="-" if st in ("line", "both") else "none", linewidth=lw,
+                            color=color, label=mathify(label), **kw)
         if spec.get("xlog"):
             ax.set_xscale("log")
     if spec.get("ylog"):
@@ -455,6 +479,8 @@ def _curves(ax, spec, data, lw):
             width = c["width_px"] * float(data.get("pt_px", 0.35)) * lw / float(data.get("lw0", lw) or lw)
         else:                                     # an older figure
             width = lw * c.get("width", 1.0)
+        if not c.get("points"):
+            y = smoothed(y, int(spec.get("smooth") or 0))       # Smooth lines (Off: as drawn)
         ax.plot(x, y, color=c.get("color") or PALETTE[k % len(PALETTE)], linewidth=width,
                 alpha=float(c.get("alpha", 1.0)), marker=st, markersize=float(spec.get("ms", 4)),
                 linestyle="none" if c.get("points") else "-", markeredgewidth=0,

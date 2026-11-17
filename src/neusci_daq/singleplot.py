@@ -230,6 +230,20 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.btn_canvas.setToolTip("Put this figure on the Plot Canvas, to lay out beside others")
         self.btn_save = QtWidgets.QPushButton("Save figure…")
         self.btn_copy = QtWidgets.QPushButton("Copy")
+        # moving the view: grab and drag the plot, scroll to zoom where you point, or these
+        self.btn_grab = QtWidgets.QToolButton(text="✋ Grab", checkable=True, checked=True)
+        self.btn_grab.setToolTip("Drag the plot to move what it shows; scroll over it to zoom where you point. "
+                                 "X from / Y from follow")
+        self.btn_zoom_in = QtWidgets.QToolButton(text="＋")
+        self.btn_zoom_in.setToolTip("Zoom in on the middle of the plot")
+        self.btn_zoom_out = QtWidgets.QToolButton(text="−")
+        self.btn_zoom_out.setToolTip("Zoom out")
+        self.btn_fit_view = QtWidgets.QToolButton(text="Fit view")
+        self.btn_fit_view.setToolTip("Back to automatic ranges: everything plotted, fitted")
+        self.view_tools = [self.btn_grab, self.btn_zoom_in, self.btn_zoom_out, self.btn_fit_view]
+        for b in self.view_tools:
+            bar.addWidget(b)
+        bar.addSpacing(8)
         for b in (self.btn_copy, self.btn_save, self.btn_canvas):
             bar.addWidget(b)
         left.addLayout(bar)
@@ -238,8 +252,12 @@ class SinglePlotPage(QtWidgets.QWidget):
         al = QtWidgets.QGridLayout(self.area)
         # the figure as a picture, drawn at its size in mm (a live matplotlib canvas resizes the
         # figure to itself and draws over its old picture): what you see is what saves
-        self.canvas = QtWidgets.QLabel()
+        self.canvas = _FigureView(self)
         self.canvas.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._geo: dict | None = None                # where the plot sat when last drawn: for grab and zoom
+        self.btn_zoom_in.clicked.connect(lambda: self.zoom_view(0.8))
+        self.btn_zoom_out.clicked.connect(lambda: self.zoom_view(1.25))
+        self.btn_fit_view.clicked.connect(self.fit_view)
         self.canvas.setStyleSheet("background: white")
         al.addWidget(self.canvas, 0, 0, QtCore.Qt.AlignmentFlag.AlignCenter)
         self._redraw = QtCore.QTimer(self, singleShot=True, interval=60)   # many edits: draw once
@@ -347,6 +365,11 @@ class SinglePlotPage(QtWidgets.QWidget):
                             "The points' shape")
         self.cap = spin(0, 20, 0.5, auto=True, tip="How wide the ends of the error bars are; Auto: from the "
                                                    "points' size")
+        self.smooth = QtWidgets.QSpinBox(minimum=0, maximum=201, singleStep=2)
+        self.smooth.setSpecialValueText("Off")
+        self.smooth.setSuffix(" points")
+        self.smooth.setToolTip("Smooth the lines: each point averaged with its neighbours, this many in all "
+                               "(points on their own stay put). Off: as measured")
         self.err_style = combo([("Bars", "bars"), ("Shaded band", "band"), ("None", "none")],
                                "How the spread (± SEM or ± SD, set for each series) is drawn")
         self.box = combo([("Open (no top or right line)", "open"), ("Closed", "closed"), ("None (ticks only)", "none")],
@@ -423,6 +446,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         ln.addRow("Point shape", self.marker)
         ln.addRow("Error caps", with_slider(self.cap))
         ln.addRow("Error bars", self.err_style)
+        ln.addRow("Smooth lines", with_slider(self.smooth))
         ax_ = section("Axes", "axes")
         ax_.addRow("Box", self.box)
         ax_.addRow("Ticks", self.ticks)
@@ -455,7 +479,7 @@ class SinglePlotPage(QtWidgets.QWidget):
             w.editingFinished.connect(self._edited)
         self.ticks.currentIndexChanged.connect(self._edited)
         for w in (self.font, self.font_ticks, self.font_title, self.font_legend, self.tick_len, self.lw, self.axw,
-                  self.ms, self.cap, self.nticks, self.w_mm, self.h_mm):
+                  self.ms, self.cap, self.nticks, self.smooth, self.w_mm, self.h_mm):
             w.valueChanged.connect(self._edited)
         for w in (self.legend, self.kind, self.shape, self.family, self.bold, self.marker, self.err_style, self.box,
                   self.grid, self.palette):
@@ -483,6 +507,8 @@ class SinglePlotPage(QtWidgets.QWidget):
             b.setEnabled(has)
         self.canvas.setVisible(has)
         self.empty.setVisible(not has)
+        for b in self.view_tools:                  # a live chart moves on its own (drag and scroll it)
+            b.setVisible(has and not live)
         self.btn_canvas.setText("Update on Canvas" if self.editing is not None else "Send to Canvas")
         if not has:
             self.title.setText("")
@@ -592,6 +618,7 @@ class SinglePlotPage(QtWidgets.QWidget):
                     font_title=self.font_title.value(), font_legend=self.font_legend.value(),
                     bold=self.bold.currentData(), lw=self.lw.value(), axw=self.axw.value(), ms=self.ms.value(),
                     marker=self.marker.currentData(), cap=self.cap.value(), err_style=self.err_style.currentData(),
+                    smooth=self.smooth.value(),
                     box=box, despine=box == "open", ticks=self.ticks.currentData(), tick_len=self.tick_len.value(),
                     nticks=self.nticks.value(), grid={"none": False, "y": "y", "xy": True}[grid],
                     zero=self.zero.isChecked(), palette=self.palette.currentData(),
@@ -601,10 +628,11 @@ class SinglePlotPage(QtWidgets.QWidget):
         """Put a look in the boxes: a figure's, a preset or a copied look. What it doesn't say stays."""
         for k, w in (("font", self.font), ("font_ticks", self.font_ticks), ("font_title", self.font_title),
                      ("font_legend", self.font_legend), ("lw", self.lw), ("axw", self.axw), ("ms", self.ms),
-                     ("cap", self.cap), ("tick_len", self.tick_len), ("nticks", self.nticks), ("w_mm", self.w_mm),
+                     ("cap", self.cap), ("tick_len", self.tick_len), ("nticks", self.nticks), ("smooth", self.smooth),
+                     ("w_mm", self.w_mm),
                      ("h_mm", self.h_mm)):
             if v.get(k) is not None:
-                w.setValue(int(v[k]) if k == "nticks" else float(v[k]))
+                w.setValue(int(v[k]) if k in ("nticks", "smooth") else float(v[k]))
         for k, w in (("family", self.family), ("bold", self.bold), ("marker", self.marker),
                      ("err_style", self.err_style), ("box", self.box), ("ticks", self.ticks), ("palette", self.palette)):
             if k in v:
@@ -822,6 +850,15 @@ class SinglePlotPage(QtWidgets.QWidget):
         except Exception as e:                      # a bad range or label: say so, don't crash
             fig.clear()
             fig.text(0.5, 0.5, f"Can't draw this: {e}", ha="center", va="center", wrap=True)
+        W, H = int(w_in * dpi * zoom), int(h_in * dpi * zoom)
+        self._geo = None
+        if fig.axes and self.spec.get("kind") != "image":        # where the plot is, for grab and zoom
+            ax = fig.axes[0]
+            pos = ax.get_position()
+            self._geo = {"left": pos.x0 * W, "top": (1 - pos.y1) * H, "w": pos.width * W, "h": pos.height * H,
+                         "xlim": tuple(ax.get_xlim()), "ylim": tuple(ax.get_ylim()),
+                         "xlog": ax.get_xscale() == "log", "ylog": ax.get_yscale() == "log",
+                         "x_moves": self.spec.get("kind") != "bar"}
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=dpi * zoom * ratio, facecolor="white")
         pix = QtGui.QPixmap()
@@ -829,6 +866,70 @@ class SinglePlotPage(QtWidgets.QWidget):
         pix.setDevicePixelRatio(ratio)
         self.canvas.setFixedSize(int(w_in * dpi * zoom), int(h_in * dpi * zoom))
         self.canvas.setPixmap(pix)
+
+    # -- moving the view: grab and pan, zoom (the figure's X from / Y from follow) -------------------
+    def in_plot(self, pos: QtCore.QPointF) -> bool:
+        g = self._geo
+        return g is not None and g["left"] <= pos.x() <= g["left"] + g["w"] and g["top"] <= pos.y() <= g["top"] + g["h"]
+
+    def _show_view(self, xlim, ylim) -> None:
+        """Put a view in the X from / Y from boxes and draw it."""
+        self._loading = True
+        try:
+            for w, v in ((self.x0, xlim[0]), (self.x1, xlim[1]), (self.y0, ylim[0]), (self.y1, ylim[1])):
+                w.setText("" if v is None else f"{v:.6g}")
+        finally:
+            self._loading = False
+        self._edited()
+
+    @staticmethod
+    def _shifted(lim, frac: float, log: bool):
+        """Limits moved by `frac` of their span (on a log axis, of their decades)."""
+        a, b = lim
+        if log and a > 0 and b > 0:
+            la, lb = np.log10(a), np.log10(b)
+            d = (lb - la) * frac
+            return 10 ** (la + d), 10 ** (lb + d)
+        d = (b - a) * frac
+        return a + d, b + d
+
+    @staticmethod
+    def _scaled_about(lim, at: float, k: float, log: bool):
+        """Limits shrunk (k < 1) or grown about the point `at` (0 to 1 along them)."""
+        a, b = lim
+        if log and a > 0 and b > 0:
+            la, lb = np.log10(a), np.log10(b)
+            c = la + (lb - la) * at
+            return 10 ** (c - (c - la) * k), 10 ** (c + (lb - c) * k)
+        c = a + (b - a) * at
+        return c - (c - a) * k, c + (b - c) * k
+
+    def pan_view(self, start: dict, dx: float, dy: float) -> None:
+        """The view as it was at `start` (a _geo), dragged by dx, dy screen pixels."""
+        if start is None or self.spec is None:
+            return
+        xlim = self._shifted(start["xlim"], -dx / start["w"], start["xlog"]) if start["x_moves"] else \
+            tuple(self.spec.get("xlim") or (None, None))
+        ylim = self._shifted(start["ylim"], dy / start["h"], start["ylog"])
+        self._show_view(xlim, ylim)
+
+    def zoom_view(self, k: float, pos: QtCore.QPointF | None = None) -> None:
+        """Zoom in (k < 1) or out about where you point (else the middle)."""
+        g = self._geo
+        if g is None or self.spec is None:
+            return
+        fx = (pos.x() - g["left"]) / g["w"] if pos is not None else 0.5
+        fy = 1 - (pos.y() - g["top"]) / g["h"] if pos is not None else 0.5
+        fx, fy = min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy))
+        xlim = self._scaled_about(g["xlim"], fx, k, g["xlog"]) if g["x_moves"] else \
+            tuple(self.spec.get("xlim") or (None, None))
+        ylim = self._scaled_about(g["ylim"], fy, k, g["ylog"])
+        self._show_view(xlim, ylim)
+
+    def fit_view(self) -> None:
+        """Back to automatic ranges."""
+        if self.spec is not None:
+            self._show_view((None, None), (None, None))
 
     def showEvent(self, ev):
         super().showEvent(ev)
@@ -1161,6 +1262,56 @@ class SinglePlotPage(QtWidgets.QWidget):
 
     def state(self) -> dict | None:
         return F.clone(self.spec) if self.spec else None
+
+
+class _FigureView(QtWidgets.QLabel):
+    """The figure as a picture: grab the plot and drag to move what it shows, scroll over it to
+    zoom where you point (Single Plot does the moving: pan_view, zoom_view)."""
+
+    def __init__(self, page: "SinglePlotPage"):
+        super().__init__()
+        self.page = page
+        self.setMouseTracking(True)
+        self._press: tuple | None = None          # where a drag began, and the view then
+
+    def _grab_on(self) -> bool:
+        return self.page.btn_grab.isChecked() and self.page.spec is not None and not self.page._live()
+
+    def mousePressEvent(self, ev):
+        pos = ev.position()
+        if ev.button() == QtCore.Qt.MouseButton.LeftButton and self._grab_on() and self.page.in_plot(pos):
+            self._press = (pos, dict(self.page._geo))
+            self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        pos = ev.position()
+        if self._press is not None:
+            start, geo = self._press
+            self.page.pan_view(geo, pos.x() - start.x(), pos.y() - start.y())
+            ev.accept()
+            return
+        self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor if self._grab_on() and self.page.in_plot(pos)
+                       else QtCore.Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if self._press is not None:
+            self._press = None
+            self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
+
+    def wheelEvent(self, ev):
+        pos = ev.position()
+        if self._grab_on() and self.page.in_plot(pos) and ev.angleDelta().y():
+            self.page.zoom_view(0.85 if ev.angleDelta().y() > 0 else 1 / 0.85, pos)
+            ev.accept()
+            return
+        super().wheelEvent(ev)
 
 
 SHAPES = [("Fill the window", None), ("4 : 3", 0.75), ("3 : 2", 2 / 3), ("16 : 9", 9 / 16),

@@ -12,7 +12,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from . import stim as stimmod
 from . import style
 from .designparts import StimPicture
-from .simplestim import DIM, FIELDS, MARKED, MODES, NAMES, WAVES, PulseDiagram, _Spin
+from .simplestim import DIM, FIELDS, MARKED, MODES, NAMES, WAVES, PulseDiagram, _repeats_spin, _Spin
 
 SHORT = {"single": "Pulse", "pair": "Pair", "train": "Train", "sine": "Sine", "triangle": "Tri"}
 
@@ -114,7 +114,7 @@ class DockedStimulator(QtWidgets.QFrame):
         self.btn_fire.setMinimumHeight(30)
         self.btn_fire.setToolTip("Send the stimulus once")
         self.btn_repeat = QtWidgets.QPushButton("Repeat")
-        self.btn_repeat.setToolTip("Send it every few seconds until Stop")
+        self.btn_repeat.setToolTip("Send it every few seconds, as many times as set (or until Stop)")
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.setToolTip("Stop sending and set the output to 0 V (Esc)")
         btns.addWidget(self.btn_fire, 2)
@@ -125,13 +125,14 @@ class DockedStimulator(QtWidgets.QFrame):
         every.setSpacing(4)
         every.addWidget(QtWidgets.QLabel("every"))
         self.every = _small_spin(0.05, 3600, 2, "s", "From the start of one stimulus to the start of the next")
-        every.addWidget(self.every)
+        every.addWidget(self.every, 1)
+        self.repeats = _repeats_spin()
+        every.addWidget(self.repeats, 1)
+        b.addLayout(every)
         self.ramp = QtWidgets.QCheckBox()
         self.ramp.setToolTip("Raise the amplitude after each stimulus (the amount and the limit are on "
                              "Simple Stimulus)")
-        every.addWidget(self.ramp)
-        every.addStretch(1)
-        b.addLayout(every)
+        b.addWidget(self.ramp)
         self.last = QtWidgets.QLabel()
         self.last.setWordWrap(True)
         b.addWidget(self.last)
@@ -143,7 +144,8 @@ class DockedStimulator(QtWidgets.QFrame):
         self.type_group.buttonClicked.connect(lambda *_: self._edited())
         for w in (self.level, self.width, self.interval, self.rate, self.every, self.freq, self.dur, self.offset):
             w.valueChanged.connect(self._edited)
-        self.count.valueChanged.connect(self._edited)
+        for w in (self.count, self.repeats):
+            w.valueChanged.connect(self._edited)
         self.ramp.toggled.connect(self._edited)
         self.btn_fire.clicked.connect(page.fire)
         self.btn_repeat.clicked.connect(page.start_repeat)
@@ -165,13 +167,14 @@ class DockedStimulator(QtWidgets.QFrame):
             d = self.page.values()
             for w, key in ((self.level, "level"), (self.width, "width"), (self.interval, "interval"),
                            (self.rate, "rate"), (self.count, "count"), (self.every, "every"),
-                           (self.freq, "freq"), (self.dur, "dur"), (self.offset, "offset")):
+                           (self.freq, "freq"), (self.dur, "dur"), (self.offset, "offset"),
+                           (self.repeats, "repeats")):
                 if w.value() != d[key] and not w.hasFocus():
                     w.setValue(d[key])
             self.type_buttons[d["mode"]].setChecked(True)
             self.ramp.setChecked(d["ramp"])
             units = self.main.cfg.stim_units or "V"
-            self.ramp.setText(f"{d['ramp_by']:+g} {units} each")
+            self.ramp.setText(f"Raise {d['ramp_by']:+g} {units} each")
             mode = d["mode"]
             for key, w in self.boxes.items():
                 w.setVisible(key in FIELDS[mode])
@@ -189,7 +192,7 @@ class DockedStimulator(QtWidgets.QFrame):
                  level=self.level.value(), width=self.width.value(), interval=self.interval.value(),
                  rate=self.rate.value(), count=self.count.value(), every=self.every.value(),
                  ramp=self.ramp.isChecked(), freq=self.freq.value(), dur=self.dur.value(),
-                 offset=self.offset.value())
+                 offset=self.offset.value(), repeats=self.repeats.value())
         self.page._set_values(d)
         self.page._changed()            # saves, redraws the page, and calls sync() here
 

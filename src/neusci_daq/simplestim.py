@@ -36,7 +36,17 @@ DELAY_MS = 2.0                 # 0 V before the first pulse, so the recorded sti
 DIM = {style.LIGHT: "#d9822b", style.DARK: "#f0a35a"}
 DEFAULTS = dict(mode="single", level=2.0, width=0.2, interval=20.0, rate=20.0, count=5,
                 every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0, offset=0.0,
-                windows=False, before=100.0, after=500.0)
+                windows=False, before=100.0, after=500.0, repeats=0)
+
+
+def _repeats_spin() -> QtWidgets.QSpinBox:
+    """How many Start repeating sends; 0 shows as "until Stop"."""
+    s = QtWidgets.QSpinBox(minimum=0, maximum=10000)
+    s.setSpecialValueText("until Stop")
+    s.setSuffix(" times")
+    s.setKeyboardTracking(False)
+    s.setToolTip("How many stimuli Repeat sends before it stops by itself (0 = until Stop)")
+    return s
 
 
 class _Spin(QtWidgets.QDoubleSpinBox):
@@ -237,6 +247,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         self._mode = style.LIGHT
         self.sent = 0
         self.repeating = False
+        self.rep_sent = 0                # how many this run of repeating has sent
         self.timer = QtCore.QTimer(self, timeout=self._tick)
         self.timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
         self.state_timer = QtCore.QTimer(self, interval=300, timeout=self._refresh)
@@ -302,7 +313,10 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.every = _spin(0.05, 3600, 2, "s", "From the start of one stimulus to the start of the next")
         self.every.setMinimumWidth(90)
         send.addWidget(self.every)
-        send.addWidget(QtWidgets.QLabel("until Stop."))
+        self.repeats = _repeats_spin()
+        self.repeats.setMinimumWidth(110)
+        self.repeats.setFont(self.level.font())
+        send.addWidget(self.repeats)
         send.addStretch(1)
         lv.addLayout(send)
         win = QtWidgets.QHBoxLayout()
@@ -365,7 +379,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         rv.addWidget(self.btn_fire)
         row = QtWidgets.QHBoxLayout()
         self.btn_repeat = QtWidgets.QPushButton("Start repeating")
-        self.btn_repeat.setToolTip("Send the stimulus every few seconds until Stop")
+        self.btn_repeat.setToolTip("Send the stimulus every few seconds, as many times as set (or until Stop)")
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.setToolTip("Stop sending and set the output to 0 V (Esc)")
         row.addWidget(self.btn_repeat, 1)
@@ -413,6 +427,7 @@ class SimpleStimPage(QtWidgets.QWidget):
                   self.freq, self.dur, self.offset, self.before, self.after):
             w.valueChanged.connect(self._changed)
         self.count.valueChanged.connect(self._changed)
+        self.repeats.valueChanged.connect(self._changed)
         self.ramp.toggled.connect(self._changed)
         self.windows.toggled.connect(self._changed)
         self.btn_fire.clicked.connect(self.fire)
@@ -443,13 +458,13 @@ class SimpleStimPage(QtWidgets.QWidget):
                     every=self.every.value(), ramp=self.ramp.isChecked(), ramp_by=self.ramp_by.value(),
                     ramp_to=self.ramp_to.value(), freq=self.freq.value(), dur=self.dur.value(),
                     offset=self.offset.value(), windows=self.windows.isChecked(), before=self.before.value(),
-                    after=self.after.value())
+                    after=self.after.value(), repeats=self.repeats.value())
 
     def _set_values(self, d: dict) -> None:
         d = {**DEFAULTS, **d}
         widgets = (self.level, self.width, self.interval, self.rate, self.count, self.every,
                    self.ramp_by, self.ramp_to, self.ramp, self.freq, self.dur, self.offset,
-                   self.windows, self.before, self.after)
+                   self.windows, self.before, self.after, self.repeats)
         for w in widgets:
             w.blockSignals(True)
         self.mode_buttons.get(d["mode"], self.mode_buttons["single"]).setChecked(True)
@@ -468,6 +483,7 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.windows.setChecked(bool(d["windows"]))
         self.before.setValue(float(d["before"]))
         self.after.setValue(float(d["after"]))
+        self.repeats.setValue(int(d["repeats"]))
         for w in widgets:
             w.blockSignals(False)
 
@@ -572,6 +588,8 @@ class SimpleStimPage(QtWidgets.QWidget):
         while self.log.count() > 200:
             self.log.takeItem(self.log.count() - 1)
         self.show_message("")
+        if self.repeating:
+            self.rep_sent += 1
         if self.ramp.isChecked():
             self._raise_amplitude()
         self.state_changed.emit()
@@ -591,8 +609,11 @@ class SimpleStimPage(QtWidgets.QWidget):
         if self.repeating:
             return
         self.repeating = True
+        self.rep_sent = 0
         if not self.fire():
             self.repeating = False
+            return
+        if self._all_sent():
             return
         if self.repeating:            # the ramp may have stopped it already
             self.timer.start(int(self.every.value() * 1000))
@@ -606,8 +627,20 @@ class SimpleStimPage(QtWidgets.QWidget):
             return
         if not self.fire():
             self.halt()
-        elif self.timer.interval() != int(self.every.value() * 1000):
+            return
+        if self._all_sent():
+            return
+        if self.timer.interval() != int(self.every.value() * 1000):
             self.timer.setInterval(int(self.every.value() * 1000))
+
+    def _all_sent(self) -> bool:
+        """Stop once this run has sent as many as Repeats asks for (0 = until Stop)."""
+        n = self.repeats.value()
+        if not self.repeating or not n or self.rep_sent < n:
+            return False
+        self.halt()
+        self.show_message(f"Sent {n}: done.")
+        return True
 
     def halt(self) -> None:
         """Stop repeating (the main window's stop_stimulus calls this, so Esc works here)."""
@@ -686,7 +719,9 @@ class SimpleStimPage(QtWidgets.QWidget):
         elif not live:
             state, ok = "Ready: sending starts acquiring (and recording, with Record on)", True
         elif self.repeating:
-            state, ok = f"Sending every {self.every.value():g} s…", True
+            n = self.repeats.value()
+            of = f"{self.rep_sent} of {n}" if n else f"{self.rep_sent} so far"
+            state, ok = f"Sending every {self.every.value():g} s · {of}…", True
         else:
             state, ok = "Ready", True
         return state, ok

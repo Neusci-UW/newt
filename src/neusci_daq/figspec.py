@@ -115,7 +115,9 @@ def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
                          "xtick.major.width": 0.8 * k, "ytick.major.width": 0.8 * k,
                          "xtick.major.pad": 3.5 * k, "ytick.major.pad": 3.5 * k, "axes.labelpad": 4.0 * k,
                          "axes.titlepad": 6.0 * k, "axes.linewidth": 0.8 * k,
-                         "legend.fontsize": font * 0.85, "font.family": "sans-serif",
+                         "legend.fontsize": font * 0.85,
+                         "font.family": ["Arial", "Liberation Sans", "DejaVu Sans"],   # the chart's face, by name
+                         # (a generic "sans-serif" is looked up when drawn, after this context)
                          "mathtext.default": "regular", "svg.fonttype": "none", "pdf.fonttype": 42}):
         if ax is None:
             fig.clear()
@@ -291,7 +293,8 @@ def _scale_bar(ax, spec, data) -> None:
     (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
     xl = sb["dx"] / (x1 - x0) if sb.get("dx") and x1 > x0 else 0.0
     yl = sb["dy"] / (y1 - y0) if sb.get("dy") and y1 > y0 else 0.0
-    c0, c1 = -0.02, -0.03
+    gx, gy = sb.get("gap", (0.0, 0.0))                   # where it was dragged to on the chart
+    c0, c1 = -0.02 + gx, -0.03 + gy
     width = 2.5 * float(data.get("pt_px", 0.75))
     size = float(spec.get("font", 9.0)) * 0.85
     kw = dict(transform=ax.transAxes, clip_on=False, color="black", linewidth=width, solid_capstyle="butt")
@@ -382,12 +385,15 @@ def paper_font(spec: dict) -> float:
     return f
 
 
-def _pt(css, default: float) -> float:
-    """A CSS font size ('9pt', '12px') in pt; a pixel is a point in Qt's logical units."""
+def _pt(css, default: float, dpi: float = 72.0) -> float:
+    """A CSS font size ('9pt', '12px') in pt: a pixel is 72/dpi pt (1 on a Mac, 0.75 at
+    Windows' 96 dpi)."""
     if not css:
         return float(default)
     m = re.match(r"\s*([\d.]+)\s*(pt|px)?", str(css))
-    return float(m.group(1)) if m else float(default)
+    if not m:
+        return float(default)
+    return float(m.group(1)) * (72.0 / dpi if m.group(2) == "px" and dpi > 0 else 1.0)
 
 
 def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, dict]:
@@ -498,9 +504,11 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
         return f"{text} ({prefix}{units})" if units else text
     (x0, x1), (y0, y1) = item.getViewBox().viewRange()
     spec = new_spec(kind="curves")
-    # the plot's own title (its channel, Ch2), and the shape it has on screen
+    # no title by default: the chart's own (its channel, Ch2) only if you typed it on the chart;
+    # a title set in its look (Single Plot) is added below. And the shape it has on screen.
     own = (item.titleLabel.text or "").strip() if getattr(item, "titleLabel", None) is not None else ""
-    spec["title"] = re.sub("<[^>]+>", "", own) if own else ""
+    typed = any(k.endswith(":title") and v for k, v in (getattr(chart, "look", None) or {}).get("texts", {}).items())
+    spec["title"] = re.sub("<[^>]+>", "", own) if own and typed else ""
     pw = plots[pis.index(item)]                       # the whole plot on screen, axes and labels too
     wpx, hpx = (pw.width(), pw.height()) if hasattr(pw, "width") and callable(pw.width) else \
         (item.sceneBoundingRect().width(), item.sceneBoundingRect().height())
@@ -513,11 +521,12 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     from pyqtgraph.Qt import QtGui as _G
     app_pt = _G.QFont().pointSizeF() or 9.0
     tick_font = left.style.get("tickFont")
-    spec["font_ticks"] = float(tick_font.pointSizeF()) if tick_font is not None else app_pt
+    spec["font_ticks"] = float(tick_font.pointSizeF()) if tick_font is not None and tick_font.pointSizeF() > 0 \
+        else float(tick_font.pixelSize()) * 72.0 / dpi if tick_font is not None and tick_font.pixelSize() > 0 else app_pt
     css = getattr(left, "labelStyle", {}) or {}
-    spec["font"] = _pt(css.get("font-size"), app_pt)
+    spec["font"] = _pt(css.get("font-size"), app_pt, dpi)
     title = getattr(item, "titleLabel", None)
-    spec["font_title"] = _pt(title.opts.get("size") if title is not None else None, app_pt)
+    spec["font_title"] = _pt(title.opts.get("size") if title is not None else None, app_pt, dpi)
     if view:
         spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
     spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
@@ -552,6 +561,10 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
         data_ticks["scalebar"] = {"dx": float(getattr(bar, "dx", 0.0)) * kx, "dy": float(getattr(bar, "dy", 0.0)) * ky,
                                   "x_text": getattr(bar, "x_text", ""), "y_text": getattr(bar, "y_text", ""),
                                   "font_px": float(getattr(bar, "font_px", 11.0))}
+        gx, gy = getattr(bar, "gap", (0.0, 0.0))          # dragged from its corner: as a share of the plot
+        vw, vh = item.vb.width(), item.vb.height()
+        if vw > 0 and vh > 0:
+            data_ticks["scalebar"]["gap"] = (float(gx) / vw, -float(gy) / vh)
     for key, ax_, k_, length in (("xticks", bottom, kx, bottom.width()), ("yticks", left, ky, left.height())):
         if "scalebar" in data_ticks:
             break
@@ -559,8 +572,17 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             lo_, hi_ = ax_.range
             levels = ax_.tickValues(lo_, hi_, length)
             vals = list(levels[0][1]) if levels else []
-            if len(levels) > 1 and length / max(1, len(vals) + len(levels[1][1])) >= 40:
-                vals = sorted(vals + list(levels[1][1]))   # room for the finer level too, as pyqtgraph does
+            if len(levels) > 1 and levels[1][1]:          # the finer level too, only if its numbers fit
+                fine = sorted(vals + list(levels[1][1]))  # (as pyqtgraph labels it, at the tick font's size)
+                from pyqtgraph.Qt import QtGui
+                fm = QtGui.QFontMetricsF(ax_.style.get("tickFont") or QtGui.QFont())
+                if key == "xticks":
+                    texts = ax_.tickStrings(fine, 1.0, levels[1][0])
+                    need = max((fm.horizontalAdvance(s) for s in texts), default=0.0) + fm.height() * 0.5
+                else:
+                    need = fm.height() * 1.5
+                if length / max(1, len(fine)) >= max(40.0, need):
+                    vals = fine
             data_ticks[key] = [round(float(v) * k_, 12) for v in vals]
         except Exception:
             pass

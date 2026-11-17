@@ -1291,6 +1291,14 @@ class AnalysisPage(QtWidgets.QWidget):
         out.update(zip(rest, colors.spread(style_, self.group_color(0), len(rest), self.trial_opacity())))
         return out
 
+    def in_browser_order(self, blocks) -> list[int]:
+        """These trials as the Trials browser lists them: group by group, in the groups' order
+        (yours, or sorted), each group's trials as listed; any not in a group after, in order.
+        Every chart that stacks trials (rows, a y axis by trial) uses this order."""
+        listed = dict.fromkeys(b for _, bl in (self.shown or []) for b in bl)
+        at = {b: k for k, b in enumerate(listed)}
+        return sorted(blocks, key=lambda b: (at.get(b, len(at)), b))
+
     def group_of(self, i: int) -> int | None:
         return next((g for g, (_, blocks) in enumerate(self.groups) if i in blocks), None)
 

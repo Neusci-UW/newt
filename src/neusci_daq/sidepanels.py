@@ -217,7 +217,7 @@ class ChartLook(QtWidgets.QGroupBox):
         self.charts: list = []
         self._vb = None
         form = QtWidgets.QFormLayout(self)
-        self.thick = QtWidgets.QDoubleSpinBox(minimum=0.25, maximum=6.0, singleStep=0.25, decimals=2, suffix=" ×")
+        self.thick = QtWidgets.QDoubleSpinBox(minimum=0.25, maximum=20.0, singleStep=0.25, decimals=2, suffix=" ×")
         self.thick.setToolTip("How thick the lines are: × 1 as drawn, × 2 twice as thick")
         self.thick.setKeyboardTracking(False)
         form.addRow("Line thickness", with_slider(self.thick))

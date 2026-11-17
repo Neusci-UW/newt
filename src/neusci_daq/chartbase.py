@@ -24,6 +24,15 @@ from . import chartstyle as CS
 from .chartstyle import LOOK  # noqa: F401  (its look: one record, read by the chart and its figure)
 
 
+def _family(item) -> None:
+    """A text item in the figure's face (Arial), at the size it has."""
+    if item is None:
+        return
+    f = item.font()
+    if f.family() != CS.FAMILY:
+        f.setFamily(CS.FAMILY)
+        item.setFont(f)
+
 
 class Chart(View):
     kind = ""                      # its name in Add chart (its heading there is in canvas.GROUPS)
@@ -277,11 +286,15 @@ class Chart(View):
         return self.page.blocks
 
     def blocks(self) -> list[int]:
-        """The blocks it shows: those it's pinned to, or those chosen."""
+        """The blocks it shows: those it's pinned to, or those chosen; in the Trials browser's
+        order, so any chart that stacks trials stacks them as the browser lists them."""
         if self.pin is None:
-            return self.finder.chosen_or_none()
-        where = {p.stem: i for i, p in enumerate(self.page._paths)}
-        return self.finder.usable([where[s] for s in self.pin["stems"] if s in where], self.pin.get("own", False))
+            chosen = self.finder.chosen_or_none()
+        else:
+            where = {p.stem: i for i, p in enumerate(self.page._paths)}
+            chosen = self.finder.usable([where[s] for s in self.pin["stems"] if s in where], self.pin.get("own", False))
+        order = getattr(self.page, "in_browser_order", None)
+        return order(chosen) if order is not None else chosen
 
     def plan(self, chosen: list[int]):
         """Which of these to average and which to show as trials (see AnalysisPage.plan)."""
@@ -440,9 +453,9 @@ class Chart(View):
         scale = CS.screen_scale(L, main_w.width(), main_w.logicalDpiX()) \
             if main_w is not None and hasattr(main_w, "logicalDpiX") else 1.0
         lab_pt, tick_pt, title_pt = CS.fonts(L, scale)
-        tf = None
+        tf = QtGui.QFont(main_w.font()) if main_w is not None and hasattr(main_w, "font") else QtGui.QFont()
+        tf.setFamily(CS.FAMILY)                   # the figure's face, so text keeps its proportions
         if tick_pt:
-            tf = QtGui.QFont()
             tf.setPointSizeF(tick_pt)
         mpx = CS.marker_px(L)
         for n, pi in enumerate(pis):
@@ -463,7 +476,7 @@ class Chart(View):
                 item.setPen(pen)
             for side in ("left", "bottom"):
                 ax = pi.getAxis(side)
-                want = {"tickLength": CS.tick_px(L), **({"tickFont": tf} if tf is not None else {})}
+                want = {"tickLength": CS.tick_px(L), "tickFont": tf}
                 if any(ax.style.get(a) != b for a, b in want.items()):      # only what changed (no relayout)
                     ax.setStyle(**want)
                 text, units = ax.labelText, ax.labelUnits
@@ -473,6 +486,7 @@ class Chart(View):
                     text, units = CS.html_sub(L["xlabel"]), ""
                 if (text or units) and (lab_pt or text != ax.labelText or units != ax.labelUnits):
                     ax.setLabel(text, units, **({"font-size": f"{lab_pt}pt"} if lab_pt else {}))
+                _family(ax.label)
             for side in ("top", "right"):
                 if L.get("despine", True):
                     pi.hideAxis(side)
@@ -522,6 +536,16 @@ class Chart(View):
                 if leg is not None:
                     for _, lab in getattr(leg, "items", []):
                         lab.setText(lab.text, size=f"{lab_pt * 0.85}pt")
+        for pi in pis:                            # every text in the figure's face, Arial, on any OS
+            if getattr(pi, "titleLabel", None) is not None:
+                _family(pi.titleLabel.item)
+            for it in pi.items:
+                for t_ in [it] if isinstance(it, pg.TextItem) else \
+                        [c for c in it.childItems() if isinstance(c, pg.TextItem)] if isinstance(it, pg.InfiniteLine) else []:
+                    _family(t_.textItem)
+            leg = getattr(pi, "legend", None)
+            for _, lab in (getattr(leg, "items", []) if leg is not None else []):
+                _family(lab.item)
         if plots:
             self._apply_ranges(pis[m].vb)
         apply_texts(self)

@@ -48,7 +48,9 @@ def thick_of(pt: float) -> float:
     return float(pt) / LINE_PT
 
 
-FIG_MM = 120.0         # a figure's width on the Canvas unless you set one
+FAMILY = "Arial"       # every chart's text, on screen and on its figure: on Windows and macOS both,
+                       # and the same width per pt at any size (the macOS system font narrows when big)
+FIG_MM = 120.0        # a figure's width on the Canvas unless you set one
 
 
 def fonts(look: dict, scale: float = 1.0) -> tuple[float | None, float | None, float | None]:

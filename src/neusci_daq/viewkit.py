@@ -94,8 +94,15 @@ class ScaleBar(pg.GraphicsObject):
         self.update()
 
     def boundingRect(self) -> QtCore.QRectF:
+        # Exactly what paint() draws (lines and both text boxes), so a drag repaints all of it
+        # and leaves no trail, at any text size.
         t = self.font_px * 1.5
-        return QtCore.QRectF(-t - 10, -self.py - 4, self.px + 64 + t * 4, self.py + t + 12)
+        r = QtCore.QRectF(0, -self.py, self.px, self.py)
+        if self.px:
+            r = r.united(QtCore.QRectF(self.px / 2 - t * 4, 3, t * 8, t))
+        if self.py:
+            r = r.united(QtCore.QRectF(-3 - t, -self.py / 2 - t * 4, t, t * 8))
+        return r.adjusted(-4, -4, 4, 4)
 
     def paint(self, p, *_) -> None:
         p.setPen(pg.mkPen(self.color, width=2.5))
@@ -104,6 +111,7 @@ class ScaleBar(pg.GraphicsObject):
         if self.px:
             p.drawLine(QtCore.QPointF(0, 0), QtCore.QPointF(self.px, 0))
         f = p.font()
+        f.setFamily("Arial")                      # chartstyle.FAMILY: the figure's face
         f.setPixelSize(max(1, int(round(self.font_px))))
         f.setBold(True)
         p.setFont(f)

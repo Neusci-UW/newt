@@ -166,7 +166,7 @@ class RasterChart(SpikeChart):
         return [(self.plot, None, None)]
 
     def draw(self) -> None:
-        chosen = self.blocks()
+        chosen = self.blocks()                           # in the Trials browser's order: row 1 at the top
         p = self.plot.getPlotItem()
         rows = {i: r for r, i in enumerate(chosen, 1)}
         if len(rows) != len(self._rows):

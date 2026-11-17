@@ -589,6 +589,11 @@ class SinglePlotPage(QtWidgets.QWidget):
     def showEvent(self, ev):
         super().showEvent(ev)
         self.page.dock_panels(self.outer)          # pick trials and colors here too
+        if self.focus_chart is None and self.spec is None and self.page.blocks:
+            # nothing open yet: start on a live chart (the first one made, else a Response)
+            QtCore.QTimer.singleShot(0, lambda: self.focus_chart is None and self.spec is None
+                                     and self.open_quick("Response"))
+            return
         if self.spec is not None and self.mode.currentIndex() == 0:
             self.data_changed()
 
@@ -713,6 +718,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         chart._sp_orig_look = orig
         self.focus_title.setText(f"<b>{getattr(chart, 'name', '')}</b> · its settings are on the right")
         self.mode.setCurrentIndex(1)
+        self.btn_back.setVisible(getattr(self, "_prev", (None,))[0] is not None)   # a figure to go back to
         self.editing = None
         self.show_spec(chart.fig_spec, live=True)
         self.page.show_sub("singleplot")

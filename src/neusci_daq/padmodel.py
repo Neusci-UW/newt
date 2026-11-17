@@ -244,7 +244,7 @@ class Column:
 
 
 NAME_RE = re.compile(r"^[^\W\d]\w*$")
-_SEL_RE = re.compile(r"^(?:(?P<a>[A-Z]{1,2})(?:\s*[-–]\s*(?P<b>[A-Z]{1,2}))?"
+_SEL_RE = re.compile(r"^(?:(?P<a>\d*[A-Z]{1,2})(?:\s*[-–]\s*(?P<b>\d*[A-Z]{1,2}))?"
                      r"(?:\s*,\s*(?P<m>first|last)\s+(?P<ms>[\d.]+)\s*ms"
                      r"|\s*,\s*\+(?P<ra>[\d.]+)\s*to\s*\+(?P<rb>[\d.]+)\s*ms"
                      r"|\s*,\s*(?P<p0>[\d.]+)\s*[-–]\s*(?P<p1>[\d.]+)\s*°"
@@ -505,30 +505,75 @@ class Source:
     def duration(self, i: int) -> float: ...
 
 
-def sent_segments(stimuli: list[dict] | None) -> list[tuple[str, float, float, dict]]:
-    """The Complex Stimulus segments sent in a trial: [(letter, start, end, part)], s from
-    the trial's start. [] when no segment stimulus was sent."""
-    for sent in stimuli or ():
-        st = sent.get("settings") or {}
-        if st.get("shape") != "segments":
+def sent_segments(stimuli: list[dict] | None,
+                  onsets: list[float | None] | None = None) -> list[tuple[str, float, float, dict]]:
+    """The segments of every stimulus sent in a trial: [(name, start, end, part)], s from the
+    trial's start. A Simple Stimulus (or any older shape) is the Complex Stimulus it makes:
+    a baseline for its delay, then its shape. The first stimulus's segments are A, B, …; when
+    more were sent (Repeat, Raise), the second's are 2A, 2B, …, the third's 3A … `onsets`:
+    where each one really started (s), lined up with the recording, None to go by its note.
+    [] when nothing was sent."""
+    out, n_sent = [], 0
+    for k, sent in enumerate(stimuli or ()):
+        st = sent.get("settings")
+        if not st:
             continue
         try:
-            s = stimmod.Stimulus.from_dict(st)
+            s = stimmod.to_segments(stimmod.Stimulus.from_dict(st))
             rate = float(sent["rate"])
         except (ValueError, KeyError, TypeError):
             continue
-        t0, at, out = s.delay_ms, stimmod.samples(s.delay_ms, rate), []
-        start = float(sent.get("t", 0.0))
-        for k, p in enumerate(s.parts):
+        n_sent += 1
+        prefix = "" if n_sent == 1 else str(n_sent)
+        onset = onsets[k] if onsets is not None and k < len(onsets) else None
+        start = float(sent.get("t", 0.0)) if onset is None else onset
+        t0, at = s.delay_ms, stimmod.samples(s.delay_ms, rate)
+        for j, p in enumerate(s.parts):
             try:
                 n = len(stimmod._part_wave(p, rate, t0))
             except (ValueError, OSError):
                 n = stimmod.span(t0, stimmod._part_ms(p), rate)
-            out.append((stimmod.letter(k), start + at / rate, start + (at + n) / rate, p))
+            out.append((prefix + stimmod.letter(j), start + at / rate, start + (at + n) / rate, p))
             at += n
             t0 += n * 1000.0 / rate if p.get("kind") == "file" else stimmod._part_ms(p)
+    return out
+
+
+_SENT_KEY = re.compile(r"^(\d+)([A-Z]+)$")
+
+
+def send_of(name: str) -> tuple[int, str]:
+    """(which stimulus sent, the segment's letter) a segment's name stands for: B is the first
+    stimulus's B, 3B the third's."""
+    m = _SENT_KEY.match(name)
+    return (int(m[1]), m[2]) if m else (1, name)
+
+
+def send_at(segs: list, t: float | None) -> int:
+    """Which stimulus sent a row starting at t (s) belongs to: the last one started by then
+    (the first, for a whole trial)."""
+    out = 1
+    if t is None:
         return out
-    return []
+    for name, t0, _t1, _p in segs:
+        n = send_of(name)[0]
+        if n > out and t0 <= t + 1e-9:
+            out = n
+    return out
+
+
+def scoped(segs: list, send: int) -> list:
+    """The segments as a row of stimulus `send` sees them: a plain letter (B) is that
+    stimulus's own segment, a numbered one (3B) the one it names."""
+    if send <= 1:
+        return segs
+    own = [(send_of(s[0])[1], *s[1:]) for s in segs if send_of(s[0])[0] == send]
+    return own + [s for s in segs if send_of(s[0])[0] != 1]
+
+
+def row_segments(segs: list, r: "Row") -> list:
+    """The segments as row r sees them (see scoped)."""
+    return scoped(segs, send_at(segs, r.t0))
 
 
 @dataclass(frozen=True)
@@ -657,9 +702,10 @@ class Pad:
         out = []
         for i in trials:
             for letter, t0, t1, part in src.segments(i):
-                if self.rows_mode == "segment" and (not self.rows_seg or letter == self.rows_seg):
+                mine = not self.rows_seg or send_of(letter)[1] == self.rows_seg   # B: B of every stimulus sent
+                if self.rows_mode == "segment" and mine:
                     out.append(Row(i, t0, t1, letter))
-                elif self.rows_mode == "pulse" and (not self.rows_seg or letter == self.rows_seg):
+                elif self.rows_mode == "pulse" and mine:
                     out += [Row(i, r.t0, r.t1, r.label) for r in pulses(letter, t0, t1, part)]
         return out
 
@@ -675,6 +721,8 @@ class Pad:
         for r in rows:
             if r.trial not in segs:
                 segs[r.trial] = src.segments(r.trial)
+        # where each stimulus was found on the stimulus channel moves its segments
+        sig += json.dumps([[(s[0], round(s[1], 6), round(s[2], 6)) for s in segs[i]] for i in sorted(segs)])
         live = set()
         for c in self.columns:
             key = json.dumps(c.to_dict(), sort_keys=True) + sig
@@ -718,7 +766,7 @@ class Pad:
             found = False
             used = 0
             for k, r in enumerate(rows):
-                w = self._window(c, r, segs[r.trial])
+                w = self._window(c, r, row_segments(segs[r.trial], r))
                 wins.append(w)
                 if r.trial in self._skip:
                     continue
@@ -726,7 +774,7 @@ class Pad:
                 st = src.spikes(r.trial, c.units) if spiky else None
                 found = found or st is not None
                 if c.over == "window" and c.sel.is_phase():
-                    out[k] = measure_phase(src, r.trial, channel, c.key, c.sel, segs[r.trial], st)
+                    out[k] = measure_phase(src, r.trial, channel, c.key, c.sel, row_segments(segs[r.trial], r), st)
                 else:
                     out[k] = measure_window(src, r.trial, channel, c.key, w, st)
             if spiky and used and not found:
@@ -743,7 +791,7 @@ class Pad:
             for k, r in enumerate(rows):
                 if r.trial in self._skip:
                     continue
-                sg = segs[r.trial]
+                sg = row_segments(segs[r.trial], r)
                 order = [s[0] for s in sg]
                 got = c.sel.letters(order) if c.kind == "level" else None
                 if c.kind == "level":
@@ -795,8 +843,9 @@ class Pad:
             live += 1
             row = SimpleNamespace(**{n: float(v[k]) for n, v in cols.items()}, trial=i + 1,
                                   t0=(r.t0 or 0.0) * 1000, t1=(r.t1 * 1000 if r.t1 is not None else None))
-            order = [s[0] for s in segs[i]]
-            spans = {s[0]: (s[1], s[2]) for s in segs[i]}
+            seen = row_segments(segs[i], r)
+            order = [s[0] for s in seen]
+            spans = {s[0]: (s[1], s[2]) for s in seen}
 
             def pick(sel, _r=r, _o=order, _s=spans):
                 sel = sel.sel if isinstance(sel, _SegBuilder) else sel

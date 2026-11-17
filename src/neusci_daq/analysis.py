@@ -851,15 +851,18 @@ def match_repeats(y: np.ndarray, start: int, n: int) -> tuple[np.ndarray, int]:
     return np.column_stack((at, at + n)), int(len(peaks) - len(good))
 
 
-def line_up(y: np.ndarray, fs: float, sent: Sent) -> tuple[int, float, float] | None:
+def line_up(y: np.ndarray, fs: float, sent: Sent,
+            within: tuple[float, float] | None = None) -> tuple[int, float, float] | None:
     """Where a stimulus that was sent is on the trace that recorded it: (first sample, size,
-    offset), with only its timing and size fitted. None if it isn't there."""
+    offset), with only its timing and size fitted. None if it isn't there. It's looked for
+    within SEARCH_S of its note, or with `within`, starting between those times (s)."""
     w = np.interp(np.arange(int(len(sent.wave) / sent.rate * fs)) / fs, np.arange(len(sent.wave)) / sent.rate, sent.wave)
     if len(w) < 4 or len(y) < 4 or np.ptp(w) == 0:
         return None
     scores = signal.correlate(y - y.mean(), w - w.mean(), mode="full", method="fft")
     lags = np.arange(-len(w) + 1, len(y))
-    near = np.abs(lags / fs - sent.t) <= SEARCH_S
+    near = (np.abs(lags / fs - sent.t) <= SEARCH_S if within is None
+            else (lags / fs >= within[0]) & (lags / fs <= within[1]))
     if not near.any():
         return None
     at = int(lags[near][np.argmax(scores[near])])
@@ -871,6 +874,24 @@ def line_up(y: np.ndarray, fs: float, sent: Sent) -> tuple[int, float, float] | 
         return None
     size, offset = np.polyfit(part, y[i:j], 1)
     return at, float(size), float(offset)
+
+
+EARLY_S = 0.1                     # a stimulus sent starts at most this long before its note
+
+
+def sent_onset(y: np.ndarray, fs: float, sent: Sent, next_note: float | None = None) -> float | None:
+    """Where a stimulus sent really starts on the trace that recorded it (s), or None if it
+    isn't found there. Its note is written as it goes out, so it starts near the note, mostly
+    after: it's looked for from EARLY_S before the note to SEARCH_S after, and not past the
+    next stimulus's note, so a repeat sent soon after (or a bigger one) isn't taken for it."""
+    lo = sent.t - EARLY_S
+    hi = sent.t + SEARCH_S if next_note is None else min(sent.t + SEARCH_S, next_note - EARLY_S)
+    if hi < lo:
+        return None
+    a = max(0, int(np.floor(lo * fs)))
+    b = min(len(y), int(np.ceil(hi * fs)) + int(len(sent.wave) / sent.rate * fs) + 1)
+    got = line_up(y[a:b], fs, sent, within=(lo - a / fs, hi - a / fs))
+    return None if got is None else (a + got[0]) / fs
 
 
 def _known(y: np.ndarray, fs: float, sent: list[Sent]) -> np.ndarray:

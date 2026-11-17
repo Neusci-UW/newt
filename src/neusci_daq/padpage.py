@@ -66,8 +66,9 @@ class PageSource(P.Source):
         page = self.page
         if not (0 <= i < len(page.blocks)) or page.blocks[i] is None:
             return []
-        return page.main.store.memo(page._paths[i], ("pad segments",),
-                                    lambda: P.sent_segments(page.blocks[i].get("stimuli")))
+        ch = page.stim_channel.currentData() or ""         # each stimulus is lined up on it
+        return page.main.store.memo(page._paths[i], ("pad segments", ch),
+                                    lambda: P.sent_segments(page.blocks[i].get("stimuli"), page.send_onsets(i)))
 
     def spikes(self, i, units=None):
         """Spike times (s) the spike sorter found in trial i: of the units ticked in the Spikes
@@ -863,7 +864,8 @@ class ColumnEditor(QtWidgets.QDialog):
     def _window_rows(self, body: QtWidgets.QFormLayout, with_part: bool, single: bool = False) -> None:
         c = self.c
         segs = self.view.src.segments(self.view.preview_trial())
-        order = [s[0] for s in segs]
+        many = any(P.send_of(s[0])[0] > 1 for s in segs)
+        order = [s[0] for s in segs if P.send_of(s[0])[0] == 1]    # B: each row's own stimulus's B
         picked = set(c.sel.letters(order))
         w = QtWidgets.QWidget()
         g = QtWidgets.QGridLayout(w)
@@ -874,13 +876,16 @@ class ColumnEditor(QtWidgets.QDialog):
             b.setCheckable(True)
             b.setChecked(letter in picked)
             b.setMinimumWidth(34)
-            b.setToolTip(letter + ("" if single else "; shift-click for a run of segments"))
+            b.setToolTip(letter + (" of the stimulus each row is in" if many else "")
+                         + ("" if single else "; shift-click for a run of segments"))
             b.clicked.connect(lambda _=False, L=letter: self._segment(L, single))
             g.addWidget(b, n // 6, n % 6)
         if c.sel.is_time():
             g.addWidget(QtWidgets.QLabel(f"<b>{c.sel.label()}</b> (a stretch of time)"), 9, 0, 1, 6)
         elif not order:
             g.addWidget(QtWidgets.QLabel("This trial has no segments: use Set window and drag"), 9, 0, 1, 6)
+        elif not picked:                          # a later stimulus's segment, clicked on the strip (3B)
+            g.addWidget(QtWidgets.QLabel(f"<b>{c.sel.label()}</b> (in every row)"), 9, 0, 1, 6)
         body.addRow("Segments", w)
         if with_part and not c.sel.is_time():
             part = QtWidgets.QWidget()
@@ -1500,15 +1505,19 @@ class PadView(QtWidgets.QWidget):
         row = self.tab.rows[k] if 0 <= k < len(self.tab.rows) else None
         segs = self.src.segments(i)
         order = [s[0] for s in segs]
+        send = P.send_at(segs, row.t0) if row is not None and row.trial == i else 1
+        seen = P.scoped(segs, send)                   # the column's B is B of the row's own stimulus
+        seen_order = [s[0] for s in seen]
         letters, w, value = set(), None, ""
         if c is not None:
             if c.kind in ("measure", "level", "duration") and not (c.kind == "measure" and c.over == "row"):
-                letters = set(c.sel.letters(order))
+                letters = {L if send == 1 or P.send_of(L)[0] > 1 else f"{send}{L}"
+                           for L in c.sel.letters(seen_order)}
             wins = self.tab.windows.get(c.name)
             if wins is not None and row is not None and k < len(wins):
                 w = wins[k]
             elif c.kind in ("level", "duration"):
-                w = c.sel.window({s[0]: (s[1], s[2]) for s in segs}, order)
+                w = c.sel.window({s[0]: (s[1], s[2]) for s in seen}, seen_order)
             if row is not None and c.name in self.tab.values:
                 text = self.tab.text[c.name][k] if c.name in self.tab.text else (c.fmt(self.tab.values[c.name][k]) or "—")
                 value = f"{P.html_name(c.shown())} = {text} {self.tab.units.get(c.name, '')}".strip()
@@ -1703,8 +1712,9 @@ class PadView(QtWidgets.QWidget):
         letters = []
         for i in self.src.trials():
             for s in self.src.segments(i):
-                if s[0] not in letters:
-                    letters.append(s[0])
+                L = P.send_of(s[0])[1]            # B stands for B of every stimulus sent
+                if L not in letters:
+                    letters.append(L)
         self.rows_seg.clear()
         self.rows_seg.addItem("every segment" if self.pad.rows_mode != "pulse" else "every train", "")
         for L in letters:

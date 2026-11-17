@@ -1012,10 +1012,9 @@ class AnalysisPage(QtWidgets.QWidget):
                 k = sig(i, y, b["sample_rate"]) if y is not None else None
             keys[i] = k
         if how != "notes":
-            # a block where the channel is nearly flat, next to the others, had no stimulus
-            size = lambda k: abs(k[2])            # a pulse's size, a wave's amplitude
-            biggest = max((size(k) for k in keys.values() if k is not None), default=0.0)
-            keys = {i: (k if k is not None and size(k) >= 0.1 * biggest else None) for i, k in keys.items()}
+            # a block whose channel shows nothing but noise had no stimulus (judged on its own,
+            # not against the others: a 0.1 V pulse beside 6 V ones is still a stimulus)
+            keys = {i: (k if k is not None and abs(k[2]) > 0 else None) for i, k in keys.items()}
             # measured signatures jitter: blocks with the same stimulus share the first one's
             good = [b for b in blocks if b is not None]
             keys = A.cluster_signatures(keys, good[0]["sample_rate"] if good else 1.0)

@@ -525,7 +525,9 @@ def stimulus_notes(comments: list[tuple[float, str]]) -> tuple[str, ...]:
 
 
 def _sig(x: float, n: int = 2) -> float:
-    return float(f"{x:.{n}g}")
+    """x to n significant figures, or one more where n would be over 2.5% off (1.25, not 1.3)."""
+    r = float(f"{x:.{n}g}")
+    return float(f"{x:.{n + 1}g}") if x and abs(r - x) > 0.025 * abs(x) else r
 
 
 TRAIN_GAP_MS = 100.0               # pulses closer than this are one stimulus (a train)
@@ -588,18 +590,37 @@ def wave_signature(y: np.ndarray, fs: float) -> tuple | None:
     return "wave", float(freq), float(amp), float(mid), float(np.sqrt(np.mean(d ** 2)) / amp)
 
 
-def stimulus_signature(y: np.ndarray, fs: float) -> tuple | None:
-    """What a channel you've said records the stimulus shows in a block: brief pulses
-    on a flat baseline as ("pulse", pulses per train, size, width ms, interval ms), a
-    wave switched on and off (pulses swinging both ways) as ("burst", ...) with the
-    fields of wave_signature for the wave while it's on, anything else as
-    wave_signature. None when there's no samples or it's flat."""
+def stimulus_present(y: np.ndarray) -> bool:
+    """Whether a stimulus channel shows more than noise: its biggest swing from where it
+    sits is at least 10 times the noise. The noise is from sample-to-sample steps, so a
+    slow wave filling the trial, or a clean pulse, isn't taken for noise. Each trial is
+    judged on its own, so a small stimulus is still one beside big ones."""
     y = np.nan_to_num(np.asarray(y, float))
-    if not y.size:
+    if y.size < 2:
+        return False
+    steps = np.diff(y)
+    noise = np.median(np.abs(steps - np.median(steps))) / 0.6745 / np.sqrt(2)
+    return bool(np.abs(y - np.median(y)).max() >= 10 * max(noise, 1e-12))
+
+
+def stimulus_signature(y: np.ndarray, fs: float) -> tuple | None:
+    """What a channel you've said records the stimulus shows in a block: pulses on a flat
+    baseline as ("pulse", pulses per train, size, width ms, interval ms) (brief ones, or
+    longer ones up to half the block that go only one way: a 1 s step is a pulse, not a
+    slow square wave), a wave switched on and off (pulses swinging both ways) as
+    ("burst", ...) with the fields of wave_signature for the wave while it's on,
+    anything else as wave_signature. None when there's no samples, or nothing stands
+    out from the noise (stimulus_present)."""
+    y = np.nan_to_num(np.asarray(y, float))
+    if not y.size or not stimulus_present(y):
         return None
     d = y - np.median(y)
     a = np.abs(d)
-    pulsy = a.max() >= 10 * max(noise_sd(y), 1e-12) and np.mean(a > 0.5 * a.max()) < 0.3
+    high = a > 0.5 * a.max()
+    # one way, starting and ending at rest (a pulse on most of the block shifts the median)
+    one_way = bool((np.all(d[high] > 0) or np.all(d[high] < 0)) and not high[0] and not high[-1])
+    pulsy = a.max() >= 10 * max(noise_sd(y), 1e-12) and (
+        np.mean(high) < 0.3 or (one_way and np.mean(high) < 0.5))
     if pulsy:
         burst = burst_signature(y, fs)
         if burst is not None:

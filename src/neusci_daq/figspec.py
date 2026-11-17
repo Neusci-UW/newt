@@ -102,6 +102,7 @@ def _average(x, y, how: str):
 def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
     """Draw the figure into a matplotlib Figure (a new axes filling it), or into `ax`."""
     import matplotlib as mpl
+    spec, data, k = _scaled(spec, data)
     font = float(spec.get("font", 9.0))
     ticks_pt = float(spec.get("font_ticks") or font * 0.9)
     title_pt = float(spec.get("font_title") or font * 1.1)
@@ -111,6 +112,9 @@ def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
                          "xtick.direction": way, "ytick.direction": way,
                          "xtick.major.size": float(spec.get("tick_len", 3.5)),
                          "ytick.major.size": float(spec.get("tick_len", 3.5)),
+                         "xtick.major.width": 0.8 * k, "ytick.major.width": 0.8 * k,
+                         "xtick.major.pad": 3.5 * k, "ytick.major.pad": 3.5 * k, "axes.labelpad": 4.0 * k,
+                         "axes.titlepad": 6.0 * k, "axes.linewidth": 0.8 * k,
                          "legend.fontsize": font * 0.85, "font.family": "sans-serif",
                          "mathtext.default": "regular", "svg.fonttype": "none", "pdf.fonttype": 42}):
         if ax is None:
@@ -120,6 +124,28 @@ def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
         if letter:
             ax.text(-0.18, 1.06, letter, transform=ax.transAxes, fontsize=font * 1.4,
                     fontweight="bold", va="bottom", ha="left")
+
+
+def _scaled(spec: dict, data: dict) -> tuple[dict, dict, float]:
+    """A figure made from a live chart is designed at the chart's size on screen (w0_mm), so
+    its text, lines and markers keep the chart's proportions; drawn at another size (w_mm),
+    all of them scale with it, as a picture would."""
+    w0 = spec.get("w0_mm")
+    if not w0 or not spec.get("w_mm"):
+        return spec, data, 1.0
+    k = float(spec["w_mm"]) / float(w0)
+    if abs(k - 1.0) < 1e-6:
+        return spec, data, 1.0
+    spec = dict(spec)
+    for key in ("font", "font_ticks", "font_title", "tick_len", "lw", "ms"):
+        if spec.get(key):
+            spec[key] = float(spec[key]) * k
+    data = dict(data)
+    if data.get("pt_px"):
+        data["pt_px"] = float(data["pt_px"]) * k
+    if data.get("lw0"):
+        data["lw0"] = float(data["lw0"]) * k
+    return spec, data, k
 
 
 def _draw(ax, spec: dict, data: dict) -> None:
@@ -184,6 +210,12 @@ def _draw(ax, spec: dict, data: dict) -> None:
     for lim, setter in ((spec.get("xlim"), ax.set_xlim), (spec.get("ylim"), ax.set_ylim)):
         if lim and any(v is not None for v in lim):
             setter(*[v if v is not None else None for v in lim])
+    for key, axis_, log in (("xticks", ax.xaxis, spec.get("xlog")), ("yticks", ax.yaxis, spec.get("ylog"))):
+        if data.get(key) and not log:                     # a live chart's own tick numbers
+            lo_, hi_ = sorted((ax.get_xlim() if key == "xticks" else ax.get_ylim()))
+            vals = [v for v in data[key] if lo_ - 1e-9 * abs(hi_ - lo_) <= v <= hi_ + 1e-9 * abs(hi_ - lo_)]
+            if len(vals) >= 2:
+                axis_.set_ticks(vals)
     if spec.get("grid"):
         ax.grid(True, linewidth=0.4, alpha=0.5)
     if spec.get("despine", True):
@@ -312,6 +344,14 @@ def _marker_px(it, d) -> float:
     return float(it.opts.get("size", 7) or 7)
 
 
+def _pt(css, default: float) -> float:
+    """A CSS font size ('9pt', '12px') in pt; a pixel is a point in Qt's logical units."""
+    if not css:
+        return float(default)
+    m = re.match(r"\s*([\d.]+)\s*(pt|px)?", str(css))
+    return float(m.group(1)) if m else float(default)
+
+
 def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, dict]:
     """(spec, data): a whiteboard chart's first plot as a figure, looking as it does: every line
     (each trial of a group too) in its color, opacity and width; the axes in the units shown
@@ -426,9 +466,20 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     pw = plots[pis.index(item)]                       # the whole plot on screen, axes and labels too
     wpx, hpx = (pw.width(), pw.height()) if hasattr(pw, "width") and callable(pw.width) else \
         (item.sceneBoundingRect().width(), item.sceneBoundingRect().height())
+    dpi = float(pw.logicalDpiX()) if hasattr(pw, "logicalDpiX") else 96.0
     if wpx > 50 and hpx > 50:
-        spec["w_mm"] = 120.0
-        spec["h_mm"] = round(max(40.0, min(200.0, 120.0 * hpx / wpx)), 1)
+        spec["w0_mm"] = wpx / dpi * 25.4                 # drawn at its size on screen…
+        spec["w_mm"] = 120.0                              # …shown at this width, everything scaled with it
+        spec["h_mm"] = round(120.0 * hpx / wpx, 1)
+    # its text as the chart draws it (a size you set in its look wins, below)
+    from pyqtgraph.Qt import QtGui as _G
+    app_pt = _G.QFont().pointSizeF() or 9.0
+    tick_font = left.style.get("tickFont")
+    spec["font_ticks"] = float(tick_font.pointSizeF()) if tick_font is not None else app_pt
+    css = getattr(left, "labelStyle", {}) or {}
+    spec["font"] = _pt(css.get("font-size"), app_pt)
+    title = getattr(item, "titleLabel", None)
+    spec["font_title"] = _pt(title.opts.get("size") if title is not None else None, app_pt)
     if view:
         spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
     spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
@@ -440,14 +491,27 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
         spec.update(chartstyle.figure_keys(look, kx, ky))
     # lines and markers keep their size against the plot: a screen pixel of a plot wpx wide is
     # w_mm / wpx of the figure (fonts stay in pt, to be read on paper)
-    pt_px = float(spec["w_mm"]) / wpx * 72 / 25.4 if wpx > 50 else 0.35
+    pt_px = 72.0 / dpi if wpx > 50 else 0.35            # at the design size: a screen pixel in pt
+    if not spec.get("w0_mm"):
+        spec["w0_mm"] = None
     for ln in lines:                                      # its label, if the chart wrote one (threshold 340 mV)
         for it in item.items:
             if isinstance(it, pg.InfiniteLine) and abs(float(it.value()) * ky - ln["y"]) < 1e-12:
                 lab = next((c for c in it.childItems() if isinstance(c, pg.InfLineLabel)), None)
                 if lab is not None and lab.isVisible():
                     ln["label"] = lab.toPlainText()
-    data = {"curves": curves, "marks": marks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
+    data_ticks = {}
+    for key, ax_, k_, length in (("xticks", bottom, kx, bottom.width()), ("yticks", left, ky, left.height())):
+        try:                                              # the numbers the chart labels its axes with
+            lo_, hi_ = ax_.range
+            levels = ax_.tickValues(lo_, hi_, length)
+            vals = list(levels[0][1]) if levels else []
+            if len(levels) > 1 and length / max(1, len(vals) + len(levels[1][1])) >= 40:
+                vals = sorted(vals + list(levels[1][1]))   # room for the finer level too, as pyqtgraph does
+            data_ticks[key] = [round(float(v) * k_, 12) for v in vals]
+        except Exception:
+            pass
+    data = {"curves": curves, "marks": marks, **data_ticks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
             "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item),
             "pt_px": pt_px, "lw0": float(spec.get("lw", 1.2))}
     return spec, data

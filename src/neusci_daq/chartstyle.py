@@ -72,10 +72,12 @@ def figure_keys(look: dict, kx: float = 1.0, ky: float = 1.0) -> dict:
     keeps the chart's view); so are labels left blank and a size left to the chart's shape."""
     lab, tick, title = fonts(look)
     out = {"lw": line_pt(look), "grid": bool(look.get("grid")), "xlog": bool(look.get("xlog")),
-           "ylog": bool(look.get("ylog")), "font": lab or FONT_PT, "font_ticks": tick or 0.0,
-           "font_title": title or 0.0, "ticks": look.get("ticks", "out"),
+           "ylog": bool(look.get("ylog")), "ticks": look.get("ticks", "out"),
            "tick_len": float(look.get("tick_len", 3.5)), "despine": bool(look.get("despine", True)),
            "zero": bool(look.get("zero")), "legend": look.get("legend", "best")}
+    for key, v in (("font", lab), ("font_ticks", tick), ("font_title", title)):
+        if v:                              # set here; else the figure keeps the chart's own
+            out[key] = float(v)
     if look.get("ms"):
         out["ms"] = float(look["ms"])
     for k in ("title", "xlabel", "ylabel"):

@@ -90,6 +90,10 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.regroup_requested.connect(self.main.regroup)
         self.blocks_panel.delete_requested.connect(
             lambda idx: self.main.delete_trials([p for i, p in enumerate(self._paths) if i in idx]))
+        self.blocks_panel.split_requested.connect(
+            lambda idx: self.main.split_trials([p for i, p in enumerate(self._paths) if i in idx]))
+        self.blocks_panel.stimuli_of = lambda i: (len(self.blocks[i].get("stimuli") or [])
+                                                  if 0 <= i < len(self.blocks) and self.blocks[i] is not None else 0)
         self.blocks_panel.tick_highlighted.connect(self.tick_highlighted)
         self.blocks_panel.btn_select.clicked.connect(self.show_all)
         self.blocks_panel.btn_deselect.clicked.connect(self.hide_all)

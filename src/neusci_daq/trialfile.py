@@ -48,6 +48,36 @@ def write_comments_dataset(f: h5py.File, comments: list[dict]) -> None:
         ds[i] = (float(c["t"]), int(c["sample_index"]), str(c["text"]))
 
 
+def stimuli_count(path: str | Path) -> int:
+    """How many stimuli were sent during a trial (0 if it can't be read)."""
+    try:
+        with h5py.File(path, "r") as f:
+            return len(json.loads(f.attrs.get("stimuli", "[]")))
+    except (OSError, ValueError, TypeError):
+        return 0
+
+
+def write_window(src: str | Path, dest: str | Path, lo: int, hi: int, attrs: dict,
+                 comments: list[dict]) -> Path:
+    """A new trial file of samples lo:hi of trial `src`, as recorded: its attributes with
+    `attrs` put over them, and `comments` ({t, sample_index, text}, from the window's
+    start). For splitting a trial into a trial per stimulus; `src` doesn't change."""
+    dest = Path(dest)
+    with h5py.File(src, "r") as f, h5py.File(dest, "w") as g:
+        raw = f["raw_volts"][:, lo:hi]
+        g.create_dataset("raw_volts", data=raw, maxshape=(raw.shape[0], None),
+                         chunks=(raw.shape[0], max(1, min(raw.shape[1], 1024))))
+        if "t" in f:
+            t = f["t"][lo:hi]
+            g.create_dataset("t", data=t - (t[0] if t.size else 0.0), maxshape=(None,))
+        write_comments_dataset(g, comments)
+        for k, v in f.attrs.items():
+            g.attrs[k] = v
+        for k, v in attrs.items():
+            g.attrs[k] = v
+    return dest
+
+
 def comment_rows(comments: list[dict]) -> np.ndarray:
     rows = np.zeros(len(comments), dtype=COMMENT_DT)
     for k, c in enumerate(sorted(comments, key=lambda c: c["t"])):

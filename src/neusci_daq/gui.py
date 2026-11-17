@@ -41,7 +41,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import config as cfgmod
 from . import simulation as sim
-from . import style, theme
+from . import style, theme, trialfile
 from .backends import Backend, make_backend, preload_daq
 from .channels import ChannelRow, ChannelStrip, ColorButton
 from .comments import CommentsPanel
@@ -423,12 +423,17 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.blocks_panel.regroup_requested.connect(self.regroup)
         self.blocks_panel.delete_requested.connect(
             lambda idx: self.delete_trials([p for i, p in enumerate(self._panel_paths()) if i in idx]))
+        self.blocks_panel.split_requested.connect(
+            lambda idx: self.split_trials([p for i, p in enumerate(self._panel_paths()) if i in idx]))
+        self.blocks_panel.stimuli_of = lambda i: (trialfile.stimuli_count(ps[i])
+                                                  if 0 <= i < len(ps := self._panel_paths()) else 0)
         self.blocks_panel.reset_requested.connect(self._reset_pages_dialog)
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         # Trials, and under it the stimulator (built once the Simple Stimulus page exists)
-        self.left_column = QtWidgets.QVBoxLayout()
+        left_box = QtWidgets.QWidget()
+        self.left_column = QtWidgets.QVBoxLayout(left_box)
         self.left_column.setContentsMargins(0, 0, 0, 0)
         self.left_column.setSpacing(0)
         # Above Trials: between a real input device and the simulators' cells
@@ -441,7 +446,19 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         sb.addWidget(self.btn_input_mode)
         self.left_column.addWidget(sim_box)
         self.left_column.addWidget(self.blocks_panel, 1)
-        row.addLayout(self.left_column)
+        # In a scroll area: on a short screen the column scrolls instead of making the
+        # window taller than the screen. As wide as the column, plus the bar while it shows.
+        left_scroll = QtWidgets.QScrollArea()
+        left_scroll.setWidget(left_box)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Ignored)
+        bar = left_scroll.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent)
+        fit_left = lambda *_: left_scroll.setFixedWidth(
+            left_box.minimumSizeHint().width() + (bar if left_scroll.verticalScrollBar().maximum() else 0))
+        left_scroll.verticalScrollBar().rangeChanged.connect(fit_left)
+        row.addWidget(left_scroll)
         row.addWidget(self.plot_area, 1)
         row.addWidget(self.comments_panel)
         from .video import CameraPanel
@@ -465,6 +482,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.dock_timed = DockedTimed(self)                          # or, with no stimulus, timed runs
         self.left_column.addWidget(self.dock_timed)
         self.set_record_stim(self.settings.value("record_stim", "simple"))
+        fit_left()
         # A small stimulator floating over the Record page's plots.
         self.mini_stim = MiniStimulator(self, self.plot_area)
         self.mini_stim.hide()

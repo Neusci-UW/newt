@@ -177,6 +177,8 @@ class TrialsBrowser(QtWidgets.QWidget):
     stim_channel_picked = QtCore.Signal(str)     # "" for None
     organize_picked = QtCore.Signal(str)         # "" by stimulus shape, "time" by start time
     delete_requested = QtCore.Signal(list)       # block indices: the trials highlighted (a group: all of it)
+    split_requested = QtCore.Signal(list)        # block indices: make a trial of each stimulus they sent
+    stimuli_of = None                            # set by the owner: block index -> how many stimuli it sent
     regroup_requested = QtCore.Signal()          # sort the trials into groups again, from scratch
     label_changed = QtCore.Signal(str)           # the label for trials recorded from now on
     reset_requested = QtCore.Signal()
@@ -595,9 +597,14 @@ class TrialsBrowser(QtWidgets.QWidget):
         if not item.isSelected():            # right-clicked outside the highlight: just this one
             self.tree.clearSelection()
             item.setSelected(True)
-        n = len(self.selected_blocks())
+        picked = self.selected_blocks()
+        n = len(picked)
         if n:
             menu.addSeparator()
+            many = [i for i in picked if self.stimuli_of is not None and self.stimuli_of(i) > 1]
+            if many:                          # Repeat or Raise sent several: a trial for each
+                menu.addAction("Split into a trial per stimulus…",
+                               lambda: self.later(lambda: self.split_requested.emit(many)))
             menu.addAction(f"Delete {n} trial{'' if n == 1 else 's'}…", self._delete_highlighted)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 

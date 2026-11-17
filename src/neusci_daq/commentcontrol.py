@@ -23,7 +23,7 @@ class CommentsMixin:
 
     def _log_comment(self, text: str) -> None:
         t = self.recorder.add_comment(text)      # saved to the block straight away
-        self._add_marker(t - self._axis_zero, text)
+        self._add_marker(t + self._t_shift - self._axis_zero, text)
         self.refresh_comments(redraw_markers=False)
 
     def _set_comment_box(self, recording: bool):
@@ -76,7 +76,7 @@ class CommentsMixin:
             offset = 0.0
         elif (self._block_on_screen and self.recorder.path is not None
               and self._comment_block() == self.recorder.path):
-            offset = self.recorder.block_start - self._axis_zero
+            offset = self.recorder.block_start + self._t_shift - self._axis_zero
         else:
             return                               # that block isn't on screen
         for c in self._shown_comments:
@@ -128,7 +128,8 @@ class CommentsMixin:
         self.plots[0].setXRange(start, start + win, padding=0)
 
     def _plot_clicked(self, pw, ev):
-        if self.mode != REVIEW or not ev.double() or self.review_block is None:
+        if self.mode != REVIEW or not ev.double() or self.review_block is None \
+                or getattr(self, "_showing_average", None):     # an average isn't a file to comment
             return
         vb = pw.getPlotItem().vb
         if not vb.sceneBoundingRect().contains(ev.scenePos()):

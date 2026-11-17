@@ -32,12 +32,15 @@ class WheelViewBox(pg.ViewBox):
     # Room to zoom out in y past the data, as a fraction of its range on each side, and
     # always as far as 0 (None: stop at the data's edges).
     y_room: float | None = None
+    drag_pans_time = False      # a plain left-drag on the plot grabs and pans time (the channels' plots)
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self._zoom_history: list = []
         self.on_drag_select = None              # f(x0, x1, finished): plain left-drag selects time
         self.on_draw = None                     # f([(x, y)…], finished): plain left-drag draws a shape
+        self.on_cursor = None                   # f(x): a plain click (the channels' value readout)
+        self.on_select = None                   # f(x0, x1, finished): a plain drag highlights time
         self._drawn: list = []
         self.bounds = [None, None]              # (lo, hi) per axis, to use instead of the data's edges
         self.y_free = False                     # y set by hand (Max/Min, the scale buttons): may go past the data
@@ -144,8 +147,18 @@ class WheelViewBox(pg.ViewBox):
         if axis is None and ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
             self._box_drag(ev)
             return
+        if axis is None and self.drag_pans_time and ev.button() == QtCore.Qt.MouseButton.LeftButton:
+            if self.on_select is not None and not ev.modifiers() & QtCore.Qt.KeyboardModifier.AltModifier:
+                ev.accept()                     # highlight a stretch of time (as in LabChart)
+                x0 = self.mapToView(ev.buttonDownPos(ev.button())).x()
+                x1 = self.mapToView(ev.pos()).x()
+                self.on_select(min(x0, x1), max(x0, x1), ev.isFinish())
+                return
+            # Option-drag: grab and pan, time only (every channel's plot is linked to it)
+            super().mouseDragEvent(ev, axis=0)
+            return
         if axis is None:
-            ev.ignore()                         # no dragging the plot about: the wheel and the axes do that
+            ev.ignore()
             return
         super().mouseDragEvent(ev, axis)
 
@@ -175,6 +188,11 @@ class WheelViewBox(pg.ViewBox):
         if ev.button() == QtCore.Qt.MouseButton.LeftButton and ev.modifiers() & ZOOM_MODS:
             ev.accept()
             self.zoom_back()
+            return
+        if (self.on_cursor is not None and ev.button() == QtCore.Qt.MouseButton.LeftButton
+                and not ev.double() and not ev.modifiers()):
+            ev.accept()                         # a cursor there, with each channel's value
+            self.on_cursor(self.mapSceneToView(ev.scenePos()).x())
             return
         super().mouseClickEvent(ev)
 
@@ -420,11 +438,17 @@ def light_grid(p: pg.PlotItem) -> None:
     The lines are also drawn solid, in the color the see-through line would have shown
     over the background: blending see-through lines the height and width of every plot
     was still most of the painting while acquiring (~75%), enough with a few channels
-    that zooming and buttons lagged. They look the same."""
-    for name in ("bottom", "left"):
+    that zooming and buttons lagged. They look the same.
+
+    Solid lines would hide the trace wherever they cross it (pyqtgraph paints the grid
+    with the axes, above the data), so the axes go behind the plot's area: the grid is
+    drawn under the traces, as a see-through one looked."""
+    for name in ("bottom", "left", "top", "right"):
         ax = p.getAxis(name)
-        ax.setStyle(maxTickLevel=1)
-        ax.generateDrawSpecs = _solid_ticks(ax, ax.generateDrawSpecs)
+        ax.setZValue(p.vb.zValue() - 1)          # (the view has no fill: the grid still shows)
+        if name in ("bottom", "left"):
+            ax.setStyle(maxTickLevel=1)
+            ax.generateDrawSpecs = _solid_ticks(ax, ax.generateDrawSpecs)
 
 
 def _solid_ticks(ax: pg.AxisItem, generate):

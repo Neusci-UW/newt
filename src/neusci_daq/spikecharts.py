@@ -113,7 +113,7 @@ class StimulusChart(SpikeChart):
                 x = np.concatenate(ons)
                 self.stim_onsets.setData(x, np.zeros(len(x)))
             return
-        traces = {i: self.page.trace(i, how) for i in chosen}
+        traces = {i: self.page.chart_trace(i, how) for i in chosen}
         traces = {i: y for i, y in traces.items() if y is not None}
         if not traces:
             return

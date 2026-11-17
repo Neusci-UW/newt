@@ -7,6 +7,9 @@ The network is 1-10 leaky integrate-and-fire cells:
   tau_ms), with noise, so it fires now and then on its own.
 - When it reaches threshold the cell fires: an action potential, then it is held
   at reset for its refractory period.
+- Spike-frequency adaptation: each spike adds adapt_mv of hyperpolarizing pull
+  that wears off with adapt_tau_ms, so under a steady drive a cell fires fast at
+  first, then slows to a lower steady rate.
 - Each spike gives every other cell a PSP of synapses[pre][post] mV (positive
   excites, negative inhibits) synapse_delay_ms later. PSPs rise and fall with
   synapse_tau_ms, and sum.
@@ -43,6 +46,8 @@ class Cell:
     refractory_ms: float = 2.0
     drive_mv: float = 8.0         # steady depolarization: with noise, sets the firing at rest (~1-2/s)
     noise_mv: float = 4.0         # membrane potential fluctuation (SD)
+    adapt_mv: float = 0.0         # spike-frequency adaptation: hyperpolarizing pull each spike adds; 0 = none
+    adapt_tau_ms: float = 100.0   # how long that pull takes to wear off
     stimulus: float = 0.0         # depolarization (mV) from a 1 V, 1 ms stimulus pulse; 0 = not driven
     spike_depth_v: float = 0.9    # extracellular recordings: spike trough on the trace
     spike_width_ms: float = 0.55  # extracellular: trough to repolarization peak
@@ -150,6 +155,7 @@ class NetworkState:
         self.v = np.array([c.rest_mv + c.drive_mv for c in net.cells])
         self.syn = np.zeros(len(net.cells))
         self.refr = np.zeros(len(net.cells), int)
+        self.adapt = np.zeros(len(net.cells))           # mV of adaptation pull, per cell
         self.pending: dict[int, np.ndarray] = {}     # step -> kicks arriving then
         self.stim: list[tuple[int, np.ndarray]] = []  # (first step, volts per step) being injected
         self.step = 0
@@ -161,6 +167,7 @@ class NetworkState:
         if n != len(self.v):
             self.v = np.array([c.rest_mv + c.drive_mv for c in net.cells])
             self.syn, self.refr, self.pending = np.zeros(n), np.zeros(n, int), {}
+            self.adapt = np.zeros(n)
         c = net.cells
         tau = np.array([x.tau_ms for x in c]) / 1e3
         self.a = np.exp(-SIM_DT / tau)
@@ -170,6 +177,8 @@ class NetworkState:
         self.sigma = np.array([x.noise_mv for x in c]) * np.sqrt(1 - self.a ** 2)
         self.thr = np.array([x.threshold_mv for x in c])
         self.reset = np.array([x.reset_mv for x in c])
+        self.adapt_step = np.array([x.adapt_mv for x in c])
+        self.adecay = np.exp(-SIM_DT / (np.array([x.adapt_tau_ms for x in c]) / 1e3))
         self.nrefr = np.array([max(1, int(round(x.refractory_ms / 1e3 / SIM_DT))) for x in c])
         self.sdecay = np.exp(-SIM_DT / (net.synapse_tau_ms / 1e3))
         scale = np.array([psp_scale(x.tau_ms, net.synapse_tau_ms) for x in c])
@@ -209,13 +218,17 @@ class NetworkState:
         noise = self.rng.standard_normal((steps, n)) * self.sigma
         inject = (1 - self.a) * self.stim_gain                  # exact for a constant current per step
         drive = self._drive(steps)
-        v, syn, refr = self.v, self.syn, self.refr
+        v, syn, refr, adapt = self.v, self.syn, self.refr, self.adapt
+        adapting = self.adapt_step.any()
         for k in range(steps):
             arriving = self.pending.pop(self.step, None)
             syn = syn * self.sdecay
             if arriving is not None:
                 syn = syn + arriving
-            v = self.vinf + (v - self.vinf) * self.a + self.b * syn + noise[k]
+            target = self.vinf - adapt if adapting else self.vinf
+            if adapting:
+                adapt = adapt * self.adecay
+            v = target + (v - target) * self.a + self.b * syn + noise[k]
             if drive[k]:
                 v = v + inject * drive[k]
             refr = refr - 1
@@ -230,9 +243,11 @@ class NetworkState:
                     self.pending[t] = self.pending.get(t, 0) + self.kick[i]
                 v = np.where(fired, self.reset, v)
                 refr = np.where(fired, self.nrefr, refr)
+                if adapting:
+                    adapt = adapt + np.where(fired, self.adapt_step, 0.0)
             out[k] = v
             self.step += 1
-        self.v, self.syn, self.refr = v, syn, refr
+        self.v, self.syn, self.refr, self.adapt = v, syn, refr, adapt
         return out, spikes
 
 
@@ -270,7 +285,8 @@ def spike_shape(cell: Cell, fs: float) -> tuple[np.ndarray, int]:
 
 # -- config ------------------------------------------------------------------
 _CELL_KEYS = {"rest_mv": "rest", "threshold_mv": "threshold", "reset_mv": "reset", "tau_ms": "tau_ms",
-              "refractory_ms": "refractory_ms", "drive_mv": "drive", "noise_mv": "noise",
+              "refractory_ms": "refractory_ms", "adapt_mv": "adaptation", "adapt_tau_ms": "adaptation_tau_ms",
+              "drive_mv": "drive", "noise_mv": "noise",
               "stimulus": "stimulus", "spike_depth_v": "spike_depth", "spike_width_ms": "spike_width_ms"}
 _REC_KEYS = {"gain": "gain", "noise_v": "noise", "sine_v": "sine_amplitude", "sine_hz": "sine_frequency"}
 
@@ -327,6 +343,9 @@ def validate(net: Network) -> None:
         if c.tau_ms <= 0 or c.refractory_ms < 0 or c.noise_mv < 0:
             raise ValueError(f"[simulated] cell {n}: time constant must be positive; refractory "
                              "period and noise can't be negative.")
+        if c.adapt_mv < 0 or c.adapt_tau_ms <= 0:
+            raise ValueError(f"[simulated] cell {n}: adaptation can't be negative and its time "
+                             "constant must be positive.")
         if c.reset_mv >= c.threshold_mv:
             raise ValueError(f"[simulated] cell {n}: reset must be below threshold.")
         if c.spike_depth_v < 0 or c.spike_width_ms <= 0:

@@ -16,10 +16,49 @@ from datetime import datetime
 from pathlib import Path
 
 import h5py
+import numpy as np
 
 from .backends import Backend, Chunk
 from .trialfile import COMMENT_DT, decode_comments, write_comments_dataset
 
+
+
+def _block_attrs(f: h5py.File, backend: Backend) -> None:
+    """What every block says about how it was recorded."""
+    cfg = backend.cfg
+    a = f.attrs
+    a["sample_rate"] = backend.actual_rate
+    a["hardware_timed"] = backend.hardware_timed
+    a["device"], a["backend"] = cfg.device, cfg.backend
+    a["terminal_config"] = cfg.terminal_config
+    a["start_time"] = datetime.now().isoformat()
+    a["channel_names"] = [c.name for c in cfg.channels]
+    a["physical"] = [c.physical for c in cfg.channels]
+    a["units"] = [c.units for c in cfg.channels]
+    a["scale"] = [c.scale for c in cfg.channels]
+    a["offset"] = [c.offset for c in cfg.channels]
+    a["colors"] = [c.color for c in cfg.channels]
+
+
+def write_block(path: str | Path, backend: Backend, raw: np.ndarray, rate: float,
+                attrs: dict | None = None, comments: list[dict] = ()) -> Path:
+    """A whole block in one go, in the same form Recorder writes as it goes: `raw`
+    (channels, samples) volts at `rate`, e.g. one stimulus's window from a protocol."""
+    path = Path(path)
+    raw = np.asarray(raw, np.float32)
+    with h5py.File(path, "w") as f:
+        f.create_dataset("raw_volts", data=raw, maxshape=(raw.shape[0], None),
+                         chunks=(raw.shape[0], max(1, min(raw.shape[1], 1024))))
+        if not backend.hardware_timed:
+            f.create_dataset("t", data=np.arange(raw.shape[1]) / rate, maxshape=(None,))
+        f.create_dataset("comments", shape=(0,), maxshape=(None,), dtype=COMMENT_DT)
+        _block_attrs(f, backend)
+        f.attrs["sample_rate"] = rate
+        for k, v in (attrs or {}).items():
+            f.attrs[k] = v
+        if comments:
+            write_comments_dataset(f, list(comments))
+    return path
 
 
 class Recorder:
@@ -52,18 +91,7 @@ class Recorder:
         if not self.backend.hardware_timed:
             f.create_dataset("t", shape=(0,), maxshape=(None,), dtype="f8", chunks=(4096,))
         f.create_dataset("comments", shape=(0,), maxshape=(None,), dtype=COMMENT_DT)
-        a = f.attrs
-        a["sample_rate"] = self.backend.actual_rate
-        a["hardware_timed"] = self.backend.hardware_timed
-        a["device"], a["backend"] = cfg.device, cfg.backend
-        a["terminal_config"] = cfg.terminal_config
-        a["start_time"] = datetime.now().isoformat()
-        a["channel_names"] = [c.name for c in cfg.channels]
-        a["physical"] = [c.physical for c in cfg.channels]
-        a["units"] = [c.units for c in cfg.channels]
-        a["scale"] = [c.scale for c in cfg.channels]
-        a["offset"] = [c.offset for c in cfg.channels]
-        a["colors"] = [c.color for c in cfg.channels]
+        _block_attrs(f, self.backend)
         with self._lock:
             self.samples_written = 0
             self._t_offset = None

@@ -7,7 +7,7 @@ name = "neusci-daq-visualizer"
 version = "0.1.0"
 description = "Newt: the Neuroscience Educational Workflow Toolbox"
 requires-python = ">=3.11"
-dependencies = ["numpy", "scipy", "pyqtgraph>=0.13", "PyQt6", "h5py"]
+dependencies = ["numpy", "scipy", "pyqtgraph>=0.13", "PyQt6", "h5py", "matplotlib"]   # matplotlib: Single Plot, Plot Canvas
 
 [project.urls]
 Source = "https://github.com/Neusci-UW/newt"
@@ -17,6 +17,7 @@ nidaqmx = ["nidaqmx>=1.0"]
 multichannelio = ["PyDAQmx"]
 audio = ["sounddevice>=0.4"]
 web = ["PyQt6-WebEngine"]   # the Membrane potential tab
+pdf = ["pypdfium2"]         # PDFs put on the Plot Canvas (on macOS, sips does without)
 dev = ["pytest", "neuscitk", "scikit-learn", "matplotlib"]
 
 [project.scripts]

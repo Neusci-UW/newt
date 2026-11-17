@@ -192,39 +192,6 @@ def _waveforms_picture() -> QtGui.QPixmap:
     return d.done()
 
 
-def _datapad_picture() -> QtGui.QPixmap:
-    d = _Pen([("Pick a window", "When, in each trial"), ("Measure", "One number per column"),
-              ("Compare", "Table, scatter or fit")])
-    rng = np.random.default_rng(5)
-    w, ph = d.w, PANEL_H
-    n = 300
-    x = d.xs[0] + 6 + np.arange(n) / n * (w - 12)
-    t = np.arange(n)
-    d.p.setPen(QtCore.Qt.PenStyle.NoPen)
-    shade = QtGui.QColor(ACCENT)
-    shade.setAlpha(60)
-    d.p.setBrush(shade)
-    d.p.drawRect(QtCore.QRectF(x[110], 2, x[190] - x[110], ph - 4))
-    d.line(x, ph / 2 - (-np.exp(-((t - 150) / 18) ** 2) * 0.8 + rng.normal(0, 0.05, n)) * 50, d.fg, 1, 200)
-    # a table of numbers
-    p = d.p
-    f = p.font()
-    f.setPixelSize(12)
-    p.setFont(f)
-    x0 = d.xs[1] + 16
-    for r, row in enumerate((("Trial", "Peak"), ("1", "41 mV"), ("2", "37 mV"), ("3", "30 mV"), ("4", "26 mV"))):
-        p.setPen(d.fg if r else d.muted)
-        for c, text in enumerate(row):
-            p.drawText(QtCore.QPointF(x0 + c * (d.w - 32) * 0.5, 30 + r * 24), text)
-    x0, y0 = d.xs[2] + 20, ph - 20
-    d.line([x0, x0, d.xs[2] + w - 12], [12, y0, y0], d.muted, 1)
-    xs = np.linspace(0, 1, 12)
-    for a, b in zip(xs, 0.15 + 0.7 * xs + rng.normal(0, 0.05, 12)):
-        d.dot(x0 + 6 + a * (w - 44), y0 - b * (ph - 40), ACCENT)
-    d.line([x0 + 6, x0 + 6 + (w - 44)], [y0 - 0.15 * (ph - 40), y0 - 0.85 * (ph - 40)], U1, 1.5)
-    return d.done()
-
-
 TOPICS = {
     "spike_sorting": {
         "title": "How Find action potentials works",
@@ -307,26 +274,6 @@ TOPICS = {
             ("Smooth for dV/dt", "Averages the spike first, since differentiating amplifies noise."),
             ("Each spike", "Draws single spikes behind the average, up to 150 of each unit."),
             ("Unit", "A group of spikes with the same shape, likely from one cell."),
-        ),
-    },
-    "datapad": {
-        "title": "How measuring works",
-        "picture": _datapad_picture,
-        "text": "The <b>Measure</b> tool turns traces into numbers. With it in <b>Time</b>, drag across a chart "
-                "against time to make a <b>window</b>: when, in each trial, to measure. In <b>Phase</b>, drag across "
-                "a chart against phase to measure the same part of every stimulus cycle. Each window is a "
-                "<b>column</b> of this table, with what to measure and on which channel in its settings; each "
-                "<b>row</b> is a trial, or a group. Then plot one column against another on a <b>Scatter</b> "
-                "chart and fit a curve to the points.",
-        "warning": "",
-        "glossary": (
-            ("Window", "The stretch of each trial (Time) or cycle (Phase) that's measured. Drag it, or its edges."),
-            ("Column", "A window's measurement, such as the peak of Ch1 from 200 to 400 ms."),
-            ("Row", "One trial; a group's average trace; or a group's trials measured one by one (mean ± SD)."),
-            ("Repeat every", "Measures the window again further along, adding a column each time."),
-            ("Phase", "Where in the stimulus's cycle: 0° to 360°, measured on every cycle and averaged."),
-            ("Scatter", "One column against another, a point per row."),
-            ("Fit", "The curve that comes closest to the points."),
         ),
     },
 }

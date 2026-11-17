@@ -35,7 +35,8 @@ MAX_CYCLES = 500               # a triangle wave is made of ramps: 3 per cycle
 DELAY_MS = 2.0                 # 0 V before the first pulse, so the recorded stimulus has a clear start
 DIM = {style.LIGHT: "#d9822b", style.DARK: "#f0a35a"}
 DEFAULTS = dict(mode="single", level=2.0, width=0.2, interval=20.0, rate=20.0, count=5,
-                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0, offset=0.0)
+                every=2.0, ramp=False, ramp_by=0.2, ramp_to=5.0, freq=10.0, dur=500.0, offset=0.0,
+                windows=False, before=100.0, after=500.0)
 
 
 class _Spin(QtWidgets.QDoubleSpinBox):
@@ -304,6 +305,22 @@ class SimpleStimPage(QtWidgets.QWidget):
         send.addWidget(QtWidgets.QLabel("until Stop."))
         send.addStretch(1)
         lv.addLayout(send)
+        win = QtWidgets.QHBoxLayout()
+        win.setSpacing(8)
+        self.windows = QtWidgets.QCheckBox("With Record on, save just around each stimulus:")
+        self.windows.setToolTip("Each stimulus becomes a trial of its own, from Before it to After it (always the "
+                                "whole stimulus), and nothing in between is recorded. Off: Record records everything")
+        self.before = _spin(0, 60000, 1, "ms", "Baseline kept before each stimulus")
+        self.after = _spin(0, 600000, 1, "ms", "Kept after each stimulus starts (at least the whole stimulus)")
+        for w in (self.before, self.after):
+            w.setMinimumWidth(90)
+        win.addWidget(self.windows)
+        win.addWidget(QtWidgets.QLabel("Before"))
+        win.addWidget(self.before)
+        win.addWidget(QtWidgets.QLabel("After"))
+        win.addWidget(self.after)
+        win.addStretch(1)
+        lv.addLayout(win)
 
         line = QtWidgets.QFrame()
         line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
@@ -393,10 +410,11 @@ class SimpleStimPage(QtWidgets.QWidget):
         self._fill_presets()
         self.mode_group.buttonClicked.connect(lambda *_: self._changed())
         for w in (self.level, self.width, self.interval, self.rate, self.every, self.ramp_by, self.ramp_to,
-                  self.freq, self.dur, self.offset):
+                  self.freq, self.dur, self.offset, self.before, self.after):
             w.valueChanged.connect(self._changed)
         self.count.valueChanged.connect(self._changed)
         self.ramp.toggled.connect(self._changed)
+        self.windows.toggled.connect(self._changed)
         self.btn_fire.clicked.connect(self.fire)
         self.btn_repeat.clicked.connect(self.start_repeat)
         self.btn_stop.clicked.connect(main.stop_stimulus)       # stops this page's repeating too (halt)
@@ -424,12 +442,14 @@ class SimpleStimPage(QtWidgets.QWidget):
                     interval=self.interval.value(), rate=self.rate.value(), count=self.count.value(),
                     every=self.every.value(), ramp=self.ramp.isChecked(), ramp_by=self.ramp_by.value(),
                     ramp_to=self.ramp_to.value(), freq=self.freq.value(), dur=self.dur.value(),
-                    offset=self.offset.value())
+                    offset=self.offset.value(), windows=self.windows.isChecked(), before=self.before.value(),
+                    after=self.after.value())
 
     def _set_values(self, d: dict) -> None:
         d = {**DEFAULTS, **d}
         widgets = (self.level, self.width, self.interval, self.rate, self.count, self.every,
-                   self.ramp_by, self.ramp_to, self.ramp, self.freq, self.dur, self.offset)
+                   self.ramp_by, self.ramp_to, self.ramp, self.freq, self.dur, self.offset,
+                   self.windows, self.before, self.after)
         for w in widgets:
             w.blockSignals(True)
         self.mode_buttons.get(d["mode"], self.mode_buttons["single"]).setChecked(True)
@@ -445,6 +465,9 @@ class SimpleStimPage(QtWidgets.QWidget):
         self.freq.setValue(float(d["freq"]))
         self.dur.setValue(float(d["dur"]))
         self.offset.setValue(float(d["offset"]))
+        self.windows.setChecked(bool(d["windows"]))
+        self.before.setValue(float(d["before"]))
+        self.after.setValue(float(d["after"]))
         for w in widgets:
             w.blockSignals(False)
 
@@ -495,6 +518,8 @@ class SimpleStimPage(QtWidgets.QWidget):
             self.field_labels[key].setVisible(key in FIELDS[mode])
         for w in (self.ramp_by, self.ramp_to):
             w.setEnabled(self.ramp.isChecked())
+        for w in (self.before, self.after):
+            w.setEnabled(self.windows.isChecked())
         self.main.settings.setValue("simple_stim", json.dumps(self.values()))
         self._draw()
         self.changed.emit()
@@ -656,8 +681,10 @@ class SimpleStimPage(QtWidgets.QWidget):
             state, ok = "No stimulator: it needs the nidaqmx (or simulated) backend.", False
         elif protocol:
             state, ok = "A protocol is running on Complex Stimulus.", False
+        elif main.mode != LIVE:
+            state, ok = "Go back to live mode to send stimuli.", False
         elif not live:
-            state, ok = "Press Start on the Record page first.", False
+            state, ok = "Ready: sending starts acquiring (and recording, with Record on)", True
         elif self.repeating:
             state, ok = f"Sending every {self.every.value():g} s…", True
         else:

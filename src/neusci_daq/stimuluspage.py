@@ -558,9 +558,7 @@ class StimulusPage(QtWidgets.QWidget):
             self.progress.setValue(n)
             state, ok = f"Stimulus {n} of {len(tr.trials)}" + (" · paused" if tr.paused else ""), True
         elif tr.varying:
-            state, ok = tr.summary.text(), tr.btn_run.isEnabled()
-            if ok and not (getattr(main, "backend", None) is not None and main.backend.running):
-                state, ok = "Press Start on the Record page first. " + state, False
+            state, ok = tr.summary.text(), tr.btn_run.isEnabled()    # Run starts acquiring too
         else:
             state, ok = main.simple_page.state() if hasattr(main, "simple_page") else ("Ready", True)
         self.lamp.setText(f"<span style='color:{'#1e8e3e' if ok else t['error']}'>●</span> {state}")

@@ -141,6 +141,7 @@ def file_info(path: str | Path) -> dict:
             "device": str(a["device"]),
             "backend": str(a["backend"]),
             "terminal_config": str(a["terminal_config"]) if "terminal_config" in a else None,
+            "label": str(a["label"]) if "label" in a else "",     # e.g. "Cell 1", from the Record page
         }
 
 

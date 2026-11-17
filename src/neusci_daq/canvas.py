@@ -18,7 +18,6 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import board as B
 from . import figure
 from . import style
-from .measurecharts import DataPadTableChart, ScatterChart
 from .plotzoom import AxisGroup
 from .responsecharts import (FitChart, LoopChart, PhaseChart, PsthChart, ResponseChart, ResponseCycleChart,
                              SpikeCycleChart, StaChart, StimulusCycleChart)
@@ -27,7 +26,7 @@ from .waveformview import PhasePlotChart, SlopeChart, VoltsChart
 
 CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart,
           ResponseChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
-          LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart, DataPadTableChart, ScatterChart)
+          LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart)
 KINDS = {c.kind: c for c in CHARTS}
 # the Add chart menu: what you're asking of the data, then (in a dict) a narrower question
 GROUPS = {"Raw recording": ("Response", "Stimulus", "Stimulus fit"),
@@ -36,10 +35,9 @@ GROUPS = {"Raw recording": ("Response", "Stimulus", "Stimulus fit"),
                       "Timing": ("Intervals",)}),
           "Around a stimulus": ("Stimulus-triggered rate", "Spike-triggered average"),
           "Cycles and phase": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase",
-                               "Response against stimulus"),
-          "Across trials": ("DataPad table", "Scatter")}
+                               "Response against stimulus")}
 BOARD = "Board"                    # the board you work on; Save… keeps it as a layout of your own
-SIZE = {"DataPad table": (560, 260), "Response": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
+SIZE = {"Response": (560, 320)}     # (w, h) a new chart starts at; else 400 × 280
 
 
 class _Toolbar(QtWidgets.QFrame):
@@ -56,10 +54,6 @@ class _Toolbar(QtWidgets.QFrame):
         for key, text, tip in ((B.SELECT, "Select", "Pick charts: click, shift-click, or drag a box over empty space"),
                                (B.HAND, "Hand", "Drag the board to move around it (or scroll, or drag with the "
                                                 "middle button)"),
-                               (B.MEASURE, "Measure", "Drag across any chart to measure part of it: a stretch of "
-                                                      "time, ms from each event, part of each cycle (Phase), or a "
-                                                      "range of values. On the PCA map and Scatter, draw around "
-                                                      "the points. The numbers go in a DataPad table"),
                                (B.EXPORT, "Export", "Drag a box anywhere, over the charts too, to save what's in it "
                                                     "as a figure: PDF, SVG, PNG or TIFF, or copy it. Click to export "
                                                     "the last box again")):
@@ -69,18 +63,6 @@ class _Toolbar(QtWidgets.QFrame):
             self.btn[key] = b
             row.addWidget(b)
         self.btn[B.SELECT].setChecked(True)
-        self.unit = QtWidgets.QButtonGroup(self)
-        self.btn_time = QtWidgets.QToolButton(text="Time", checkable=True, autoRaise=True)
-        self.btn_time.setToolTip("Measure windows in time: on charts against time, such as Response, or in ms "
-                                 "from each event, on the triggered and spike charts")
-        self.btn_phase = QtWidgets.QToolButton(text="Phase", checkable=True, autoRaise=True)
-        self.btn_phase.setToolTip("Measure the same part of every stimulus cycle (degrees): on charts against "
-                                  "phase, such as Response by cycle, or drag across one cycle of a chart against "
-                                  "time")
-        for b in (self.btn_time, self.btn_phase):
-            self.unit.addButton(b)
-            row.addWidget(b)
-        self.btn_time.setChecked(True)
         row.addSpacing(8)
         self.btn_add = QtWidgets.QPushButton("+ Add chart")
         self.btn_add.setToolTip("Put another chart on the board (or right-click empty space). Any chart can be "
@@ -135,8 +117,9 @@ class _Toolbar(QtWidgets.QFrame):
 
 
 class ChartCanvas(QtWidgets.QWidget):
-    tool_changed = QtCore.Signal(str, str)          # tool, measure unit ("time" or "phase")
+    tool_changed = QtCore.Signal(str)
     picked_changed = QtCore.Signal()
+    focus_requested = QtCore.Signal(object)          # a chart double-clicked: open it to change it
 
     def __init__(self, page):
         super().__init__()
@@ -161,7 +144,6 @@ class ChartCanvas(QtWidgets.QWidget):
         self.add_menu.aboutToShow.connect(lambda: self._fill_add_menu(self.add_menu, None))
         self.floating = _Toolbar(self)
         self.floating.tools.buttonClicked.connect(lambda *_: self._tool_picked())
-        self.floating.unit.buttonClicked.connect(lambda *_: self._unit_picked())
         self.floating.btn_tidy.clicked.connect(lambda: self.space.tidy())
         self.floating.btn_in.clicked.connect(lambda: self.space.zoom_about(self.space.zoom * 1.25))
         self.floating.btn_out.clicked.connect(lambda: self.space.zoom_about(self.space.zoom / 1.25))
@@ -201,24 +183,15 @@ class ChartCanvas(QtWidgets.QWidget):
     def tool(self) -> str:
         return next(k for k, b in self.floating.btn.items() if b.isChecked())
 
-    def measure_unit(self) -> str:
-        return "phase" if self.floating.btn_phase.isChecked() else "time"
-
-    def set_tool(self, tool: str, unit: str | None = None) -> None:
+    def set_tool(self, tool: str) -> None:
         self.floating.btn[tool].setChecked(True)
-        if unit is not None:
-            (self.floating.btn_phase if unit == "phase" else self.floating.btn_time).setChecked(True)
-        self._tool_picked()
-
-    def _unit_picked(self) -> None:
-        self.floating.btn[B.MEASURE].setChecked(True)     # picking Time or Phase picks Measure
         self._tool_picked()
 
     def _tool_picked(self) -> None:
         tool = self.tool()
         for space in self.spaces.values():
             space.set_tool(tool)
-        self.tool_changed.emit(tool, self.measure_unit())
+        self.tool_changed.emit(tool)
 
     # -- layouts -------------------------------------------------------------------------------
     def own_layouts(self) -> list[str]:
@@ -578,6 +551,14 @@ class ChartCanvas(QtWidgets.QWidget):
         self.select(chart)
 
     def eventFilter(self, obj, ev) -> bool:
+        if ev.type() == QtCore.QEvent.Type.MouseButtonDblClick and isinstance(obj, QtWidgets.QWidget) \
+                and self.space is not None:
+            w = obj
+            while w is not None and not isinstance(w, B.ChartFrame):
+                w = w.parentWidget()
+            if w is not None and w.board is self.space:   # a chart opens in focus mode, to change it
+                QtCore.QTimer.singleShot(0, lambda c=w.chart: self.focus_requested.emit(c))
+                return True
         if ev.type() == QtCore.QEvent.Type.MouseButtonPress and isinstance(obj, QtWidgets.QWidget) \
                 and self.space is not None:
             w = obj

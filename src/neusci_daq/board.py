@@ -24,7 +24,7 @@ GRID = 20                       # snapping, in board pixels
 NEAR = 10                       # how close an edge must come to snap to another chart's
 MIN_W, MIN_H = 160, 120         # the smallest a chart can be made
 ZOOMS = (0.25, 2.0)
-SELECT, HAND, MEASURE, EXPORT = "select", "hand", "measure", "export"
+SELECT, HAND, EXPORT = "select", "hand", "export"
 
 
 def snap(v: float) -> float:

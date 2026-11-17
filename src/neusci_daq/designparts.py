@@ -221,8 +221,10 @@ class StimPicture(QtWidgets.QWidget):
         self.update()
 
     def _geom(self):
+        # below the plot: the letters, the names, and (several trials) the trial colors' key
+        below = 46 if self.n_trials <= 1 else 62
         L, R, T, B = ((4, self.width() - 4, 4, self.height() - 4) if self.compact
-                      else (52, self.width() - 14, 30, self.height() - 46))
+                      else (52, self.width() - 14, 30, self.height() - below))
         n = max((len(w) for w in self.waves), default=1)
         n = max(n, self.spans[-1][1] if self.spans else 1, 2)
         lo = min([0.0] + [float(w.min()) for w in self.waves if len(w)])
@@ -349,7 +351,7 @@ class StimPicture(QtWidgets.QWidget):
         # the map's key: trial 1 → n
         if many and not self.compact:
             kw, kh = 110, 8
-            x0, y0 = R - kw - 40, B + 24
+            x0, y0 = R - kw - 40, B + 44              # its own row, under the segments' names
             grad = QtGui.QLinearGradient(x0, 0, x0 + kw, 0)
             for f, _ in TRIAL_STOPS:
                 grad.setColorAt(f, trial_color(f))

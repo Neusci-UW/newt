@@ -619,6 +619,8 @@ class Result:
     t_ms: np.ndarray | None = None    # window time axis, ms after the stimulus
     data: np.ndarray | None = None    # (channels, samples), in each channel's units
     use: bool = True                  # left out of averages and the curve when False
+    raw: np.ndarray | None = None     # what's saved as a block (volts): the whole stimulus and Before/After
+    raw_before_s: float = 0.0         # where the stimulus's time 0 is in `raw`
 
 
 @dataclass
@@ -643,7 +645,10 @@ class Capture:
     differs.
     """
 
-    SEARCH_AFTER_S = 1.0      # for the last trial, which has no next one
+    # For the last trial sent (no next one yet): how long after sending to look for it on the
+    # recorded stimulus. The output starts within a read or two of being sent; more than that
+    # only kept acquiring for nothing between trials.
+    SEARCH_AFTER_S = 0.25
 
     def __init__(self, rate: float, monitor_row: int, to_units, keep_s: float, read_s: float = 0.05):
         self.rate = float(rate)
@@ -679,9 +684,12 @@ class Capture:
             self._ring = RingBuffer(data.shape[0], int(self.keep_s * self.rate))
         self._ring.append(t, data)
 
-    def sent(self, trial: Trial, wave: np.ndarray, out_rate: float, delay_ms: float) -> None:
+    def sent(self, trial: Trial, wave: np.ndarray, out_rate: float, delay_ms: float,
+             late_s: float = 0.0) -> None:
+        """A stimulus went out `late_s` before now (e.g. noticed late, the app being busy):
+        it's looked for from then, not from the newest sample."""
         tpl, pad = template(wave, out_rate, self.rate)
-        now = self.latest
+        now = self.latest - max(0.0, late_s)
         if self.pending and self.pending[-1].t_next is None:
             self.pending[-1].t_next = now
         self.pending.append(_Pending(trial, now, tpl, pad, delay_ms / 1000.0, len(wave) / out_rate))
@@ -708,10 +716,21 @@ class Capture:
         done, keep = [], []
         for pd in self.pending:
             ready = self._span(pd)[1] + pd.dur_s + p.after_ms / 1000.0 + 0.05
-            if self.latest < ready and not force:
-                keep.append(pd)
+            if self.latest >= ready or force:
+                done.append(self._result(pd, p))
                 continue
-            done.append(self._result(pd, p))
+            # Sooner, once it's found and the end of what's kept is in: so acquiring between
+            # trials can stop right after the trial instead of waiting out the latest it could be.
+            # (only once the data reaches past the latest it could have started, by a couple of
+            # reads: lined up any sooner, the match can't slide far enough and settles on the send)
+            early = pd.t_fire + pd.dur_s + p.after_ms / 1000.0 + 2 * self.slack + 0.05
+            if self.latest >= early and len(self.pending) == 1:
+                r = self._result(pd, p)
+                end = r.t0 + max(p.after_ms / 1000.0, pd.dur_s - pd.delay_s) if r.found else None
+                if end is not None and self.latest >= end + 1.0 / self.rate:
+                    done.append(r)
+                    continue
+            keep.append(pd)
         self.pending = keep
         return done
 
@@ -723,10 +742,29 @@ class Capture:
         hi = min(self.t.size, int((s_hi + pd.dur_s - self.t[0]) * self.rate) + pd.pad + 1)
         k, match = find_stimulus(self.data[self.monitor_row, lo:hi], pd.tpl)
         if match < MATCH_THRESHOLD:
-            return Result(pd.trial, False, match)
+            # not lined up: still keep the window from when it was sent, so nothing is lost
+            raw, before_s = self._saved(pd, p, pd.t_fire + pd.delay_s)
+            return Result(pd.trial, False, match, raw=raw, raw_before_s=before_s)
         t0 = float(self.t[lo + k + pd.pad]) + pd.delay_s
         got = cut(self.t, self.data, t0, p.before_ms, p.after_ms, self.rate)
         if got is None:
             return Result(pd.trial, False, match, t0)
         t_ms, raw = got
-        return Result(pd.trial, True, match, t0, t_ms, self.to_units(raw))
+        saved, before_s = self._saved(pd, p, t0)
+        return Result(pd.trial, True, match, t0, t_ms, self.to_units(raw), raw=saved, raw_before_s=before_s)
+
+    def _saved(self, pd: _Pending, p: Protocol, t0: float) -> tuple[np.ndarray | None, float]:
+        """What's kept of one trial (raw volts, and where t0 is in it): the whole stimulus
+        sent, from its first sample (leading baselines too) to its last, widened to
+        Before and After if those reach further."""
+        before_ms = max(p.before_ms, pd.delay_s * 1000.0)
+        after_ms = max(p.after_ms, (pd.dur_s - pd.delay_s) * 1000.0)
+        if self.data is None or not self.t.size:
+            return None, 0.0
+        # as much of that as was recorded (e.g. Stop came before its end)
+        i0 = int(round((t0 - self.t[0]) * self.rate))
+        lo = max(0, i0 - int(round(before_ms / 1000.0 * self.rate)))
+        hi = min(self.t.size, i0 + int(round(after_ms / 1000.0 * self.rate)) + 1)
+        if hi - lo < 2 or not lo <= i0 < self.t.size:
+            return None, 0.0
+        return self.data[:, lo:hi].copy(), (i0 - lo) / self.rate

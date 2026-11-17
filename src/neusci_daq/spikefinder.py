@@ -149,7 +149,7 @@ class SpikeFinder(View):
         self._find_timer = QtCore.QTimer(self, singleShot=True, interval=250)
         self._find_timer.timeout.connect(self._find_again)
         self._opacity_timer = QtCore.QTimer(self, singleShot=True, interval=80)   # a slider moves many steps
-        self._opacity_timer.timeout.connect(lambda: self.page.canvas.units_changed())
+        self._opacity_timer.timeout.connect(lambda: (self.page.canvas.units_changed(), self.page.pad_view.spikes_restyled()))
         self.threshold.editingFinished.connect(self._detection_changed)
         for w in (self.method, self.polarity, self.units):
             w.currentIndexChanged.connect(lambda *_: self._detection_changed())
@@ -288,6 +288,7 @@ class SpikeFinder(View):
         if was != now:
             self._unticked ^= {u}
             self.page.canvas.units_changed()
+            self.page.pad_view.data_changed()          # DataPad spike columns count the ticked units
 
     def color_of(self, u: int) -> str:
         """Unit u's color (0-based): the one picked for it, else its place in the palette."""
@@ -306,10 +307,22 @@ class SpikeFinder(View):
         self.unit_colors[u] = color
         self._show_results()
         self.page.canvas.units_changed()
+        self.page.pad_view.spikes_restyled()
 
     def set_unit_opacity(self, u: int, opacity: float) -> None:
         self.unit_opacity[u] = opacity
         self._opacity_timer.start()
+
+    def marker_side(self, amplitudes: np.ndarray) -> np.ndarray:
+        """Where a spike's marker goes, +1 above it or -1 below: the way the spikes were found
+        (Positive: above, Negative: below; Either: each by its own sign), so it never hides the spike."""
+        pol = self.polarity.currentData()
+        amp = np.asarray(amplitudes, float)
+        if pol == "positive":
+            return np.ones(len(amp))
+        if pol == "negative":
+            return -np.ones(len(amp))
+        return np.where(amp >= 0, 1.0, -1.0)
 
     def brushes(self, units: np.ndarray) -> list:
         made = {int(u): pg.mkBrush(self.qcolor(u)) for u in np.unique(units)}

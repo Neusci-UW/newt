@@ -13,7 +13,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
-from . import style
+from . import style, theme
 
 LIVE, BACK = "live", "back"
 ROLE = QtCore.Qt.ItemDataRole.UserRole
@@ -35,14 +35,26 @@ class TrialPreview(QtWidgets.QWidget):
         self.view.ci.layout.setSpacing(2)
         self.view.ci.layout.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.view)
+        self._fg = theme.THEMES[theme.DARK].foreground
+        self._last = None                         # what's shown, to draw again in a new theme
+        self.apply_theme(theme.DARK)
+
+    def apply_theme(self, mode: str) -> None:
+        """The app's light or dark plots: background and labels (and draw it again)."""
+        t = theme.THEMES.get(mode, theme.THEMES[theme.DARK])
+        self._fg = t.foreground
+        self.view.setBackground(t.background)
+        if self._last is not None:
+            self.show_trial(*self._last)
 
     def show_trial(self, title: str, channels: list[tuple[str, np.ndarray, float]], color: str | None = None) -> None:
         """channels: (name, samples, sample rate); color: the trial's group color, if it has one."""
+        self._last = (title, channels, color)
         self.caption.setText(f"<b>{title}</b>" if channels else "")
         self.view.clear()
         first = None
         for r, (name, y, fs) in enumerate(channels):
-            self.view.addLabel(f"Ch{r + 1}", row=r, col=0, color="#bbb")
+            self.view.addLabel(f"Ch{r + 1}", row=r, col=0, color=self._fg)
             p = self.view.addPlot(row=r, col=1)
             p.setMenuEnabled(False)
             p.setMouseEnabled(False, False)
@@ -51,7 +63,7 @@ class TrialPreview(QtWidgets.QWidget):
             p.hideAxis("left")
             p.setDownsampling(auto=True, mode="peak")
             p.setClipToView(True)
-            p.plot(np.arange(len(y)) / fs, y, pen=pg.mkPen(color, width=1) if color else pg.mkPen(width=1))
+            p.plot(np.arange(len(y)) / fs, y, pen=pg.mkPen(color or self._fg, width=1))
             if first is None:
                 first = p
             else:
@@ -64,12 +76,77 @@ class GroupTree(QtWidgets.QTreeWidget):
     the rows inside them still selects them."""
     moved = QtCore.Signal(str, int)              # a page's name, the row it goes to
     stepped = QtCore.Signal(int)                 # Up and Down (-1, 1), when step_keys: always on to another trial
+    stepped_extend = QtCore.Signal(int)          # Shift+Up/Down (Record page): add the next trial to the highlight
+    delete_pressed = QtCore.Signal()             # Delete or Backspace (Cmd+Backspace too)
     step_keys = False
+    own_selection = False   # Shift and Cmd clicks done here (the Record page): see mousePressEvent
+    anchor = None           # ("block", i): where a Shift-click's range starts (the trial you're on)
+
+    def _blocks_in_order(self) -> list:
+        out = []
+        for r in range(self.topLevelItemCount()):
+            top = self.topLevelItem(r)
+            for c in range(top.childCount()):
+                d = top.child(c).data(0, ROLE)
+                if isinstance(d, tuple) and d[0] == "block":
+                    out.append(top.child(c))
+        return out
+
+    def _select_only(self, items) -> None:
+        """Exactly these items selected, in one change (one overlay, not one per item)."""
+        sel = QtCore.QItemSelection()
+        for it in items:
+            ix = self.indexFromItem(it)
+            sel.select(ix, ix)
+        self.selectionModel().select(sel, QtCore.QItemSelectionModel.SelectionFlag.ClearAndSelect
+                                     | QtCore.QItemSelectionModel.SelectionFlag.Rows)
+
+    def mousePressEvent(self, ev):
+        """Record page: a Shift-click highlights the trials from the one you're on to this one,
+        replacing whatever was highlighted (just trials: no groups or averages); a Cmd-click adds
+        or takes away one trial (opening it only when it's added). Plain clicks as usual."""
+        item = self.itemAt(ev.position().toPoint())
+        data = item.data(0, ROLE) if item is not None else None
+        is_block = isinstance(data, tuple) and data[0] == "block"
+        mods = ev.modifiers()
+        if (self.own_selection and is_block and ev.button() == QtCore.Qt.MouseButton.LeftButton
+                and ev.position().x() >= self.visualItemRect(item).x()):        # (not the ▸ arrow)
+            if mods & QtCore.Qt.KeyboardModifier.ShiftModifier and self.anchor is not None:
+                order = self._blocks_in_order()
+                keys = [it.data(0, ROLE) for it in order]
+                if self.anchor in keys:
+                    a, b = keys.index(self.anchor), keys.index(data)
+                    self._select_only(order[min(a, b):max(a, b) + 1])
+                    self.setCurrentItem(item, 0, QtCore.QItemSelectionModel.SelectionFlag.NoUpdate)
+                    self.itemClicked.emit(item, 0)
+                    ev.accept()
+                    return
+            if mods & (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.MetaModifier):
+                keep = [it for it in self.selectedItems()
+                        if isinstance(it.data(0, ROLE), tuple) and it.data(0, ROLE)[0] == "block" and it is not item]
+                adding = not item.isSelected()
+                self._select_only(keep + ([item] if adding else []))
+                if adding:
+                    self.itemClicked.emit(item, 0)
+                ev.accept()
+                return
+        super().mousePressEvent(ev)
+        if is_block and not mods:
+            self.anchor = data
 
     def keyPressEvent(self, ev):
-        if self.step_keys and ev.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down) and not ev.modifiers():
-            self.stepped.emit(-1 if ev.key() == QtCore.Qt.Key.Key_Up else 1)
+        if ev.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace) and self.selectedItems():
+            self.delete_pressed.emit()
             return
+        if self.step_keys and ev.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
+            d = -1 if ev.key() == QtCore.Qt.Key.Key_Up else 1
+            mods = ev.modifiers() & ~QtCore.Qt.KeyboardModifier.KeypadModifier
+            if not mods:
+                self.stepped.emit(d)
+                return
+            if self.own_selection and mods == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                self.stepped_extend.emit(d)
+                return
         super().keyPressEvent(ev)
 
     def dragMoveEvent(self, ev):
@@ -98,6 +175,10 @@ class TrialsBrowser(QtWidgets.QWidget):
     rename_requested = QtCore.Signal(str)        # a page's name
     move_requested = QtCore.Signal(int, str)     # block, page ("" asks for a new page's name)
     stim_channel_picked = QtCore.Signal(str)     # "" for None
+    organize_picked = QtCore.Signal(str)         # "" by stimulus shape, "time" by start time
+    delete_requested = QtCore.Signal(list)       # block indices: the trials highlighted (a group: all of it)
+    regroup_requested = QtCore.Signal()          # sort the trials into groups again, from scratch
+    label_changed = QtCore.Signal(str)           # the label for trials recorded from now on
     reset_requested = QtCore.Signal()
     color_requested = QtCore.Signal(str)         # a page's name: pick its color
     color_cleared = QtCore.Signal(str)           # a page's name: back to the default color
@@ -105,7 +186,8 @@ class TrialsBrowser(QtWidgets.QWidget):
     group_moved = QtCore.Signal(str, int)        # a page's name, the row it goes to
     sort_picked = QtCore.Signal(str)             # "frequency", "amplitude" or "" for your order
     tick_highlighted = QtCore.Signal(list, list, bool)   # blocks, pages; True: untick everything else
-    step_requested = QtCore.Signal(int)          # Up or Down in the list: the trial before or after
+    step_requested = QtCore.Signal(int)
+    step_extend_requested = QtCore.Signal(int)   # Shift+Up/Down: the next trial too (Record page)          # Up or Down in the list: the trial before or after
 
     def __init__(self, for_analysis: bool = False):
         super().__init__()
@@ -124,6 +206,22 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.group_extras = QtWidgets.QWidget()   # the Groups window
         top = QtWidgets.QVBoxLayout(self.extras) if for_analysis else lay
         group_top = QtWidgets.QVBoxLayout(self.group_extras) if for_analysis else lay
+        top.addWidget(QtWidgets.QLabel("Organize by"))
+        self.organize = QtWidgets.QComboBox()
+        self.organize.addItem("Stimulus shape", "")
+        self.organize.addItem("Start time", "time")
+        self.organize.setToolTip("Stimulus shape: a group for each different stimulus. Start time: every "
+                                 "trial in one group, in the order it was recorded. Remembered for this session")
+        self.organize.activated.connect(lambda *_: self.organize_picked.emit(self.organize.currentData() or ""))
+        self.btn_regroup = QtWidgets.QPushButton("Regroup")
+        self.btn_regroup.setToolTip("Sort every trial into groups again from scratch (e.g. after a recording "
+                                    "finishes). Group names you gave and trials you moved stay")
+        self.btn_regroup.clicked.connect(lambda: self.later(self.regroup_requested.emit))
+        org = QtWidgets.QHBoxLayout()
+        org.setContentsMargins(0, 0, 0, 0)
+        org.addWidget(self.organize, 1)
+        org.addWidget(self.btn_regroup)
+        top.addLayout(org)
         # The stimulus channel (also on the Analysis tab): it sorts the blocks into pages.
         top.addWidget(QtWidgets.QLabel("Stimulus channel"))
         self.stim_ch = QtWidgets.QComboBox()
@@ -145,9 +243,19 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.group_settings.setContentsMargins(0, 0, 0, 0)
         if for_analysis:
             group_top.addLayout(self.group_settings)
-        group_top.addWidget(self.btn_reset)
         if for_analysis:
+            group_top.addWidget(self.btn_reset)
             group_top.addStretch(1)
+        else:
+            # Record page: a label for the trials recorded from now on (Reset groups is on Analysis)
+            lay.addWidget(QtWidgets.QLabel("Trial label"))
+            self.label_box = QtWidgets.QLineEdit()
+            self.label_box.setPlaceholderText("Optional, e.g. Cell 1")
+            self.label_box.setClearButtonEnabled(True)
+            self.label_box.setToolTip("Saved with every trial recorded from now on, and shown after its name. "
+                                      "Change it when you move to a new cell; clear it for none")
+            self.label_box.editingFinished.connect(lambda: self.label_changed.emit(self.label_box.text().strip()))
+            lay.addWidget(self.label_box)
         self.btn_groups = QtWidgets.QPushButton("Groups…")
         self.btn_groups.setToolTip("The colors of groups and trials, Spread, and Reset groups")
         self.btn_groups.hide()                    # no longer in the pane; the Groups window is still built
@@ -199,9 +307,12 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.tree.setMinimumHeight(60)           # its settings above still fit a small laptop screen
         # Cmd/Shift-click several blocks (or pick a page) to overlay them
         self.tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tree.own_selection = True       # Shift and Cmd clicks: see GroupTree.mousePressEvent
+        # Up and Down step trial to trial, opening its group and closing the one left (both panels)
+        self.tree.step_keys = True
+        self.tree.stepped.connect(self.step_requested)
+        self.tree.stepped_extend.connect(self.step_extend_requested)
         if for_analysis:
-            self.tree.step_keys = True
-            self.tree.stepped.connect(self.step_requested)
             self.tree.setDragEnabled(True)
             self.tree.setAcceptDrops(True)
             self.tree.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragDrop)
@@ -210,6 +321,7 @@ class TrialsBrowser(QtWidgets.QWidget):
             self.tree.moved.connect(lambda name, row: self.later(lambda: self.group_moved.emit(name, row)))
         self.tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
+        self.tree.delete_pressed.connect(self._delete_highlighted)
         self.tree.itemClicked.connect(lambda item, *_: self.later(lambda d=item.data(0, ROLE): self.activated.emit(d)))
         self.tree.itemDoubleClicked.connect(lambda item, *_: self.later(lambda d=item.data(0, ROLE): self._double(d)))
         self.tree.itemSelectionChanged.connect(
@@ -251,6 +363,12 @@ class TrialsBrowser(QtWidgets.QWidget):
             fn()
 
     # -- showing -----------------------------------------------------------------------------
+    def set_organize(self, key: str, enabled: bool = True) -> None:
+        self.organize.blockSignals(True)
+        self.organize.setCurrentIndex(max(0, self.organize.findData(key or "")))
+        self.organize.setEnabled(enabled)
+        self.organize.blockSignals(False)
+
     def set_stim_channels(self, names: list[str], current: str, enabled: bool) -> None:
         self.stim_ch.blockSignals(True)
         self.stim_ch.clear()
@@ -286,15 +404,30 @@ class TrialsBrowser(QtWidgets.QWidget):
             tree.addTopLevelItem(item)
         n_blocks = 0
         for g, (name, blocks) in enumerate(pages):
-            head = bold(QtWidgets.QTreeWidgetItem([("⠿ " if self.for_analysis else "") + f"{name}  ({len(blocks)})"]))
+            ticked = [i for i in blocks if i not in hidden_blocks]
+            some = self.for_analysis and 0 < len(ticked) < len(blocks)
+            head = bold(QtWidgets.QTreeWidgetItem([("⠿ " if self.for_analysis else "") + f"{name}  ({len(blocks)})"
+                                                   + (f"  · {len(ticked)} ticked" if some else "")]))
             head.setData(0, ROLE, ("page", name))
-            if name not in hidden_pages:
+            if name not in hidden_pages or some:
                 head.setIcon(0, style.dot_icon(colors[g % len(colors)]))
-            self._tick(head, name in hidden_pages, True)
+            self._tick(head, name in hidden_pages and not ticked, True)
+            if some:                              # some of its trials ticked: say so, even folded away
+                head.setCheckState(0, QtCore.Qt.CheckState.PartiallyChecked)
             head.setToolTip(0, f"{name}: " + ("click to see this group's average; double-click to rename it; "
                                               "right-click to change its color" if self.for_analysis else
                                               "double-click to rename this group; its trials take the new name"))
             tree.addTopLevelItem(head)
+            if len(blocks) >= 2:                  # the group's average first
+                avg = QtWidgets.QTreeWidgetItem([f"Average ({len(blocks)})"])
+                f = avg.font(0)
+                f.setItalic(True)
+                avg.setFont(0, f)
+                avg.setData(0, ROLE, ("avg", name))
+                avg.setFlags(avg.flags() & ~QtCore.Qt.ItemFlag.ItemIsDragEnabled & ~QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+                avg.setToolTip(0, f"Every channel averaged over the {len(blocks)} trials of {name}, "
+                                  "sample by sample from each trial's start: the average stimulus and response")
+                head.addChild(avg)
             for k, i in enumerate(blocks, 1):
                 stem, dur, *note = labels.get(i, (f"trial {i + 1}", "?"))
                 item = QtWidgets.QTreeWidgetItem([f"{name} {k}" + "".join(f"   {n}" for n in note)])
@@ -361,6 +494,8 @@ class TrialsBrowser(QtWidgets.QWidget):
         for item in self.items():
             data = item.data(0, ROLE)
             if data == want:
+                if isinstance(want, tuple) and want[0] == "block" and not overlay:
+                    tree.anchor = want           # a Shift-click's range starts at the trial shown
                 if overlay:                      # don't disturb a multiple selection
                     tree.setCurrentItem(item, 0, QtCore.QItemSelectionModel.SelectionFlag.NoUpdate)
                 else:
@@ -368,20 +503,24 @@ class TrialsBrowser(QtWidgets.QWidget):
                 tree.scrollToItem(item)
             if isinstance(data, tuple) and data[0] == "block":
                 item.setSelected(data[1] in overlay or (not overlay and data == want))
+            elif isinstance(data, tuple) and not overlay:    # groups and averages: only the one shown
+                item.setSelected(data == want)
         tree.blockSignals(False)
 
-    def reveal(self, block: int, leaving: int | None = None) -> None:
-        """Highlight this trial, opening its group; close the group of the trial being left."""
-        item = next((it for it in self.items() if it.data(0, ROLE) == ("block", block)), None)
+    def reveal(self, block, leaving=None) -> None:
+        """Highlight just this trial (a block index, or ("block", i) / ("avg", group)), opening its
+        group; close the group of the one being left."""
+        want = block if isinstance(block, tuple) else ("block", block)
+        gone = leaving if isinstance(leaving, tuple) or leaving is None else ("block", leaving)
+        item = next((it for it in self.items() if it.data(0, ROLE) == want), None)
         if item is None:
             return
-        old = next((it for it in self.items() if it.data(0, ROLE) == ("block", leaving)), None) \
-            if leaving is not None else None
+        old = next((it for it in self.items() if it.data(0, ROLE) == gone), None) if gone is not None else None
         if old is not None and old.parent() is not None and old.parent() is not item.parent():
             old.parent().setExpanded(False)
         if item.parent() is not None:
             item.parent().setExpanded(True)
-        self.mark(("block", block), [])
+        self.mark(want, [])
 
     def select(self, blocks: list[int], pages: list[str] = ()) -> None:
         """Select just these blocks and pages, without reporting it."""
@@ -406,13 +545,15 @@ class TrialsBrowser(QtWidgets.QWidget):
             if isinstance(data, tuple) and data[0] == "block":
                 picked.add(int(data[1]))
             elif isinstance(data, tuple) and data[0] == "page":
-                picked.update(int(item.child(c).data(0, ROLE)[1]) for c in range(item.childCount()))
+                kids = (item.child(c).data(0, ROLE) for c in range(item.childCount()))
+                picked.update(int(d[1]) for d in kids if isinstance(d, tuple) and d[0] == "block")
         return sorted(picked)
 
     def selected_pages(self) -> list[str]:
-        """The names of the pages selected (not those with just some blocks selected)."""
+        """The names of the pages selected, or whose Average is (not those with just some
+        blocks selected)."""
         return [item.data(0, ROLE)[1] for item in self.tree.selectedItems()
-                if isinstance(item.data(0, ROLE), tuple) and item.data(0, ROLE)[0] == "page"]
+                if isinstance(item.data(0, ROLE), tuple) and item.data(0, ROLE)[0] in ("page", "avg")]
 
     # -- page actions --------------------------------------------------------------------------
     def _double(self, data) -> None:
@@ -442,4 +583,16 @@ class TrialsBrowser(QtWidgets.QWidget):
             if home is not None and home != here:
                 menu.addAction(f"Back to its stimulus group ({home})",
                                lambda: self.later(lambda: self.move_requested.emit(i, home)))
+        if not item.isSelected():            # right-clicked outside the highlight: just this one
+            self.tree.clearSelection()
+            item.setSelected(True)
+        n = len(self.selected_blocks())
+        if n:
+            menu.addSeparator()
+            menu.addAction(f"Delete {n} trial{'' if n == 1 else 's'}…", self._delete_highlighted)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _delete_highlighted(self) -> None:
+        picked = self.selected_blocks()
+        if picked and self.tree.isEnabled():
+            self.later(lambda: self.delete_requested.emit(picked))

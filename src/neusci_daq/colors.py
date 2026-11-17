@@ -77,10 +77,22 @@ MAPS = {
     "Plasma": ("#0d0887", "#7e03a8", "#cc4778", "#f89540", "#f0f921"),
     "Cividis": ("#00224e", "#434e6c", "#7d7c78", "#bcaf6f", "#fee838"),
 }
-SOLID, OPACITY = "Solid", "Opacity"
-TRIAL_STYLES = (SOLID, OPACITY, *MAPS)
-PALETTE_STYLE = "Palette"
-PAGE_STYLES = (PALETTE_STYLE, *MAPS)
+SOLID, OPACITY, SHADES_T = "Solid", "Opacity", "Shades"
+TRIAL_STYLES = (SOLID, OPACITY, SHADES_T, *MAPS)
+PALETTE_STYLE, ONE, SHADES = "Palette", "One color", "Shades of one color"
+PAGE_STYLES = (PALETTE_STYLE, ONE, SHADES, *MAPS)
+BASE_COLOR = "#0072B2"             # one color / shades: until you pick one
+
+
+def shade(color: str, f: float):
+    """Color at f (0 to 1) along its shades: pale and greyish (0) to full and deep (1), the same hue."""
+    from pyqtgraph.Qt import QtGui
+    c = QtGui.QColor(color)
+    h, s, l, _ = c.getHslF()
+    f = min(1.0, max(0.0, f))
+    s2 = 0.18 + (max(s, 0.55) - 0.18) * f       # saturation up
+    l2 = 0.78 - 0.42 * f                        # light to dark
+    return QtGui.QColor.fromHslF(max(h, 0.0), s2, l2)
 LEVELS = 12
 START = 0.12                       # where a map starts
 
@@ -97,14 +109,18 @@ def sample(name: str, f: float):
                           ((a.red(), b.red()), (a.green(), b.green()), (a.blue(), b.blue()))))
 
 
-def spread(style: str, color: str, n: int) -> list:
-    """How n trials in order are drawn (QColors), in a group of this color."""
+def spread(style: str, color: str, n: int, opacity: float | None = None) -> list:
+    """How n trials in order are drawn (QColors), in a group of this color. opacity (0–1), when
+    given, sets how solid they are (Opacity: the last; the first fades from a seventh of it)."""
     from pyqtgraph.Qt import QtGui
     out = []
     for k in range(n):
         f = round(k / max(1, n - 1) * (LEVELS - 1)) / (LEVELS - 1)
-        c = sample(style, f) if style in MAPS else QtGui.QColor(color)
-        if style == OPACITY:
+        c = sample(style, f) if style in MAPS else shade(color, f) if style == SHADES_T else QtGui.QColor(color)
+        if opacity is not None:
+            top = 255 * min(1.0, max(0.02, opacity))
+            c.setAlpha(int(top * (0.14 + 0.86 * f)) if style == OPACITY and n > 1 else int(top))
+        elif style == OPACITY:
             c.setAlpha(int(35 + 220 * f) if n > 1 else 255)
         elif style == SOLID:
             c.setAlpha(int(max(35, 255 / n ** 0.5)))     # fainter the more of them there are

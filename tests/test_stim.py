@@ -195,9 +195,13 @@ def test_nidaqmx_error_is_reported_and_output_zeroed(fake_nidaqmx, tmp_path, mon
 
 
 # ---------------------------------------------------------------- the menu, simulated
-def test_fire_needs_acquisition_running(win):
-    assert not win.fire_stimulus()
-    assert "Press Start" in win.statusBar().currentMessage()
+def test_fire_starts_acquiring_and_sends_once_it_has(app, win):
+    assert not win.backend.running
+    assert win.fire_stimulus()                   # no need to press Start first
+    assert win.backend.running and win.stim_out.fired == 0
+    pump(app, 0.6)
+    assert win.stim_out.fired == 1
+    win.btn_run.setChecked(False)
 
 
 def test_record_stimulus_on_adds_and_removes_a_stim_channel(app, win):

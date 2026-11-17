@@ -13,6 +13,9 @@ from .stim import Stimulus
 from .stimwindow import StimPage
 from . import colors
 from .mainparts import LIVE
+from pyqtgraph.Qt import QtCore
+
+START_SETTLE_MS = 300    # acquiring this long before a stimulus that started it is sent
 
 
 class StimulatorMixin:
@@ -47,13 +50,14 @@ class StimulatorMixin:
         if hasattr(self, "trials_page"):
             self.trials_page.stimulus_changed()
 
-    def stimulus_waves(self) -> tuple[list[str], np.ndarray]:
+    def stimulus_waves(self, trial: int = 0) -> tuple[list[str], np.ndarray]:
         """(outputs, waveform) Fire sends: the first stimulus on its output and the second,
-        if any, on the other. Raises ValueError, naming the output when there are two."""
+        if any, on the other, as trial `trial` (0 = the first) sends them. Raises
+        ValueError, naming the output when there are two."""
         cfg = self.cfg
-        streams = [(cfg.stim_output, self.stimulus)]
+        streams = [(cfg.stim_output, self.stimulus.at_trial(trial))]
         if self.stimulus2 is not None:
-            streams.append((self.second_output, self.stimulus2))
+            streams.append((self.second_output, self.stimulus2.at_trial(trial)))
         waves = {}
         for out, s in streams:
             try:
@@ -62,14 +66,25 @@ class StimulatorMixin:
                 raise ValueError(f"{out}: {e}" if len(streams) > 1 else str(e)) from None
         return stimmod.combine(waves)
 
-    def describe_stimuli(self) -> str:
-        """What Fire sends, for comments and messages: with two outputs, each by name."""
+    def describe_stimuli(self, trial: int | None = None) -> str:
+        """What Fire sends, for comments and messages: with two outputs, each by name.
+        With `trial`, that trial's version, prefixed "Trial n:"."""
         cfg = self.cfg
-        text = self.stimulus.describe(cfg.stim_units, cfg.stim_scale)
-        if self.stimulus2 is not None:
+        s1, s2 = self.stimulus, self.stimulus2
+        if trial is not None:
+            s1, s2 = s1.at_trial(trial), (s2.at_trial(trial) if s2 is not None else None)
+        text = s1.describe(cfg.stim_units, cfg.stim_scale)
+        if s2 is not None:
             text = (f"{cfg.stim_output}: {text}; {self.second_output}: "
-                    + self.stimulus2.describe(cfg.stim_units, cfg.stim_scale))
-        return text
+                    + s2.describe(cfg.stim_units, cfg.stim_scale))
+        return text if trial is None else f"Trial {trial + 1}: {text}"
+
+    def repeat_trials(self) -> int:
+        """How many trials Repeat steps through: Complex Stimulus's How many when a
+        segment changes from trial to trial, else 1 (the same stimulus every time)."""
+        steps = self.stimulus.steps or (self.stimulus2 is not None and self.stimulus2.steps)
+        page = getattr(self, "stimulus_page", None)
+        return max(1, page.n_trials.value()) if steps and page is not None else 1
 
     def set_stimulus(self, s: Stimulus) -> None:
         """Use stimulus `s` for Fire and Repeat, and show it in the Stimulator tab."""
@@ -94,16 +109,19 @@ class StimulatorMixin:
         self.stim_page.show_message(text, error)
 
     def _escape(self):
-        if self.trials_page.running:
+        if self.trials_page.running:              # stopping a stimulus always comes first
             self.stop_stimulus()
             return
         if self.repeating or getattr(getattr(self, "simple_page", None), "repeating", False) \
                 or (self.stim_out is not None and self.stim_out.busy):
             self.stop_stimulus()
             self._stim_message("Stimulus stopped")
+            return
+        self.clear_readout()                     # nothing to stop: the cursor or highlight goes
 
-    def fire_stimulus(self) -> bool:
-        """Send the current stimulus once. Returns False (with a message) if it can't."""
+    def fire_stimulus(self, trial: int | None = None) -> bool:
+        """Send the current stimulus once (as trial `trial`, 0 = the first, when given).
+        Returns False (with a message) if it can't."""
         if self.stim_out is None:
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
@@ -111,12 +129,27 @@ class StimulatorMixin:
             self._stim_message("A protocol is running (Acquisition › Complex Stimulus); stop it first.", error=True)
             return False
         try:
-            chans, wave = self.stimulus_waves()
+            chans, wave = self.stimulus_waves(trial or 0)
+            desc = self.describe_stimuli(trial)
+            s1, s2 = self.stimulus, self.stimulus2
+            if trial is not None:                # what was sent, for the recording
+                s1, s2 = s1.at_trial(trial), (s2.at_trial(trial) if s2 is not None else None)
         except ValueError as e:
             self._stim_message(str(e), error=True)
             return False
-        return self.send_wave(wave, self.describe_stimuli(), self.stimulus, channels=chans,
-                              stimulus2=self.stimulus2)
+        return self.send_wave(wave, desc, s1, channels=chans, stimulus2=s2)
+
+    def _fire_repeat_trial(self) -> bool:
+        """Repeat's next send: per-trial changes step on each repeat, starting over
+        after the last trial."""
+        n = self.repeat_trials()
+        if n == 1:
+            return self.fire_stimulus()
+        t = self._repeat_i % n
+        if not self.fire_stimulus(t):
+            return False
+        self._repeat_i = t + 1
+        return True
 
     def send_wave(self, wave, desc: str, stimulus: Stimulus | None = None,
                   channels: list[str] | None = None, stimulus2: Stimulus | None = None) -> bool:
@@ -127,9 +160,23 @@ class StimulatorMixin:
         if self.stim_out is None:
             self._stim_message("The stimulator needs the nidaqmx (or simulated) backend.", error=True)
             return False
-        if self.mode != LIVE or not self.backend.running:
-            self._stim_message("Press Start first: stimuli are sent while acquiring.", error=True)
+        if self.mode != LIVE and not self.backend.running:
+            self._stim_message("Go back to live mode first: stimuli are sent while acquiring.", error=True)
             return False
+        if not self.backend.running:            # a stimulus page's Send starts acquiring too
+            if not self.ensure_acquiring():
+                return False
+            # let the stream (and the block, with Record on) get going first, so the
+            # recording holds the whole stimulus
+            def later():
+                if self.backend.running:
+                    self.send_wave(wave, desc, stimulus, channels=channels, stimulus2=stimulus2)
+            settle = START_SETTLE_MS
+            if self._simple_windows():           # its Before (the baseline) is recorded first
+                settle = max(settle, int(self.simple_page.before.value()) + 100)
+            QtCore.QTimer.singleShot(settle, later)
+            self._stim_message("Started acquiring; sending the stimulus…")
+            return True
         try:
             stimmod.check_limit(wave, self.cfg.stim_max_v)
             self.stim_out.fire(wave, self.cfg.stim_rate, channels)
@@ -143,6 +190,11 @@ class StimulatorMixin:
                           if stimulus2 is not None and len(channels) > 1 else None)
                 self.recorder.add_stimulus(stimulus.to_dict(), self.cfg.stim_rate,
                                            output=self.cfg.stim_output, second=second)
+        self._stim_sent, self._stim_idle_since = True, None   # acquiring stops after the last one
+        ws = getattr(self, "window_saver", None)
+        if ws is not None and ws.running and not self.trials_page.running:
+            ws.sent(wave, self.cfg.stim_rate, desc, stimulus, stimulus2 if len(channels) > 1 else None,
+                    (self.cfg.stim_output, self.second_output))
         for fn in getattr(self, "sent_hooks", ()):     # pages that list what was sent
             fn(desc, stimulus)
         self._stim_message(f"Stimulus sent on {' and '.join(channels)}: {desc}")
@@ -155,6 +207,8 @@ class StimulatorMixin:
         self.set_repeat(False)
         if hasattr(self, "simple_page"):
             self.simple_page.halt()
+        if hasattr(self, "dock_timed"):
+            self.dock_timed.halt()
         if self.stim_out is not None:
             self.stim_out.stop()
         self._update_stim_chip()
@@ -165,7 +219,8 @@ class StimulatorMixin:
             on = False
         if on and not self.repeating:
             self.repeating = True          # set first, so the chip shows "every N s"
-            if not self.fire_stimulus():
+            self._repeat_i = 0
+            if not self._fire_repeat_trial():
                 self.repeating = False
             else:
                 self.stim_timer.start(int(self.stim_repeat_s * 1000))
@@ -186,7 +241,7 @@ class StimulatorMixin:
             self._stim_message("Skipped one repeat: the previous stimulus was still running. "
                                "Use a longer repeat time.", error=True)
             return
-        if not self.fire_stimulus():
+        if not self._fire_repeat_trial():
             self.set_repeat(False)
         elif self.stim_timer.interval() != int(self.stim_repeat_s * 1000):
             self.stim_timer.setInterval(int(self.stim_repeat_s * 1000))
@@ -251,7 +306,7 @@ class StimulatorMixin:
             self.board_page.sync()
         self.trials_page.sync()
         name = next((r.ch.name for r in self.rows if r.ch.physical == phys), "") if phys else ""
-        if name and self._stim_key() is not None:
-            self.set_stim_channel(name)                  # the Blocks panel and Analysis group by it
+        if self.mode == LIVE:                            # the Blocks panel's Stimulus channel follows
+            self.set_stim_channel(name, from_monitor=True)
         self.statusBar().showMessage(f"Recording the stimulus on {phys} ({name})" if phys
                                      else "Not recording the stimulus", 8000)

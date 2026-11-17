@@ -69,6 +69,20 @@ class ResponseChart(Chart):
         self.show_average.setChecked(True)
         self.field("show_trials", "", self.show_trials, self._view_changed)
         self.field("show_average", "", self.show_average, self._view_changed)
+        # the same choice on the chart itself, where you look at it: Averages, All trials or Both
+        head = QtWidgets.QHBoxLayout()
+        head.setContentsMargins(4, 0, 4, 0)
+        head.addStretch(1)
+        self.view_pick = QtWidgets.QComboBox()
+        for label, key in (("Averages", "avg"), ("All trials", "trials"), ("Both", "both")):
+            self.view_pick.addItem(label, key)
+        self.view_pick.setToolTip("Each group's average; every trial, in its trial color (Trials drawer › "
+                                  "Groups › Trials sets how); or faint trials behind bold averages")
+        self.view_pick.currentIndexChanged.connect(self._view_picked)
+        head.addWidget(QtWidgets.QLabel("Show"))
+        head.addWidget(self.view_pick)
+        self.body.addLayout(head)
+        self._show_view_pick()
         self.series.itemChanged.connect(lambda *_: self._setting_changed(None))
         self._axes = AxisGroup()
         self._saved_ticks: list | None = None        # from the layout, until the channels are known
@@ -102,6 +116,22 @@ class ResponseChart(Chart):
             self.show_average.blockSignals(True)          # something has to show
             self.show_average.setChecked(True)
             self.show_average.blockSignals(False)
+        self._show_view_pick()
+        self.refresh()
+
+    def _show_view_pick(self) -> None:
+        t, a = self.show_trials.isChecked(), self.show_average.isChecked()
+        self.view_pick.blockSignals(True)
+        self.view_pick.setCurrentIndex(self.view_pick.findData("both" if t and a else "trials" if t else "avg"))
+        self.view_pick.blockSignals(False)
+
+    def _view_picked(self) -> None:
+        key = self.view_pick.currentData()
+        for box, on in ((self.show_trials, key in ("trials", "both")), (self.show_average, key in ("avg", "both"))):
+            box.blockSignals(True)
+            box.setChecked(on)
+            box.blockSignals(False)
+        self.saved()
         self.refresh()
 
     def plots(self) -> list:
@@ -122,6 +152,7 @@ class ResponseChart(Chart):
         super().restore(state)
         self._saved_ticks = [tuple(t) for t in state.get("ticked", [])] or None
         self._spikes_set = state.get("spikes_set", False)
+        self._show_view_pick()
 
     def names(self) -> list[str]:
         """The channels it lists: all but the stimulus, which has its own chart."""
@@ -181,16 +212,22 @@ class ResponseChart(Chart):
         for b, c in page.trial_colors(trials).items():
             by_color.setdefault(c.name(QtGui.QColor.NameFormat.HexArgb), (c, []))[1].append(rows[b])
         drawn = []
-        if self.show_trials.isChecked():                  # every trial of a group, faint behind its average
+        if self.show_trials.isChecked():                  # every trial, in its trial color (faint behind averages)
+            behind = self.show_average.isChecked()
             for g, _, blocks in averaged:
-                faint = QtGui.QColor(page.group_color(g))
-                faint.setAlpha(70)
-                item = OverlayCurve()
-                item.mode = "peak"
-                item.setPen(pg.mkPen(faint, width=1))
-                p.addItem(item)
-                item.set_traces(Y[[rows[b] for b in blocks]], fs)
-                drawn.append(item)
+                groups: dict[str, tuple[QtGui.QColor, list[int]]] = {}
+                for b, c in page.trial_colors(blocks).items():
+                    c = QtGui.QColor(c)
+                    if behind and page.trial_opacity() is None:     # auto: faint behind the averages
+                        c.setAlpha(min(c.alpha(), 80))
+                    groups.setdefault(c.name(QtGui.QColor.NameFormat.HexArgb), (c, []))[1].append(rows[b])
+                for c, picked in groups.values():
+                    item = OverlayCurve()
+                    item.mode = "peak"
+                    item.setPen(pg.mkPen(c, width=1))
+                    p.addItem(item)
+                    item.set_traces(Y[picked], fs)
+                    drawn.append(item)
         for color, picked in by_color.values():
             item = OverlayCurve()
             item.mode = "peak"
@@ -251,7 +288,7 @@ class ResponseChart(Chart):
         series = []                                   # (label, unit, block -> y, (channel, series))
         for name, c in sorted(self.ticked(), key=lambda nc: (page.names().index(nc[0])
                                                              if nc[0] in page.names() else 99, nc[1])):
-            ys = {b: page.trace(b, name) for b in chosen}
+            ys = {b: page.chart_trace(b, name) for b in chosen}
             ys = {b: y for b, y in ys.items() if y is not None}
             if not ys:
                 continue
@@ -385,19 +422,20 @@ class ResponseChart(Chart):
         self.spikes_note.setText(text)
 
     def _trace(self, i: int) -> np.ndarray | None:
-        return self.page.trace(i, self._spike_channel)
+        return self.page.chart_trace(i, self._spike_channel)
 
     def _event_heights(self, ev: A.Events) -> np.ndarray:
         """Where each event is on its block's trace (worked out once per search)."""
         name = self._spike_channel
-        if self._heights is None or self._heights[0] is not ev or self._heights[1] != name:
+        base = (self.page.baseline_on, repr(self.page.baseline_sel)) if hasattr(self.page, "baseline_on") else None
+        if self._heights is None or self._heights[0] is not ev or self._heights[1] != (name, base):
             y = np.zeros(len(ev.t))
             for b in np.unique(ev.block):
                 trace, m = self._trace(int(b)), ev.block == b
                 if trace is not None:
                     k = np.round(ev.t[m] * self.data[int(b)]["sample_rate"]).astype(int)
                     y[m] = trace[np.clip(k, 0, len(trace) - 1)]
-            self._heights = (ev, name, y)
+            self._heights = (ev, (name, base), y)        # on the traces as drawn: less the baseline
         return self._heights[2]
 
     def _show_spikes(self) -> None:
@@ -417,8 +455,16 @@ class ResponseChart(Chart):
             return
         show = np.isin(ev.unit, list(on))
         if self.show_dots.isChecked():
-            self.marks.setData(ev.t[show], self._event_heights(ev)[show], brush=self.finder.brushes(ev.unit[show]),
-                               size=self.mark_size.value(),
+            # just past each spike, the way they were found: above for positive, below for negative
+            side = self.finder.marker_side(ev.amplitude[show])
+            h = self._event_heights(ev)[show]
+            ok = np.isfinite(h)
+            lift = 0.05 * float(np.nanmax(h) - np.nanmin(h)) if ok.sum() > 1 else 0.0
+            if not lift:
+                (_, _), (y0, y1) = self.plots()[0].getPlotItem().getViewBox().viewRange()
+                lift = 0.05 * (y1 - y0)
+            self.marks.setData(ev.t[show], h + side * lift, brush=self.finder.brushes(ev.unit[show]),
+                               size=self.mark_size.value(), symbol=["t" if s > 0 else "t1" for s in side],
                                pen=pg.mkPen(self._fg(), width=1) if hl else pg.mkPen(None))
         else:
             self.marks.setData([], [])
@@ -470,15 +516,22 @@ class ResponseChart(Chart):
         sign = 1 if finder.polarity.currentData() == "positive" else -1
         self.thr_line.setVisible(self.show_thr.isChecked())       # first: a hidden label keeps its old text
         self.thr_line.blockSignals(True)
-        self.thr_line.setValue(finder.baseline() + sign * level)
+        self.thr_line.setValue(finder.baseline() + sign * level - self._thr_shift())
         self.thr_line.blockSignals(False)
         self.thr_label.setFormat(f"threshold {finder.fmt(level)}")
         self.thr_label.anchors = [(1, 1 if sign > 0 else 0)] * 2     # on the side away from the traces
         self.thr_label.updatePosition()
 
+    def _thr_shift(self) -> float:
+        """How far the baseline moved the highlighted trial's trace down (0 when it's off): the
+        threshold line moves with it, so it still sits where spikes are found."""
+        off = getattr(self.page, "baseline_offset", None)
+        return off(self.page.index(), self._spike_channel) if off is not None else 0.0
+
     def _thr_dragged(self) -> None:
-        self.finder.threshold_dragged(self.thr_line.value())
-        self.thr_label.setFormat(f"threshold {self.finder.fmt(abs(self.thr_line.value() - self.finder.baseline()))}")
+        raw = self.thr_line.value() + self._thr_shift()          # back on the recording's own scale
+        self.finder.threshold_dragged(raw)
+        self.thr_label.setFormat(f"threshold {self.finder.fmt(abs(raw - self.finder.baseline()))}")
 
     def listen_for_mark(self, on_drag) -> None:
         for pw in self._plots:
@@ -606,7 +659,7 @@ class PsthChart(_AverageChart):
             if not stim:
                 triggers[b] = np.array([0.0])
             else:
-                y = page.trace(b, stim)
+                y = page.chart_trace(b, stim)
                 if y is not None:               # each train's start as page.onsets finds it, or every pulse
                     triggers[b] = A.stimulus_times(y, fs, one_way=True) if every else \
                         A.train_starts(A.stimulus_times(y, fs))
@@ -690,7 +743,7 @@ class StaChart(_AverageChart):
         fs = self.data[chosen[0]]["sample_rate"]
         spread = page.spread()
         name = self.sta_channel.currentData()
-        traces = {k: page.trace(k, name) for k in chosen} if name else {}
+        traces = {k: page.chart_trace(k, name) for k in chosen} if name else {}
         traces = {k: v for k, v in traces.items() if v is not None}
         averaged, trials = self.plan(list(traces))
         colors = page.trial_colors(trials)
@@ -753,7 +806,7 @@ class FitChart(Chart):
                 curve.setData([], [])
             return
         b = chosen[0]
-        y, line = page.recorded(b, stim), page.trace(b, stim)
+        y, line = page.chart_recorded(b, stim), page.chart_trace(b, stim)
         if y is None:
             return
         t = np.arange(len(y)) / self.data[b]["sample_rate"]
@@ -854,9 +907,9 @@ class CycleChart(Chart):
         R, which rows of S have R). R is None if no block has the response."""
         page = self.page
         stim, resp = page.repeats.channel(), self.cycle_resp.currentText()
-        S = np.vstack([A.cycle_rows(page.trace(b, stim), cycles[b]) for b in blocks])
+        S = np.vstack([A.cycle_rows(page.chart_trace(b, stim), cycles[b]) for b in blocks])
         number = np.concatenate([np.arange(len(cycles[b])) for b in blocks])
-        traces = {b: page.trace(b, resp) for b in blocks}
+        traces = {b: page.chart_trace(b, resp) for b in blocks}
         have = [b for b in blocks if traces[b] is not None]
         if not have:
             return S, None, number, None
@@ -917,7 +970,7 @@ class StimulusCycleChart(CycleChart):
         total = 0
         spread = page.spread()
         for _, color, blocks in sets:
-            S = np.vstack([A.cycle_rows(page.trace(b, stim), cycles[b]) for b in blocks])
+            S = np.vstack([A.cycle_rows(page.chart_trace(b, stim), cycles[b]) for b in blocks])
             mean, sd, sem, _ = A.mean_spread(S)              # across the cycles
             if spread:
                 draw_band(p, x, mean, sd if spread == "sd" else sem, color)

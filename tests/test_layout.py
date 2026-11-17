@@ -31,7 +31,8 @@ def test_starts_on_acquisition_record_with_sub_pages(win):
 def test_sub_page_bar_only_under_tabs_that_have_sub_pages(win):
     pane = win.tabs.panes[0]
     win.tabs.pick_group(0, "analysis")
-    assert shown(win) == ["analysis"] and pane.sub_head.isHidden()
+    assert shown(win) == ["analysis"] and not pane.sub_head.isHidden()
+    assert tab_texts(pane.sub_bar) == ["DataPad", "Single Plot", "Plot Canvas"]
     assert pane.bar.currentIndex() == 1
     win.tabs.pick_group(0, "acquisition")
     assert shown(win) == ["acq"] and not pane.sub_head.isHidden()

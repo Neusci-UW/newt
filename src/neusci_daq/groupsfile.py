@@ -18,6 +18,8 @@ What you change is kept in the session folder, in pages.json:
   shown_trials  blocks you ticked yourself: they stay in, even on a page left out
   order    the pages in the order you dragged them
   sort     "frequency" or "amplitude" to keep them sorted, "" for your order
+  organize "time": one page, every block in the order it was recorded; "" (the default): a
+           page per stimulus shape
 
 Gains and fits are applied as data is read: the recorded blocks are never changed.
 """
@@ -31,8 +33,11 @@ ALL = "All trials"                # the one group when there's nothing to group 
 
 
 def load(folder: str | Path | None) -> dict:
-    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "gains": {}, "stim_fit": "",
-           "hidden_groups": [], "hidden_trials": [], "shown_trials": [], "order": [], "sort": ""}
+    out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "base_color": "",
+           "trial_opacity": 0,
+           "gains": {}, "stim_fit": "",
+           "hidden_groups": [], "hidden_trials": [], "shown_trials": [], "order": [], "sort": "",
+           "organize": ""}
     if folder is None:
         return out
     try:
@@ -41,11 +46,14 @@ def load(folder: str | Path | None) -> dict:
         out["moved"] = {str(k): str(v) for k, v in d.get("moved", {}).items()}
         out["colors"] = {str(k): str(v) for k, v in d.get("colors", {}).items()}
         out["page_map"], out["trial_map"] = str(d.get("page_map", "")), str(d.get("trial_map", ""))
+        out["base_color"] = str(d.get("base_color", ""))
+        out["trial_opacity"] = int(d.get("trial_opacity", 0) or 0)
         out["gains"] = {str(k): float(v) for k, v in d.get("gains", {}).items()}
         out["stim_fit"] = str(d.get("stim_fit", ""))
         for key in ("hidden_groups", "hidden_trials", "shown_trials", "order"):
             out[key] = [str(x) for x in d.get(key, [])]
         out["sort"] = str(d.get("sort", ""))
+        out["organize"] = "time" if d.get("organize") == "time" else ""
     except (OSError, ValueError, AttributeError, TypeError):
         pass
     return out
@@ -59,7 +67,7 @@ def apply(auto: list[tuple[str, list[int]]], stems: list[str], d: dict) -> list[
     """The pages: [(name, block indices)], from the stimulus groups (`auto`; empty
     when there's nothing to group by, which makes one page) and what you changed.
     Pages keep their stimulus order; pages you made come after; empty ones go."""
-    if not auto:
+    if not auto or d.get("organize") == "time":    # by start time: all on one page, in order
         auto = [(ALL, list(range(len(stems))))]
     renamed, moved = d.get("renamed", {}), d.get("moved", {})
     pages: dict[str, list[int]] = {}

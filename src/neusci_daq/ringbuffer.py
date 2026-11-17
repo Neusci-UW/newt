@@ -11,14 +11,17 @@ import numpy as np
 
 
 class RingBuffer:
-    def __init__(self, n_channels: int, capacity: int):
+    def __init__(self, n_channels: int, capacity: int, dtype=np.float64):
+        """dtype is the samples' (times are always float64: float32 times stop telling
+        20 kHz samples apart after about 20 minutes of streaming)."""
         self.n = int(n_channels)
+        self.dtype = np.dtype(dtype)
         self._alloc(max(2, int(capacity)))
 
     def _alloc(self, cap: int) -> None:
         self.cap = cap
-        self._t = np.zeros(2 * cap)
-        self._y = np.zeros((self.n, 2 * cap))
+        self._t = np.empty(2 * cap)            # (only the held part is ever read)
+        self._y = np.empty((self.n, 2 * cap), self.dtype)
         self._w = 0              # where the next sample goes (0..cap-1)
         self._count = 0          # how many samples are held (≤ cap)
 
@@ -32,7 +35,7 @@ class RingBuffer:
         """Add samples t (m,) and y (n_channels, m); only the newest `cap` are kept."""
         t = np.asarray(t, float)
         m = len(t)
-        y = np.asarray(y, float).reshape(self.n, m)     # (works with no channels too)
+        y = np.asarray(y, self.dtype).reshape(self.n, m)     # (works with no channels too)
         if m == 0:
             return
         if m > self.cap:

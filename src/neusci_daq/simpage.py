@@ -25,6 +25,10 @@ _CELL_COLUMNS = (
     ("Reset", "reset_mv", "mV", "Where the membrane potential goes after a spike (below threshold)"),
     ("Time const.", "tau_ms", "ms", "Membrane time constant: how quickly PSPs fade"),
     ("Refractory", "refractory_ms", "ms", "No spikes for this long after one"),
+    ("Adaptation", "adapt_mv", "mV", "Spike-frequency adaptation: each spike pulls the cell this much further "
+                                     "from threshold, so a steady drive makes it fire fast at first, then "
+                                     "slow down; 0 = none"),
+    ("Adapt. time", "adapt_tau_ms", "ms", "How long the adaptation from a spike takes to wear off"),
     ("Drive", "drive_mv", "mV", "Steady depolarization above rest; with noise, sets how often it fires on its own"),
     ("Noise", "noise_mv", "mV", "Membrane potential fluctuation (SD)"),
     ("Stimulus", "stimulus", "mV", "How strongly the stimulus drives this cell: the depolarization from a 1 V, "
@@ -530,13 +534,10 @@ class SimOffBanner(QtWidgets.QFrame):
         h.setContentsMargins(12, 8, 12, 8)
         text = QtWidgets.QLabel(
             "Acquisition is recording from a real input device, so changes here are saved but not recorded. "
-            "Switch the input device to Simulated cells to record this. Your channel setup is remembered.")
+            "To record this, press Switch to Simulated cells on the Record page, above Trials. "
+            "Your channel setup is remembered.")
         text.setWordWrap(True)
-        btn = QtWidgets.QPushButton("Switch to Simulated cells")
-        btn.setToolTip("Reopen NEWT on the simulated input device (stop recording first)")
-        btn.clicked.connect(lambda: self.main.switch_input("simulated"))
         h.addWidget(text, 1)
-        h.addWidget(btn, 0)
         self.apply_theme(style.LIGHT)
 
     def apply_theme(self, mode: str) -> None:

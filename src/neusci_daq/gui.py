@@ -60,7 +60,8 @@ from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
 from .simplestim import SimpleStimPage
-from .dockstim import DockedDesign, DockedStimulator
+from .dockstim import DockedDesign, DockedStimulator, DockedTimed
+from .windowsaver import WindowSaver
 from .ministim import MiniStimulator
 from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
 from . import colors
@@ -108,6 +109,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.review_dir: Path | None = None
         self._review_source: Path | None = None   # the .mat an imported session came from
         self._live_state = None              # the live session, while browsing its own blocks
+        self._t_shift, self._joins = 0.0, []   # live: a run's stretches end to end (resume_acquiring)
+        self._bounds: list[tuple[float, str]] = []   # live: where acquisitions and trials start
         self._overlay_sel: list[int] = []    # blocks overlaid on the review plots (2 or more)
         self._mirrors: list = []             # other channels' copies in the first plot (Overlay channels)
         self._calcs: list = []               # (Calculation, Formula or None, problem) for the plots shown
@@ -158,6 +161,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self._set_mode(LIVE)
         self._sync_setup_controls()
         self._fill_recorded()
+        self.reopen_last_session()           # carry on with the last untitled session, if it's there
         open_ = self.settings.value("comments_open", True, type=bool)
         self.btn_comments.setChecked(open_)
         self.comments_panel.setVisible(open_)
@@ -286,6 +290,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         QtGui.QShortcut(QtGui.QKeySequence("Right"), self, activated=lambda: self.analysis_step(1))
         QtGui.QShortcut(QtGui.QKeySequence("Up"), self, activated=lambda: self.step_block(-1))
         QtGui.QShortcut(QtGui.QKeySequence("Down"), self, activated=lambda: self.step_block(1))
+        QtGui.QShortcut(QtGui.QKeySequence("Shift+Up"), self, activated=lambda: self.step_block(-1, extend=True))
+        QtGui.QShortcut(QtGui.QKeySequence("Shift+Down"), self, activated=lambda: self.step_block(1, extend=True))
 
         central = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(central)
@@ -297,6 +303,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.plot_layout.setContentsMargins(0, 0, 0, 0)
         self.plot_layout.setSpacing(2)
         self.plots, self.curves, self.strips = [], [], []
+        self.plot_units, self._readout_items, self._readout_at = [], [], None   # click/highlight readout
         self.plot_widgets, self.curve_colors, self.curve_widths = [], [], []
         self.row_widgets = []
 
@@ -426,6 +433,15 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.blocks_panel.move_requested.connect(
             lambda i, page: self.move_block(i, page) if page else self._new_page_dialog(i))
         self.blocks_panel.stim_channel_picked.connect(self.set_stim_channel)
+        self.blocks_panel.organize_picked.connect(lambda k: self.set_organize(k, self._panel_folder()))
+        self.trial_label = str(self.settings.value("trial_label", "") or "")
+        self.blocks_panel.label_box.setText(self.trial_label)
+        self.blocks_panel.label_changed.connect(self.set_trial_label)
+        self.blocks_panel.step_requested.connect(self.step_trials)
+        self.blocks_panel.step_extend_requested.connect(lambda d: self.step_trials(d, extend=True))
+        self.blocks_panel.regroup_requested.connect(self.regroup)
+        self.blocks_panel.delete_requested.connect(
+            lambda idx: self.delete_trials([p for i, p in enumerate(self._panel_paths()) if i in idx]))
         self.blocks_panel.reset_requested.connect(self._reset_pages_dialog)
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -434,6 +450,24 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.left_column = QtWidgets.QVBoxLayout()
         self.left_column.setContentsMargins(0, 0, 0, 0)
         self.left_column.setSpacing(0)
+        # Above Trials: between a real input device and the simulators' cells
+        sim_box = QtWidgets.QWidget()
+        sb = QtWidgets.QVBoxLayout(sim_box)
+        sb.setContentsMargins(8, 8, 8, 6)
+        if self.cfg.backend != "simulated":
+            self.btn_input_mode = QtWidgets.QPushButton("Switch to Simulated cells")
+            self.btn_input_mode.setToolTip(
+                "Reopen NEWT on the simulated input device, which records the Neural network and Breadboard "
+                "simulators (stop recording first). Your channel setup is remembered.")
+            self.btn_input_mode.clicked.connect(lambda: self.switch_input("simulated"))
+        else:
+            self.btn_input_mode = QtWidgets.QPushButton("Switch to live recording mode")
+            self.btn_input_mode.setToolTip(
+                "Reopen NEWT on the real input device used before Simulated cells (stop recording first), "
+                "with its channel setup")
+            self.btn_input_mode.clicked.connect(self.switch_to_live)
+        sb.addWidget(self.btn_input_mode)
+        self.left_column.addWidget(sim_box)
         self.left_column.addWidget(self.blocks_panel, 1)
         row.addLayout(self.left_column)
         row.addWidget(self.plot_area, 1)
@@ -451,10 +485,13 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.trials_page = ProtocolsPage(self)
         self.stimulus_page = StimulusPage(self, self.stim_page, self.trials_page)   # the two, as one page
         self.simple_page = SimpleStimPage(self)       # a pulse, pair or train, for teaching labs
+        self.window_saver = WindowSaver(self)         # its "save just around each stimulus"
         self.dock_stim = DockedStimulator(self, self.simple_page)    # its main controls, under Trials
         self.left_column.addWidget(self.dock_stim)
         self.dock_design = DockedDesign(self)                        # or Complex Stimulus's Run
         self.left_column.addWidget(self.dock_design)
+        self.dock_timed = DockedTimed(self)                          # or, with no stimulus, timed runs
+        self.left_column.addWidget(self.dock_timed)
         self.set_record_stim(self.settings.value("record_stim", "simple"))
         # A small stimulator floating over the Record page's plots.
         self.mini_stim = MiniStimulator(self, self.plot_area)
@@ -486,7 +523,9 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("acq", "Record", central),
             ("simple", "Simple Stimulus", self.simple_page),
             ("stim", "Complex Stimulus", self.stimulus_page),
-            ("analysis", "Analysis", self.analysis_page),
+            ("analysis", "DataPad", self.analysis_page),
+            ("singleplot", "Single Plot", self.analysis_page.single_plot),
+            ("plotcanvas", "Plot Canvas", self.analysis_page.plot_canvas),
             ("sim", "Neural network simulator", with_banner(self, self.sim_page)),
             ("board", "Breadboard simulator", with_banner(self, self.board_page)),
             ("membrane", "Membrane potential", self.membrane_page),
@@ -496,7 +535,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("syn", "Synapse", self.syn_page),
             ("sum", "Summation", self.sum_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "simple", "stim"]),
-            ("analysis", "Analysis", ["analysis"]),
+            ("analysis", "Analysis", ["analysis", "singleplot", "plotcanvas"]),
             ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
             ("lessons", "Lessons", ["membrane", "rc", "hh", "ap", "syn", "sum"]),
         ])
@@ -671,6 +710,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         if hasattr(self, "dock_stim"):
             self.dock_stim.apply_theme(mode)
             self.dock_design.apply_theme(mode)
+            self.dock_timed.apply_theme(mode)
         if hasattr(self, "trials_page"):
             self.trials_page.apply_theme(mode)
         if hasattr(self, "stimulus_page"):
@@ -763,16 +803,22 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.run_bar = bar = QtWidgets.QWidget()
         bar.setObjectName("runBar")
         bar.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
-        rl = QtWidgets.QHBoxLayout(bar)
-        rl.setContentsMargins(8, 6, 8, 6)
+        col = QtWidgets.QVBoxLayout(bar)
+        col.setContentsMargins(8, 6, 8, 6)
+        col.setSpacing(6)
+        top = QtWidgets.QHBoxLayout()              # which stimulator, right above Start/Record
+        top.setSpacing(8)
+        top.addWidget(QtWidgets.QLabel("Stimulus"))
+        rl = QtWidgets.QHBoxLayout()
         rl.setSpacing(8)
+        col.addLayout(top)
+        col.addLayout(rl)
 
         def sep():
             f = QtWidgets.QFrame()
             f.setFrameShape(QtWidgets.QFrame.Shape.VLine)
             return f
-        for w in (self.btn_run, self.btn_rec, sep(), self.lbl_rate, self.rate_box, sep(),
-                  QtWidgets.QLabel("Stimulus")):
+        for w in (self.btn_run, self.btn_rec, sep(), self.lbl_rate, self.rate_box):
             rl.addWidget(w)
         self.stim_mode_group = QtWidgets.QButtonGroup(self)
         self.stim_mode_buttons = {}
@@ -786,7 +832,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.stim_mode_group.addButton(b)
             self.stim_mode_buttons[key] = b
             seg.addWidget(b)
-        rl.addLayout(seg)
+        top.addLayout(seg)
+        top.addStretch(1)
         rl.addStretch(1)
         self.window_box.hide()                     # kept for its value; the time bar shows it
         self.stim_mode_group.buttonClicked.connect(
@@ -802,6 +849,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         if hasattr(self, "dock_stim"):
             self.dock_stim.setVisible(has and mode == "simple")
             self.dock_design.setVisible(has and mode == "complex")
+            self.dock_timed.setVisible(mode == "none")
         for b in self.stim_mode_buttons.values():
             b.setEnabled(has)
 

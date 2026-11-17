@@ -1,0 +1,496 @@
+"""A figure, as Single Plot designs it and the Plot Canvas lays it out: a plain dict (the
+spec) and the numbers it plots (a snapshot of DataPad columns), drawn with matplotlib so it
+saves as PDF/SVG with every line and label its own object.
+
+spec = {"kind": "xy" | "bar", "series": [{"x", "y", "by_group", "style", "average", "color",
+"label"}], "title", "xlabel", "ylabel", "xlim", "ylim", "xlog", "ylog", "font", "lw", "ms",
+"grid", "legend", "despine", "zero", "fit", "w_mm", "h_mm"}
+
+data = {"rows": [trial, …], "groups": [name, …], "colors": {group: "#hex"}, "cols": {name:
+[values]}, "units": {name: unit}}
+
+Labels are written plainly; a word with an underscore gets a true subscript (I_B → I with a
+subscript B), so students never see the underscore on a figure.
+"""
+from __future__ import annotations
+
+import copy
+import re
+
+import numpy as np
+
+from . import fitting
+
+PALETTE = ["#1f5fbf", "#d1495b", "#2a9d8f", "#e9a03b", "#6a4c93", "#8a8a8a", "#3d348b", "#00798c"]
+STYLES = {"markers": "Points", "line": "Line", "both": "Line and points"}
+AVERAGES = {"": "Every trial", "sem": "Mean ± SEM at each x", "sd": "Mean ± SD at each x", "mean": "Mean at each x"}
+LEGENDS = ["best", "upper left", "upper right", "lower left", "lower right", "outside", "off"]
+FITS = {"": "None", **fitting.MODELS}
+
+
+def new_spec(x: str = "", y: str = "", kind: str = "xy") -> dict:
+    return {"kind": kind, "series": [new_series(x, y)] if y else [], "title": "", "xlabel": "", "ylabel": "",
+            "xlim": [None, None], "ylim": [None, None], "xlog": False, "ylog": False,
+            "font": 9.0, "font_ticks": 0.0, "font_title": 0.0, "ticks": "out", "tick_len": 3.5,
+            "lw": 1.2, "ms": 4.0, "grid": False, "legend": "best", "despine": True,
+            "zero": False, "fit": "", "fit_degree": 1, "fit_line": 0, "fit_x": [None, None],
+            "w_mm": 80.0, "h_mm": 60.0, "points": True}
+
+
+def new_series(x: str, y: str) -> dict:
+    return {"x": x, "y": y, "by_group": True, "style": "markers", "average": "", "color": "", "label": ""}
+
+
+def clone(spec: dict) -> dict:
+    return copy.deepcopy(spec)
+
+
+_SUB = re.compile(r"(?<![\w$\\])([^\W\d_]+)_(\w+)")
+
+
+def mathify(text: str) -> str:
+    """Plain label text → matplotlib text with true subscripts: "I_B (pA)" → "$\\mathregular{I_{B}}$ (pA)"."""
+    if not text or "$" in text:
+        return text or ""
+    return _SUB.sub(lambda m: f"$\\mathregular{{{m.group(1)}_{{{m.group(2)}}}}}$", text)
+
+
+def default_label(col: str, data: dict) -> str:
+    u = (data.get("units") or {}).get(col, "")
+    return f"{col} ({u})" if u else col
+
+
+def columns_used(spec: dict) -> list[str]:
+    out = []
+    for s in spec.get("series", []):
+        out += [c for c in (s.get("x"), s.get("y")) if c]
+    return list(dict.fromkeys(out))
+
+
+def _xy(data: dict, s: dict):
+    cols = data.get("cols") or {}
+    y = np.asarray(cols.get(s["y"], []), float)
+    x = np.asarray(cols.get(s["x"], []), float) if s.get("x") else np.arange(1, len(y) + 1, dtype=float)
+    n = min(len(x), len(y))
+    return x[:n], y[:n]
+
+
+def _groups(data: dict, n: int, by_group: bool):
+    groups = list(data.get("groups") or [])[:n]
+    if not by_group or len(groups) < n:
+        return [("", np.ones(n, bool))]
+    names = list(dict.fromkeys(groups))
+    g = np.array(groups, object)
+    return [(name, g == name) for name in names]
+
+
+def _average(x, y, how: str):
+    ux = np.unique(x[np.isfinite(x)])
+    m, e = [], []
+    for v in ux:
+        yy = y[(x == v) & np.isfinite(y)]
+        m.append(yy.mean() if yy.size else np.nan)
+        if how == "sd":
+            e.append(yy.std(ddof=1) if yy.size > 1 else np.nan)
+        elif how == "sem":
+            e.append(yy.std(ddof=1) / np.sqrt(yy.size) if yy.size > 1 else np.nan)
+        else:
+            e.append(np.nan)
+    return ux, np.array(m), np.array(e)
+
+
+def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
+    """Draw the figure into a matplotlib Figure (a new axes filling it), or into `ax`."""
+    import matplotlib as mpl
+    font = float(spec.get("font", 9.0))
+    ticks_pt = float(spec.get("font_ticks") or font * 0.9)
+    title_pt = float(spec.get("font_title") or font * 1.1)
+    way = spec.get("ticks", "out")                    # tick marks outside, inside or across the axis
+    with mpl.rc_context({"font.size": font, "axes.labelsize": font, "axes.titlesize": title_pt,
+                         "xtick.labelsize": ticks_pt, "ytick.labelsize": ticks_pt,
+                         "xtick.direction": way, "ytick.direction": way,
+                         "xtick.major.size": float(spec.get("tick_len", 3.5)),
+                         "ytick.major.size": float(spec.get("tick_len", 3.5)),
+                         "legend.fontsize": font * 0.85, "font.family": "sans-serif",
+                         "mathtext.default": "regular", "svg.fonttype": "none", "pdf.fonttype": 42}):
+        if ax is None:
+            fig.clear()
+            ax = fig.add_subplot(111)
+        _draw(ax, spec, data)
+        if letter:
+            ax.text(-0.18, 1.06, letter, transform=ax.transAxes, fontsize=font * 1.4,
+                    fontweight="bold", va="bottom", ha="left")
+
+
+def _draw(ax, spec: dict, data: dict) -> None:
+    lw, ms = float(spec.get("lw", 1.2)), float(spec.get("ms", 4.0))
+    colors = data.get("colors") or {}
+    k = 0
+    series = spec.get("series", [])
+    if spec.get("kind") == "image":
+        _image(ax, data)
+        return
+    if spec.get("kind") == "bar":
+        _bars(ax, spec, data, lw, ms)
+    elif spec.get("kind") == "curves":
+        _curves(ax, spec, data, lw)
+        _marks_and_lines(ax, spec, data, lw)
+    if spec.get("fit") and spec.get("kind") != "bar":
+        got = do_fit(spec, data)
+        if got is not None:
+            _, f, x = got
+            xs = np.linspace(np.nanmin(x), np.nanmax(x), 300)
+            ax.plot(xs, f.predict(xs), "--", color="#c62828", linewidth=lw * 1.2, zorder=8,
+                    label=f"fit (R² = {f.r2:.3f})")
+    else:
+        for s in series:
+            x, y = _xy(data, s)
+            for gname, m in _groups(data, len(y), s.get("by_group", True)):
+                color = s.get("color") or colors.get(gname) or PALETTE[k % len(PALETTE)]
+                k += 1
+                label = s.get("label") or (gname if gname and len(series) == 1 else
+                                           (f"{s['y']} · {gname}" if gname else s["y"]))
+                xs, ys = x[m], y[m]
+                if s.get("average"):
+                    xs, ys, es = _average(xs, ys, s["average"])
+                    if s["average"] in ("sem", "sd"):
+                        ax.errorbar(xs, ys, yerr=es, fmt="none", ecolor=color, elinewidth=lw * 0.8,
+                                    capsize=ms * 0.6)
+                else:
+                    order = np.argsort(xs, kind="stable") if s.get("style") != "markers" else slice(None)
+                    xs, ys = xs[order], ys[order]
+                st = s.get("style", "markers")
+                ax.plot(xs, ys, linestyle="-" if st in ("line", "both") else "none",
+                        marker="o" if st in ("markers", "both") else None, markersize=ms, linewidth=lw,
+                        color=color, markeredgewidth=0, label=mathify(label))
+        if spec.get("xlog"):
+            ax.set_xscale("log")
+    if spec.get("ylog"):
+        ax.set_yscale("log")
+    if spec.get("zero"):
+        ax.axhline(0, color="0.6", linewidth=0.6, zorder=0)
+        if spec.get("kind") != "bar":
+            ax.axvline(0, color="0.6", linewidth=0.6, zorder=0)
+    first = series[0] if series else {}
+    if spec.get("kind") == "curves":
+        first = {}
+    xl = spec.get("xlabel") or data.get("xlabel") or (default_label(first.get("x"), data) if first.get("x") else
+                                ("" if spec.get("kind") == "bar" else "Trial"))
+    yl = spec.get("ylabel") or data.get("ylabel") or (default_label(first.get("y"), data) if first.get("y") else "")
+    ax.set_xlabel(mathify(xl))
+    ax.set_ylabel(mathify(yl))
+    if spec.get("title"):
+        ax.set_title(mathify(spec["title"]))
+    for lim, setter in ((spec.get("xlim"), ax.set_xlim), (spec.get("ylim"), ax.set_ylim)):
+        if lim and any(v is not None for v in lim):
+            setter(*[v if v is not None else None for v in lim])
+    if spec.get("grid"):
+        ax.grid(True, linewidth=0.4, alpha=0.5)
+    if spec.get("despine", True):
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+    for sp in ax.spines.values():
+        sp.set_linewidth(0.8)
+    leg = spec.get("legend", "best")
+    handles, labels = ax.get_legend_handles_labels()
+    if leg != "off" and len(labels) > 1:
+        if leg == "outside":
+            ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1))
+        else:
+            ax.legend(frameon=False, loc=leg)
+
+
+def _bars(ax, spec, data, lw, ms):
+    colors = data.get("colors") or {}
+    series = spec.get("series", [])
+    names = []
+    width = 0.8 / max(1, len(series))
+    for j, s in enumerate(series):
+        _, y = _xy(data, s)
+        groups = _groups(data, len(y), True)
+        names = [g or "All" for g, _ in groups]
+        for k, (g, m) in enumerate(groups):
+            yy = y[m]
+            yy = yy[np.isfinite(yy)]
+            mean = yy.mean() if yy.size else np.nan
+            how = s.get("average") or "sem"
+            err = (yy.std(ddof=1) / (np.sqrt(yy.size) if how == "sem" else 1)) if yy.size > 1 else np.nan
+            color = s.get("color") or colors.get(g) or PALETTE[k % len(PALETTE)]
+            xpos = k + (j - (len(series) - 1) / 2) * width
+            ax.bar(xpos, mean, width * 0.9, color=color, alpha=0.75, linewidth=0,
+                   label=mathify(s.get("label") or s["y"]) if k == 0 and len(series) > 1 else None)
+            if how in ("sem", "sd"):
+                ax.errorbar(xpos, mean, yerr=err, fmt="none", ecolor="0.15", elinewidth=lw * 0.8, capsize=ms * 0.8)
+            if spec.get("points", True) and yy.size:
+                jitter = (np.random.default_rng(k).random(yy.size) - 0.5) * width * 0.4
+                ax.plot(xpos + jitter, yy, "o", color="0.15", markersize=ms * 0.6, markeredgewidth=0)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels([mathify(n) for n in names])
+
+
+def _curves(ax, spec, data, lw):
+    """A whiteboard chart's lines, as they were when it was made a figure."""
+    for k, c in enumerate(data.get("curves", [])):
+        x, y = np.asarray(c["x"], float), np.asarray(c["y"], float)
+        st = "o" if c.get("points") else None
+        ax.plot(x, y, color=c.get("color") or PALETTE[k % len(PALETTE)], linewidth=lw * c.get("width", 1.0),
+                alpha=float(c.get("alpha", 1.0)), marker=st, markersize=float(spec.get("ms", 4)),
+                linestyle="none" if c.get("points") else "-", markeredgewidth=0,
+                label=mathify(c.get("name", "")) or None)
+
+
+def _marks_and_lines(ax, spec, data, lw):
+    """A chart's spike markers (each its unit's color and shape) and levels across (the threshold)."""
+    for m in data.get("marks", []):
+        sym = np.asarray(m.get("symbols", []), object)
+        x, y = np.asarray(m["x"], float), np.asarray(m["y"], float)
+        cols, alphas = m.get("colors", []), m.get("alpha", [])
+        size = float(m.get("size", 7.0)) * 0.9
+        for s_ in (set(sym.tolist()) if len(sym) else {"o"}):
+            k = np.flatnonzero(sym == s_) if len(sym) else np.arange(len(x))
+            from matplotlib.colors import to_rgba
+            rgba = [to_rgba(cols[i] if i < len(cols) else "#d9822b", alphas[i] if i < len(alphas) else 1.0)
+                    for i in k]
+            ax.scatter(x[k], y[k], s=size ** 2, c=rgba, marker=_SYMBOLS.get(s_, "o"), linewidths=0, zorder=5)
+    lo, hi = spec.get("ylim") or [None, None]
+    for ln in data.get("lines", []):
+        if (lo is not None and ln["y"] < lo) or (hi is not None and ln["y"] > hi):
+            continue                                  # off the plot: no line, and no label out in the margin
+        ax.axhline(ln["y"], color=ln.get("color") or "#c62828", linewidth=lw * 0.8,
+                   linestyle="--" if ln.get("dash") else "-", zorder=4)
+        if ln.get("label"):
+            ax.annotate(ln["label"], xy=(1, ln["y"]), xycoords=("axes fraction", "data"), ha="right",
+                        va="bottom", color=ln.get("color") or "#c62828", fontsize=float(spec.get("font", 9)) * 0.85,
+                        annotation_clip=True)
+
+
+def _image(ax, data):
+    """An image put on the Plot Canvas (kept as PNG bytes, base64)."""
+    import base64
+    import io as _io
+    from matplotlib import image as mimg
+    arr = mimg.imread(_io.BytesIO(base64.b64decode(data.get("png", ""))), format="png")
+    ax.imshow(arr, interpolation="lanczos")
+    ax.set_axis_off()
+
+
+def _decimate(x: np.ndarray, y: np.ndarray, n: int = 4000) -> tuple[np.ndarray, np.ndarray]:
+    """At most about 2n points, keeping each stretch's min and max, so spikes keep their height."""
+    if len(x) <= 2 * n:
+        return x, y
+    edges = np.linspace(0, len(x), n + 1).astype(int)
+    xs, ys = [], []
+    for a, b in zip(edges[:-1], edges[1:]):
+        seg = y[a:b]
+        ok = np.isfinite(seg)
+        if not ok.any():
+            xs += [x[a]]
+            ys += [np.nan]
+            continue
+        i, j = a + int(np.nanargmin(seg)), a + int(np.nanargmax(seg))
+        for k in sorted((i, j)):
+            xs.append(x[k])
+            ys.append(y[k])
+    return np.asarray(xs), np.asarray(ys)
+
+
+def from_chart(chart, max_points: int = 4000) -> tuple[dict, dict]:
+    """(spec, data): a whiteboard chart's first plot as a figure, looking as it does: every line
+    (each trial of a group too) in its color, opacity and width; the axes in the units shown
+    (mV, ms…), over the same range; its grid."""
+    import pyqtgraph as pg
+    plots = chart.plots()
+    if not plots:
+        raise ValueError("this chart has nothing to make a figure of")
+    pis = [p.getPlotItem() if hasattr(p, "getPlotItem") else p for p in plots]
+    keys = list(getattr(chart, "_plot_keys", []) or [])
+    spiked = (getattr(chart, "_spike_channel", ""), 0)
+    item = pis[keys.index(spiked)] if spiked in keys else pis[0]   # the channel with the spikes, else the first
+    left = item.getAxis("left")
+    bottom = next((p.getAxis("bottom") for p in reversed(pis) if (p.getAxis("bottom").labelText or "").strip()),
+                  item.getAxis("bottom"))             # stacked charts label time on the last plot only
+
+    def scale(ax) -> float:                           # the SI prefix the axis shows (×1000 for mV)
+        k = getattr(ax, "autoSIPrefixScale", 1.0) if getattr(ax, "autoSIPrefix", False) else 1.0
+        return float(k or 1.0) * float(getattr(ax, "scale", 1.0) or 1.0)
+    kx, ky = scale(bottom), scale(left)
+    curves, marks, lines = [], [], []
+    for it in item.items:
+        if isinstance(it, pg.ScatterPlotItem) and it.isVisible() and len(it.data):
+            d = it.data                                   # spike markers: each point its color and shape
+            cols = [pg.mkBrush(b).color() for b in d["brush"]]
+            marks.append({"x": [float(v) * kx for v in d["x"]], "y": [float(v) * ky for v in d["y"]],
+                          "colors": [c.name() for c in cols], "alpha": [round(c.alphaF(), 3) for c in cols],
+                          "symbols": [str(sym) for sym in d["symbol"]],
+                          "size": float(np.nanmedian(d["size"])) if len(d["size"]) else 7.0})
+            continue
+        if isinstance(it, pg.InfiniteLine) and it.isVisible() and it.angle % 180 == 0:
+            pen = it.pen                                  # a level across, as the spike threshold
+            lines.append({"y": float(it.value()) * ky, "color": pen.color().name(),
+                          "dash": pen.style() != QtCore_SolidLine(), "label": ""})
+            continue
+        if not isinstance(it, pg.PlotDataItem) or not it.isVisible():
+            continue
+        pen = it.opts.get("pen")
+        p = pg.mkPen(pen) if pen is not None else None
+        color = p.color() if p is not None else None
+        sym = it.opts.get("symbol") is not None and (p is None or p.style() == QtCore_NoPen())
+        if color is None or not color.alpha() or (p is not None and p.style() == QtCore_NoPen()):
+            brush = it.opts.get("symbolBrush")
+            color = pg.mkBrush(brush).color() if brush is not None else color
+        width = (p.widthF() or 1.0) if p is not None else 1.0
+        if hasattr(it, "_Y"):                          # many trials as one item: each its own line
+            X, Y = it.getOriginalDataset()
+            rows = [(X, row) for row in np.atleast_2d(Y)]
+        elif getattr(it, "_full", None) is not None:
+            rows = [it._full]
+        else:
+            x, y = it.getData()
+            rows = [(x, y)] if x is not None and y is not None else []
+        for x, y in rows:
+            x, y = np.asarray(x, float), np.asarray(y, float)
+            if not len(x):
+                continue
+            x, y = _decimate(x, y, max_points)
+            curves.append({"x": [float(v) for v in x * kx], "y": [float(v) for v in y * ky],
+                           "color": color.name() if color is not None else "",
+                           "alpha": round(color.alphaF(), 3) if color is not None else 1.0,
+                           "name": it.name() or "", "width": round(width / 1.5, 3), "points": bool(sym),
+                           "z": float(it.zValue())})
+    curves.sort(key=lambda c: c["z"])
+
+    def label(ax) -> str:
+        text = (ax.labelText or "").strip()
+        units = (ax.labelUnits or "").strip()
+        prefix = (getattr(ax, "labelUnitPrefix", "") or "") if units else ""
+        return f"{text} ({prefix}{units})" if units else text
+    (x0, x1), (y0, y1) = item.getViewBox().viewRange()
+    spec = new_spec(kind="curves")
+    spec["title"] = getattr(chart, "name", "") or ""
+    spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
+    spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
+        if hasattr(item, "ctrl") else False
+    spec["lw"] = 1.2
+    for ln in lines:                                      # its label, if the chart wrote one (threshold 340 mV)
+        for it in item.items:
+            if isinstance(it, pg.InfiniteLine) and abs(float(it.value()) * ky - ln["y"]) < 1e-12:
+                lab = next((c for c in it.childItems() if isinstance(c, pg.InfLineLabel)), None)
+                if lab is not None and lab.isVisible():
+                    ln["label"] = lab.toPlainText()
+    data = {"curves": curves, "marks": marks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
+            "chart": getattr(chart, "name", "")}
+    return spec, data
+
+
+def QtCore_NoPen():
+    from pyqtgraph.Qt import QtCore
+    return QtCore.Qt.PenStyle.NoPen
+
+
+def QtCore_SolidLine():
+    from pyqtgraph.Qt import QtCore
+    return QtCore.Qt.PenStyle.SolidLine
+
+
+# pyqtgraph's marker shapes as matplotlib's (t: ▼, t1: ▲ …)
+_SYMBOLS = {"o": "o", "t": "v", "t1": "^", "t2": ">", "t3": "<", "s": "s", "d": "D", "+": "+", "x": "x",
+            "star": "*", "p": "p", "h": "h", "|": "|", "_": "_"}
+
+
+def image_spec(png: bytes, w_px: int, h_px: int, width_mm: float = 80.0) -> tuple[dict, dict]:
+    import base64
+    spec = new_spec(kind="image")
+    spec["w_mm"], spec["h_mm"] = width_mm, width_mm * h_px / max(1, w_px)
+    return spec, {"png": base64.b64encode(png).decode()}
+
+
+def fit_lines(spec: dict, data: dict) -> list[tuple[str, np.ndarray, np.ndarray]]:
+    """What a fit can go through: [(name, x, y)], each line or series of the figure (each group
+    of a series split by group; a chart's every line, its averages first)."""
+    out = []
+    if spec.get("kind") == "curves":
+        curves = data.get("curves", [])
+        bold = [k for k, c in enumerate(curves) if c.get("width", 1) >= max((d.get("width", 1) for d in curves),
+                                                                          default=1)]
+        order = bold + [k for k in range(len(curves)) if k not in bold]
+        for n, k in enumerate(order):
+            c = curves[k]
+            name = c.get("name") or ("bold line" if k in bold else "line")
+            out.append((f"{name} {n + 1}", np.asarray(c["x"], float), np.asarray(c["y"], float)))
+        return out
+    for s in spec.get("series", []):
+        x, y = _xy(data, s)
+        groups = _groups(data, len(y), s.get("by_group", True))
+        if len(groups) > 1:                           # every point together first: an I–V line, say
+            xs, ys = (_average(x, y, s["average"])[:2] if s.get("average") else (x, y))
+            out.append((f"{s['y']} · all points" + (f" against {s['x']}" if s.get("x") else ""), xs, ys))
+        for gname, m in groups:
+            xs, ys = x[m], y[m]
+            if s.get("average"):
+                xs, ys, _ = _average(xs, ys, s["average"])
+            out.append((f"{s['y']}" + (f" · {gname}" if gname else "") + (f" against {s['x']}" if s.get("x") else ""),
+                        xs, ys))
+    return out
+
+
+def do_fit(spec: dict, data: dict):
+    """(name, Fit, x used) for the figure's fit settings, or None (nothing to fit; it says why
+    in a ValueError when asked through fit_report)."""
+    try:
+        return _fit_now(spec, data)
+    except ValueError:
+        return None
+
+
+def _fit_now(spec: dict, data: dict):
+    lines = fit_lines(spec, data)
+    if not spec.get("fit") or not lines:
+        return None
+    k = min(max(0, int(spec.get("fit_line", 0))), len(lines) - 1)
+    name, x, y = lines[k]
+    lo, hi = (list(spec.get("fit_x") or []) + [None, None])[:2]
+    m = np.isfinite(x) & np.isfinite(y)
+    if lo is not None:
+        m &= x >= lo
+    if hi is not None:
+        m &= x <= hi
+    if m.sum() < 3:
+        raise ValueError("Fewer than 3 points in that x range")
+    f = fitting.fit(spec["fit"], x[m], y[m], int(spec.get("fit_degree", 1)))
+    return name, f, x[m]
+
+
+def fit_report(spec: dict, data: dict) -> str:
+    """The fit's result as rich text: the equation, each parameter ± its standard error, R², n."""
+    try:
+        got = _fit_now(spec, data)
+    except ValueError as e:
+        return f"<span style='color:#c62828'>{e}</span>"
+    if got is None:
+        return "Pick a model to fit."
+    name, f, _ = got
+    rows = "".join(f"<tr><td><b>{n}</b></td><td align=right>{v:.5g}</td><td>± {e:.3g}</td></tr>"
+                   for n, v, e in f.table())
+    return (f"<b>{name}</b><br>{f.equation}<br><table cellspacing=4>{rows}</table>"
+            f"R² = {f.r2:.4f} &nbsp; n = {f.n}")
+
+
+def _fit(ax, model, x, y, color, lw):
+    ok = np.isfinite(x) & np.isfinite(y)
+    if ok.sum() < 3:
+        return
+    try:
+        f = fitting.fit(model, x[ok], y[ok], 1)
+    except Exception:
+        return
+    xs = np.linspace(np.nanmin(x[ok]), np.nanmax(x[ok]), 200)
+    ax.plot(xs, f.predict(xs), "-", color=color, linewidth=lw * 0.9, alpha=0.8,
+            label=f"fit: R² = {f.r2:.3f}")
+
+
+def save(spec: dict, data: dict, path: str, dpi: int = 300) -> None:
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(spec.get("w_mm", 80) / 25.4, spec.get("h_mm", 60) / 25.4))
+    draw(fig, spec, data)
+    fig.tight_layout()
+    fig.savefig(path, dpi=dpi, transparent=False, facecolor="white")

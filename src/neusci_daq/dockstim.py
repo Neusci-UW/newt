@@ -345,8 +345,6 @@ class DockedDesign(QtWidgets.QFrame):
         t = style.tokens(self._mode)
         running = tr.running
         busy = main.stim_out is not None and main.stim_out.busy
-        backend = getattr(main, "backend", None)
-        live = backend is not None and backend.running
         if tr.varying and tr.chk is not None:
             c = tr.chk
             what = (f"{tr.protocol.name}: {c.n_trials} stimuli" if c.ok else
@@ -359,8 +357,8 @@ class DockedDesign(QtWidgets.QFrame):
             self.progress.setMaximum(max(1, len(tr.trials)))
             self.progress.setValue(n)
             state, ok = f"Stimulus {n} of {len(tr.trials)}" + (" · paused" if tr.paused else ""), True
-        elif not live:
-            state, ok = "Press Start first.", False
+        elif main.mode != "live":
+            state, ok = "Go back to live mode to send stimuli.", False
         elif tr.varying and tr.chk is not None and not tr.chk.ok:
             state, ok = "Fix it on Complex Stimulus (edit…).", False
         elif tr.varying and not main.cfg.stim_monitor:
@@ -394,3 +392,148 @@ class DockedDesign(QtWidgets.QFrame):
         self.what.setStyleSheet(f"color: {t['muted']}")
         self.picture.apply_theme(mode)
         self.redraw()
+
+
+class DockedTimed(QtWidgets.QFrame):
+    """With the run bar's Stimulus on None, under Trials: Start acquires for a set time,
+    Repeats times, with an optional wait between (acquiring stops while it waits). With
+    Record on, each one is a trial of its own. Acquiring stops after the last."""
+
+    def __init__(self, main):
+        super().__init__()
+        self.main = main
+        self._mode = style.LIGHT
+        self.rep = 0                      # 1..n while running, 0 when not
+        self.waiting = False
+        self._until = 0.0                 # when this acquisition (or wait) ends, monotonic
+        self.setObjectName("dockStim")
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(230)
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(10, 8, 10, 10)
+        v.setSpacing(6)
+        v.addWidget(QtWidgets.QLabel("<b>Timed acquisition</b>"))
+        form = QtWidgets.QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(4)
+        st = main.settings
+        self.length = _small_spin(0, 36000, 1, "s", "How long each acquisition lasts after Start. "
+                                  "0 (until Stop): Start acquires until you press Stop")
+        self.length.setSpecialValueText("until Stop")
+        self.length.setValue(float(st.value("timed_s", 0.0)))
+        self.repeats = QtWidgets.QSpinBox(minimum=1, maximum=1000)
+        self.repeats.setKeyboardTracking(False)
+        self.repeats.setToolTip("How many acquisitions Start makes; with Record on, each is a trial of its own")
+        self.repeats.setValue(int(st.value("timed_n", 1)))
+        self.wait = _small_spin(0, 36000, 1, "s", "Time between one acquisition's end and the next one's start "
+                                "(acquiring stops while waiting). 0: straight after")
+        self.wait.setValue(float(st.value("timed_wait", 0.0)))
+        form.addRow("Acquire for", self.length)
+        form.addRow("Repeats", self.repeats)
+        form.addRow("Wait", self.wait)
+        v.addLayout(form)
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(6)
+        v.addWidget(self.progress)
+        self.status = QtWidgets.QLabel()
+        self.status.setWordWrap(True)
+        v.addWidget(self.status)
+        for key, w in (("timed_s", self.length), ("timed_n", self.repeats), ("timed_wait", self.wait)):
+            w.valueChanged.connect(lambda val, key=key: (self.main.settings.setValue(key, val), self._show()))
+        self.timer = QtCore.QTimer(self, interval=100, timeout=self._tick)
+        self._show()
+
+    @property
+    def running(self) -> bool:
+        return self.rep > 0
+
+    def begin(self) -> None:
+        """Start was pressed (acquiring has started): the first acquisition (none to time
+        with Acquire for at 0: acquiring goes on until Stop)."""
+        import time
+        if self.length.value() <= 0:
+            return
+        self.rep, self.waiting = 1, False
+        self._until = time.monotonic() + self.length.value()
+        self.timer.start()
+        self._lock(True)
+        self._show()
+
+    def halt(self) -> None:
+        """Stop, Esc, or the last one ended."""
+        if not self.running:
+            return
+        self.rep, self.waiting = 0, False
+        self.timer.stop()
+        self._lock(False)
+        self._show()
+
+    def _lock(self, on: bool) -> None:
+        for w in (self.length, self.repeats, self.wait):
+            w.setEnabled(not on)
+
+    def _tick(self) -> None:
+        import time
+        main = self.main
+        if not main.btn_run.isChecked():
+            self.halt()
+            return
+        now = time.monotonic()
+        if now < self._until:
+            self._show(now)
+            return
+        if self.waiting:                                 # the wait is over: the next one
+            self.waiting = False
+            self._until = now + self.length.value()
+            if not main.resume_acquiring(keep_trace=True):
+                self.halt()
+                return
+        elif self.rep >= self.repeats.value():           # the last one: done
+            self.halt()
+            main.btn_run.setChecked(False)
+            main.statusBar().showMessage("Timed acquisition finished", 10000)
+            return
+        else:
+            self.rep += 1
+            if self.wait.value() > 0:                    # stop acquiring until the next
+                self.waiting = True
+                self._until = now + self.wait.value()
+                main.rest_acquiring()
+                main._lock_channels(True)
+            else:                                        # straight on: a new trial, same stream
+                self._until = now + self.length.value()
+                if main.recorder.recording:
+                    main._stop_block()
+                    main._start_block()
+        self._show(now)
+
+    def _show(self, now: float | None = None) -> None:
+        import time
+        n, t, w = self.repeats.value(), self.length.value(), self.wait.value()
+        self.repeats.setEnabled(t > 0 and not self.running)
+        self.wait.setEnabled(t > 0 and n > 1 and not self.running)
+        if not self.running:
+            total = n * t + (n - 1) * w
+            self.progress.setVisible(False)
+            if t <= 0:
+                self.status.setText("Start acquires until you press Stop")
+                return
+            self.status.setText(f"Start acquires {n} × {t:g} s" + (f", {w:g} s apart" if n > 1 and w else "")
+                                + (f" ({total:g} s in all)" if n > 1 else ""))
+            return
+        now = time.monotonic() if now is None else now
+        left = max(0.0, self._until - now)
+        self.progress.setVisible(True)
+        self.progress.setMaximum(n * 100)
+        frac = 0.0 if self.waiting else 1.0 - left / max(t, 1e-9)     # of this one (none yet, waiting)
+        self.progress.setValue(int((self.rep - 1 + frac) * 100))
+        self.status.setText(f"Repeat {self.rep} of {n} · next in {left:.0f} s" if self.waiting
+                            else f"Repeat {self.rep} of {n} · {left:.0f} s left")
+
+    def apply_theme(self, mode: str) -> None:
+        self._mode = mode
+        t = style.tokens(mode)
+        self.setStyleSheet(f"QFrame#dockStim {{ background: {t['ground']}; border-top: 1px solid {t['line']}; }}"
+                           f"QPushButton {{ padding: 3px 6px; }}")
+        self.status.setStyleSheet(f"color: {t['muted']}")

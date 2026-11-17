@@ -140,6 +140,8 @@ class ChannelSetupMixin:
         self._set_curve_color(index, color)
         self.review_color_btns[index].set_color(color)
         self._recolor(self.review_blocks, {name: color})
+        if self._overlay_sel:
+            self._draw_overlay()                 # the overlaid trials match it
 
     @staticmethod
     def _layout(channels: list[Channel]) -> list[tuple]:

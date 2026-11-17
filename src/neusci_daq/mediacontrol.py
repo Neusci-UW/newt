@@ -211,6 +211,14 @@ class MediaMixin:
                 tip="A USB audio input: an audio interface, a SpikerBox-style device or a microphone. "
                     "Its inputs are channels in1, in2, …")
 
+    def switch_to_live(self) -> bool:
+        """From Simulated cells back to the real input device used before (the NI DAQ if none)."""
+        try:
+            last = json.loads(self.settings.value("live_input", "") or "{}")
+        except ValueError:
+            last = {}
+        return self.switch_input(last.get("backend", "nidaqmx"), last.get("device", ""))
+
     def switch_input(self, backend: str, device: str = "") -> bool:
         """Use another input device: a fresh window on it (the channels change with it)."""
         import copy
@@ -222,6 +230,8 @@ class MediaMixin:
         if not self._leave_live():
             return False
         cfg = copy.deepcopy(self.cfg)
+        if backend == "simulated" and cfg.backend != "simulated":   # the real device, for Switch to live recording
+            self.settings.setValue("live_input", json.dumps({"backend": cfg.backend, "device": cfg.audio_device}))
         if cfg.backend != "audio":                     # remembered, to come back to
             self.settings.setValue("daq_setup", json.dumps({
                 "channels": [dataclasses.asdict(c) for c in cfg.channels], "sample_rate": cfg.sample_rate}))

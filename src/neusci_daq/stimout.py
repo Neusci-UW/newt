@@ -27,6 +27,7 @@ class StimOutput:
         self.cfg = cfg
         self.error: BaseException | None = None
         self.fired = 0                          # stimuli started (for tests and the status bar)
+        self.started_at: float | None = None    # when the last one's output clock started (monotonic)
         self.last_channels: list[str] = []      # the outputs the last stimulus went to
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -47,6 +48,7 @@ class StimOutput:
             raise ValueError("One row of the waveform per output.")
         self.error = None
         self._stop.clear()
+        self.started_at = None      # time.monotonic() when the output's clock started (set as it does)
         self.fired += 1
         self.last_channels = channels
         self._thread = threading.Thread(target=self._run, args=(wave, float(rate), channels),
@@ -100,6 +102,7 @@ class NidaqmxOutput(StimOutput):
                                             samps_per_chan=n)
             task.write(wave, auto_start=False)          # 2-D: one row per channel, in order
             task.start()
+            self.started_at = time.monotonic()          # (a long protocol takes a while to write)
             deadline = time.monotonic() + n / rate + 5.0
             while not task.is_task_done():
                 if self._stop.is_set():
@@ -138,8 +141,26 @@ class SimulatedOutput(StimOutput):
         if wave.ndim == 2:          # the network takes one stimulus: the configured output's
             row = channels.index(self.cfg.stim_output) if self.cfg.stim_output in channels else 0
             wave = wave[row]
-        self.backend.inject(self.cfg.stim_monitor, wave, rate)
-        end = time.monotonic() + len(wave) / rate
+        # Played against this output's own clock, as hardware would: each stretch that isn't
+        # 0 V goes in when its time comes (a whole protocol is mostly 0 V between stimuli, and
+        # acquiring may stop in between), from where the clock is if it's already started.
+        start = self.started_at = time.monotonic()
+        on = np.flatnonzero(np.abs(wave) > 0)
+        gap = max(1, int(0.05 * rate))
+        cuts = np.flatnonzero(np.diff(on) > gap) if len(on) else np.empty(0, int)
+        firsts = np.r_[on[:1], on[cuts + 1]] if len(on) else []
+        lasts = np.r_[on[cuts], on[-1:]] + 1 if len(on) else []
+        for a, b in zip(firsts, lasts):
+            while time.monotonic() < start + a / rate:
+                if self._stop.is_set():
+                    break
+                time.sleep(0.002)
+            if self._stop.is_set():
+                self.backend.inject(self.cfg.stim_monitor, np.zeros(1), rate)
+                return
+            if self.backend.running:              # whole, as hardware plays it (a moment late at most)
+                self.backend.inject(self.cfg.stim_monitor, wave[a:b], rate)
+        end = start + len(wave) / rate
         while time.monotonic() < end:
             if self._stop.is_set():
                 self.backend.inject(self.cfg.stim_monitor, np.zeros(1), rate)

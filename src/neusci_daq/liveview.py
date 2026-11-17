@@ -14,14 +14,31 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 from . import session
 from . import style
 from . import dsp
-from .channels import CalcStrip, ChannelRowWidget, ChannelStrip, ColorButton
+from .channels import CalcStrip, ChannelRow, ChannelRowWidget, ChannelStrip, format_y
 from .config import Channel, valid_inputs
 from .plotzoom import MultiAxis, TraceCurve, light_grid
 from .stim import Stimulus
 from .ringbuffer import RingBuffer
-from . import colors
+from . import colors, theme
 from .mainparts import LIVE, REVIEW, WINDOW_MAX, _SI_BASE, _TraceViewBox
 from .units import whole
+
+KEEP_S = 60.0          # seconds the live display always holds, however far you zoom in
+# Live: a bar where each acquisition starts (Start, or carrying on after a wait) and one
+# where each trial starts (a recorded block, or a saved stimulus window)
+BOUND_COLORS = {"acq": "#1fa39a", "trial": "#e8a33d"}
+GAP_SHOWN_MIN_S, GAP_SHOWN_FRAC = 0.2, 0.05   # a wait is shown this wide at most: 0.2 s, or 5% of Window
+STIM_TAIL_S = 0.5      # acquiring this long after the last stimulus ends, then stopping (Stimulus not None)
+
+
+def _time(s: float) -> str:
+    """A time for the readout: 33.512 s, or 120 ms / 450 µs under a second."""
+    a = abs(s)
+    if a >= 1 or a == 0:
+        return f"{s:.4g} s" if a < 1000 else f"{s:.0f} s"
+    if a >= 1e-3:
+        return f"{s * 1e3:.4g} ms"
+    return f"{s * 1e6:.4g} µs"
 
 
 class LiveMixin:
@@ -34,6 +51,10 @@ class LiveMixin:
                 w.setParent(None)
                 w.deleteLater()
         self.plots, self.curves, self.strips = [], [], []
+        self.review_strips = []
+        self._joins = []                         # (they went with the plots)
+        self.plot_units = []
+        self._readout_items, self._readout_at = [], None
         self.plot_widgets, self.curve_colors, self.curve_widths = [], [], []
         self.row_widgets = []
         self._unfitted.clear()
@@ -49,8 +70,11 @@ class LiveMixin:
         vb.set_box_tool(getattr(self, "btn_box_zoom", None) is not None and self.btn_box_zoom.isChecked())
         vb.on_fit = lambda vb=vb: self._fit_view(vb)
         vb.on_zoomed = lambda vb: self._zoom_stack.append(vb)
+        vb.on_cursor = lambda x: self._readout(x, None, True)      # click: the value there
+        vb.on_select = self._readout                               # drag: the average over it
         p = pw.getPlotItem()
         self.plot_widgets.append(pw)
+        self.plot_units.append(unit)
         if unit in _SI_BASE:
             p.setLabel("left", name, units=unit)       # pyqtgraph adds m, µ, k as needed
         else:
@@ -157,6 +181,8 @@ class LiveMixin:
     def _curves_updated(self) -> None:
         """After new data went into the curves."""
         self._fit_new_plots()
+        if self._readout_at is not None:         # the cursor's or highlight's values, for the new data
+            self._update_readout()
         for k, mirror in self._mirrors:
             if k < len(self.curves):
                 mirror.setData(*self.curves[k].getOriginalDataset())
@@ -289,7 +315,7 @@ class LiveMixin:
         for k, (c, f, problem) in enumerate(self._calcs):
             color = colors.PALETTE[(len(names) + k) % len(colors.PALETTE)]
             pw = self._new_plot(c.name, c.unit, color, 1.0)
-            if live:
+            if live or getattr(self, "review_strips", None):     # lined up under the channels' strips
                 row = ChannelRowWidget(CalcStrip(c.name, c.formula, problem,
                                                  lambda *_, k=k: self.analysis_channel_dialog(k)), pw)
                 row.set_compact(self._compact_strips)
@@ -319,11 +345,22 @@ class LiveMixin:
     def _recompute_calc_ring(self) -> None:
         """Calculated values for the live data held, e.g. after the calculations change."""
         ring = getattr(self, "ring", None)
-        self.calc_ring = RingBuffer(len(self._calcs), ring.cap if ring is not None else 2)
+        self.calc_ring = RingBuffer(len(self._calcs), ring.cap if ring is not None else 2, np.float32)
         if self._calcs:
             self._chain.reset()
         if self._calcs and ring is not None and len(ring):
-            self.calc_ring.append(self.ring.t, self._calc_chunk(self.ring.y))
+            # stretch by stretch: the history breaks (a NaN sample) where nothing was acquired,
+            # and filters start again after each break rather than carry the NaN on
+            t, y = self.ring.t, self.ring.y
+            breaks = np.flatnonzero(np.isnan(y).all(axis=0)) if y.size else np.empty(0, int)
+            start = 0
+            for b in list(breaks) + [len(t)]:
+                if b > start:
+                    self.calc_ring.append(t[start:b], self._calc_chunk(y[:, start:b]))
+                if b < len(t):
+                    self.calc_ring.append(t[b:b + 1], np.full((len(self._calcs), 1), np.nan))
+                    self._chain.reset()
+                start = b + 1
 
     def _draw_calc_live(self) -> None:
         if not self._calcs or self.calc_ring is None or not len(self.calc_ring):
@@ -372,10 +409,17 @@ class LiveMixin:
             return False
         if k is None:
             calcs.append(dlg.calculation())
+            # a new analysis channel gets a channel row of its own, not a right axis in the
+            # channel overlay (its tool's menu can put it in)
+            self.overlay_out.add(calcs[-1].name)
         elif dlg.deleted:
             del calcs[k]
         else:
-            calcs[k] = dlg.calculation()
+            old, calcs[k] = calcs[k], dlg.calculation()
+            if old.name in self.overlay_out and calcs[k].name != old.name:   # renamed: still on its own
+                self.overlay_out.discard(old.name)
+                self.overlay_out.add(calcs[k].name)
+        self.settings.setValue("overlay_excluded", "\n".join(sorted(self.overlay_out)))
         self.set_calculations(calcs)
         return True
 
@@ -398,6 +442,8 @@ class LiveMixin:
                 p.getAxis("bottom").setStyle(showValues=False)
             self.plots[-1].setLabel("bottom", "time", units="s")
             self.plots[0].sigXRangeChanged.connect(self._xrange_changed)
+            if getattr(self, "mode", LIVE) == LIVE:
+                self._redraw_bounds()             # the acquisition and trial bars
             self._axis_group.set_plots(self.plots)     # every plot's area starts at the same x
             if getattr(self, "mode", LIVE) == LIVE and not self.btn_run.isChecked():
                 self._show_stopped()     # new plots (e.g. after a rate change) start at Window
@@ -446,38 +492,70 @@ class LiveMixin:
             self.trials_page.sync()
 
     def _build_review_plots(self, names: list[str], units: list[str], colors: list[str]):
+        """Plots for a saved session: one per recorded channel, each with its strip as
+        in live mode (color, line thickness, Max/Min and scale); what a saved trial
+        can't change (on/off, name, input) is locked."""
         self._review_names = list(names)
-        """Plots for a saved session: one per recorded channel, with only a color bar."""
         self._clear_plot_area()
         self.review_color_btns = []
+        self.review_strips = []
+        widths = {r.ch.name: r.ch.width for r in self.rows}
         for i, (name, unit, color) in enumerate(zip(names, units, colors)):
-            row_w = QtWidgets.QWidget()
-            h = QtWidgets.QHBoxLayout(row_w)
-            h.setContentsMargins(0, 0, 0, 0)
-            btn = ColorButton(color, lambda c, i=i: self.set_review_color(i, c),
-                              tooltip="Change this channel's color in every trial of this session")
-            self.review_color_btns.append(btn)
-            h.addWidget(btn, 0)
-            widths = {r.ch.name: r.ch.width for r in self.rows}
-            pw = self._new_plot(name, unit, color, widths.get(name, 1.0))
+            ch = Channel(physical=name, name=name, units=unit, color=color, width=widths.get(name, 1.0))
+            strip = ChannelStrip(ChannelRow(ch), [name], False, lambda *_: None, lambda *_: None,
+                                 lambda st, c, i=i: self.set_review_color(i, c), can_remove=False,
+                                 on_width=lambda st, w, i=i: self.set_review_width(i, w))
+            strip.set_locked(True)
+            strip.input.setToolTip("Recorded as this channel (can't be changed in a saved trial)")
+            strip.color_btn.setToolTip("Change this channel's color in every trial of this session")
+            self.review_color_btns.append(strip.color_btn)
+            self.review_strips.append(strip)
+            pw = self._new_plot(name, unit, color, ch.width)
             pw.setToolTip("Double-click to add a comment")
             pw.scene().sigMouseClicked.connect(lambda ev, pw=pw: self._plot_clicked(pw, ev))
-            h.addWidget(pw, 1)
+            p = pw.getPlotItem()
+            strip.attach_plot(p.vb, unit, unit in _SI_BASE, self._autoscale_view,
+                              on_hold=lambda p=p: self._unfitted.discard(p))
+            row_w = ChannelRowWidget(strip, pw)
+            row_w.set_compact(self._compact_strips)
+            self.row_widgets.append(row_w)
             self.plot_layout.addWidget(row_w, 1)
         fs = (self.review_block or {}).get("sample_rate", self.cfg.sample_rate)
         self._add_calc_rows(list(names), fs, live=False)
         self._finish_plots()
+        self._fit_strips()
+
+    def set_review_width(self, index: int, width: float) -> None:
+        """Line thickness of a channel while browsing trials (display only). The live
+        channel of the same name takes it too, so it's the same either way."""
+        from .channels import LINE_MAX, LINE_MIN
+        width = min(LINE_MAX, max(LINE_MIN, float(width)))
+        if index < len(self.curve_widths):
+            self.curve_widths[index] = width
+            self._set_curve_color(index, self.curve_colors[index])
+        name = self._review_names[index] if index < len(self._review_names) else None
+        for r in self.rows:
+            if r.ch.name == name:
+                r.ch.width = width
+        if getattr(self, "_overlay_sel", None):
+            self._draw_overlay()                 # the overlaid trials match it
 
     def _alloc_buffers(self, trim: bool = True):
-        """Size the live display's ring buffer to Window. trim=False (stopped) only
+        """Size the live display's ring buffer to Window (but never under KEEP_S). trim=False (stopped) only
         grows it, so zooming in and back out doesn't lose the trace on screen."""
         n = len(self.cfg.channels)
-        self.cap = max(2, int(self.window_box.value() * self.cfg.sample_rate))
+        # At least the last minute, whatever Window shows, so zooming in and back out
+        # always finds it (float32: about 10 MB per channel at 20 kHz).
+        self.cap = max(2, int(max(self.window_box.value(), KEEP_S) * self.cfg.sample_rate))
         ring = getattr(self, "ring", None)
         if ring is None or ring.n != n:
-            self.ring = RingBuffer(n, self.cap)
-        else:
-            ring.resize(self.cap if trim else max(self.cap, len(ring)))
+            self.ring = RingBuffer(n, self.cap, np.float32)   # half the memory; plenty for 16-bit DAQ readings
+        elif trim:
+            ring.resize(self.cap)
+        elif self.cap > ring.cap:
+            # Grow only, and in doubling steps (up to the longest Window): each resize copies
+            # the whole buffer, and doing that on every wheel tick froze zooming while streaming.
+            ring.resize(min(max(self.cap, 2 * ring.cap), int(WINDOW_MAX * self.cfg.sample_rate)))
         cr = getattr(self, "calc_ring", None)
         if cr is not None and cr.cap != self.ring.cap:
             cr.resize(self.ring.cap)             # the calculated values keep pace
@@ -637,12 +715,27 @@ class LiveMixin:
             self._update_scroll_range()
             self._scrolled(self.scroll.value())
         elif self.btn_run.isChecked():
-            self._alloc_buffers()
+            # Grow only: zooming in and back out while acquiring keeps what's already
+            # held (the refresh draws just the last Window of it). Once zooming has
+            # settled, the buffer shrinks back to the Window, so a long Window left
+            # behind doesn't keep its memory.
+            self._alloc_buffers(trim=False)
+            timer = getattr(self, "_trim_timer", None)
+            if timer is None:
+                timer = self._trim_timer = QtCore.QTimer(self, singleShot=True, interval=2000)
+                timer.timeout.connect(self._trim_after_zoom)
+            timer.start()
         else:
             # Stopped: keep the last trace (Start clears it anyway) so zooming in
             # and back out doesn't lose it, and redraw since no refresh will.
             self._alloc_buffers(trim=False)
             self._show_stopped()
+
+    def _trim_after_zoom(self) -> None:
+        """Zooming stopped a while ago while acquiring: give back what's beyond Window (or KEEP_S)."""
+        if self.mode == LIVE and self.btn_run.isChecked() and self.ring is not None \
+                and self.ring.cap > self.cap:
+            self._alloc_buffers(trim=True)
 
     def _show_stopped(self, start: float | None = None) -> None:
         """Acquisition stopped: show Window seconds of the last trace from `start`
@@ -671,47 +764,268 @@ class LiveMixin:
         for p in self.plots:
             p.vb.clamp_to_data = not on
         if on:
-            # Drop chunks left over from the previous run; their timestamps
-            # restart from 0, so drawing them would join old and new data.
-            while True:
-                try:
-                    self.display_q.get_nowait()
-                except queue.Empty:
-                    break
-            try:
-                self.backend.start()
-            except Exception as e:
-                self.btn_run.setChecked(False)
-                QtWidgets.QMessageBox.critical(self, "Could not start acquisition", repr(e))
+            self._stim_sent, self._stim_idle_since = False, None
+            windows = self._simple_windows()
+            tp = getattr(self, "trials_page", None)
+            protocol = (self.settings.value("record_stim", "simple") == "complex" and tp is not None
+                        and tp.varying and self.stim_out is not None)   # it saves each stimulus's window
+            if not self.resume_acquiring(record=getattr(self, "_start_records", True)
+                                         and not windows and not protocol, keep_trace=True, new_run=True):
                 return
-            self.ring.clear()
-            self._fit_window()
-            self._alloc_buffers()                # back to Window's size, if stopped zooming grew it
-            self._recompute_calc_ring()          # empty, filters reset
-            self._clear_markers()
-            self._axis_zero = 0.0
-            self._block_on_screen = False
+            if windows:                          # each stimulus saved as a trial of its own
+                sp = self.simple_page
+                self.window_saver.start(sp.before.value(), sp.after.value())
             self.btn_run.setText("Stop")
             self.timer.start()
-            if self.btn_rec.isChecked():         # Record is on: Start records too
-                self._start_block()
-            self._stim_on_start()
+            if windows and not getattr(self, "_starting_for_stim", False):
+                # record its Before (the baseline) first
+                QtCore.QTimer.singleShot(int(self.simple_page.before.value()) + 100,
+                                         lambda: self.btn_run.isChecked() and self._stim_on_start())
+            else:
+                self._stim_on_start()
         else:
             if self.recorder.recording:          # ends the block; Record stays on for the next Start
                 self._stop_block()
             self.stop_stimulus()
+            if hasattr(self, "window_saver"):
+                self.window_saver.stop()         # the last stimulus's trial, with what arrived
             self.backend.stop()
+            self._end_stretch()
+            self._stopped_at = time.monotonic()  # for the shaded band where the next run joins on
             self.timer.stop()
             self.btn_run.setText("Start")
             self._show_rec_armed()
             self._fit_window()
 
+    def resume_acquiring(self, record: bool = True, keep_trace: bool = False, new_run: bool = False) -> bool:
+        """Start the stream afresh (Start, or a run carrying on after a wait) and, with
+        Record on (and `record`), a new block. The display starts empty at 0 s, or with
+        keep_trace (the same run) carries on from the end of what's shown: the run's
+        stretches end to end, a dashed line where each joins, the waits left out."""
+        # Drop chunks left over from the previous run; their timestamps
+        # restart from 0, so drawing them would join old and new data.
+        while True:
+            try:
+                self.display_q.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self.backend.start()
+        except Exception as e:
+            self.btn_run.setChecked(False)
+            QtWidgets.QMessageBox.critical(self, "Could not start acquisition", repr(e))
+            return False
+        rate = float(self.backend.actual_rate)
+        same = (len(self.ring) and self.ring.n == len(self.cfg.channels)
+                and abs(rate - getattr(self, "_ring_rate", rate)) < 1e-6 * rate)
+        if keep_trace and same:
+            # the new stream's clock starts at 0 again: put it after what's shown, past a short
+            # shaded band for the time nothing was acquired (the real time is its label)
+            self._end_stretch()                  # (samples that came in after it stopped, too)
+            gap0 = float(self.ring.t[-1]) + 1.0 / max(rate, 1e-9)
+            off = time.monotonic() - getattr(self, "_stopped_at", time.monotonic())
+            shown = min(off, max(GAP_SHOWN_MIN_S, GAP_SHOWN_FRAC * self.window_box.value()))
+            self.ring.append(np.array([gap0]), np.full((self.ring.n, 1), np.nan))   # the trace breaks
+            if self.calc_ring is not None and len(self.calc_ring):
+                self.calc_ring.append(np.array([gap0]), np.full((self.calc_ring.n, 1), np.nan))
+            join = gap0 + shown + 1.0 / max(rate, 1e-9)
+            self._t_shift = join
+            self._stretch_start = join
+            if new_run:
+                self._saved_until = None
+            if self.mode == LIVE:
+                self._fit_window()
+            if off > 0.05:
+                self._mark_boundary(gap0, "gap", (join, off))
+            if new_run:
+                self._mark_boundary(join, "acq")
+            if record and self.btn_rec.isChecked():
+                self._start_block()
+            return True
+        self._t_shift, self._ring_rate = 0.0, rate
+        self._stretch_start, self._saved_until = 0.0, None
+        self._clear_bounds()
+        self._mark_boundary(0.0, "acq")
+        self.ring.clear()
+        if self.mode == LIVE:                # (looking at a block: Back to Live redraws)
+            self._fit_window()
+            self._alloc_buffers()            # back to Window's size, if stopped zooming grew it
+            self._clear_markers()
+        self._recompute_calc_ring()          # empty, filters reset
+        self._axis_zero = 0.0
+        self._block_on_screen = False
+        if record and self.btn_rec.isChecked():   # Record is on: this stretch is a block of its own
+            self._start_block()
+        return True
+
+    def ensure_acquiring(self, record: bool = True) -> bool:
+        """Start, for a stimulus sent from a stimulus page: acquiring (and recording, with
+        Record on) as Start does, but without Start's own run-bar stimulus, since the page
+        sends its own. True if acquiring."""
+        if self.backend.running:
+            return True
+        if self.mode != LIVE:
+            return False
+        self._starting_for_stim, self._start_records = True, record
+        try:
+            self.btn_run.setChecked(True)
+        finally:
+            self._starting_for_stim, self._start_records = False, True
+        return self.backend.running
+
+    def _mark_boundary(self, t: float, kind: str, gap: tuple | None = None) -> None:
+        """A bar on the live history at stream time `t` (as the history holds it): where a
+        run ("acq") or a trial ("trial") starts; or ("gap", with gap = (end, seconds)) a
+        shaded band where nothing was acquired. Kept with the history, so it's drawn again
+        after Back to Live, and goes when that part of the history does."""
+        self._bounds.append((float(t), kind, gap))
+        if self.mode == LIVE and self.plots:
+            self._draw_boundary(float(t), kind, gap)
+
+    def mark_trial_start(self, stream_t: float, length_s: float | None = None) -> None:
+        """A trial (a saved stimulus window) starts at this time of the current stream and
+        lasts length_s. What was acquired since the last saved part, before it, wasn't saved."""
+        start = stream_t + self._t_shift
+        self._mark_boundary(start, "trial")
+        if length_s is not None:
+            self._mark_unsaved(start)
+            self._saved_until = start + length_s
+
+    def _mark_unsaved(self, upto: float) -> None:
+        """A run saving just its trials' windows: shade what was acquired since the last
+        saved part (or this stretch's start) up to `upto` as not saved."""
+        frm = max(getattr(self, "_stretch_start", 0.0), getattr(self, "_saved_until", None) or -np.inf)
+        if upto - frm > 0.005:
+            last = self._bounds[-1] if self._bounds else None
+            if last is not None and last[1] == "unsaved" and abs(last[2][0] - frm) < 1e-6:
+                self._bounds[-1] = (last[0], "unsaved", (upto, upto - last[0]))   # one band, longer
+                if self.mode == LIVE and self.plots:
+                    self._redraw_bounds()
+            else:
+                self._mark_boundary(frm, "unsaved", (upto, upto - frm))
+            if getattr(self, "_saved_until", None) is not None:
+                self._saved_until = max(self._saved_until, upto)    # accounted for up to here
+
+    def _end_stretch(self) -> None:
+        """Acquiring stops (a wait, or Stop): its tail after the last saved trial wasn't saved."""
+        if getattr(self, "_saved_until", None) is not None and len(self.ring):
+            self._mark_unsaved(float(self.ring.t[-1]))
+
+    def _draw_boundary(self, t: float, kind: str, gap: tuple | None = None) -> None:
+        items = []
+        if kind in ("gap", "unsaved"):
+            end, secs = gap
+            if kind == "gap":
+                text = f"not acquiring · {secs:.3g} s" if secs < 60 else f"not acquiring · {secs / 60:.3g} min"
+                brush, tip = pg.mkBrush(128, 128, 128, 60), f"Nothing was acquired here: {text.split('· ')[1]} (shown shorter)"
+            else:                                # acquired, but outside every saved trial
+                text = "not saved"
+                brush, tip = pg.mkBrush(232, 163, 61, 28), ("Acquired but not saved: only each trial's "
+                                                            "window is saved (this is warm-up or tail)")
+            for k, p in enumerate(self.plots):
+                band = pg.LinearRegionItem((t - self._axis_zero, end - self._axis_zero), movable=False,
+                                           brush=brush, pen=pg.mkPen(None))
+                band.setToolTip(tip)
+                band.setZValue(-10)
+                p.addItem(band)
+                items.append(band)
+                if k == 0:                       # its label, on the top plot
+                    lab = pg.InfiniteLine(t - self._axis_zero, angle=90, pen=pg.mkPen(None),
+                                          label=text, labelOpts={"position": 0.97, "color": "#8a8f98",
+                                                                 "anchors": [(0, 0), (0, 0)]})
+                    p.addItem(lab)
+                    items.append(lab)
+            self._joins.append((t, kind, items, end))
+            return
+        pen = pg.mkPen(BOUND_COLORS[kind], width=3)      # thick: easy to see at a glance
+        tip = "A run starts here" if kind == "acq" else "A trial starts here"
+        for p in self.plots:
+            ln = pg.InfiniteLine(t - self._axis_zero, angle=90, pen=pen)
+            ln.setToolTip(tip)
+            ln.setZValue(5)
+            p.addItem(ln)
+            items.append(ln)
+        self._joins.append((t, kind, items, None))
+
+    def _remove_bound_items(self) -> None:
+        for _, _, items, _ in self._joins:
+            for it in items:
+                vb = it.getViewBox()
+                if vb is not None:
+                    vb.removeItem(it)
+        self._joins = []
+
+    def _redraw_bounds(self) -> None:
+        """The bars and bands again, on new live plots."""
+        self._remove_bound_items()
+        ring = getattr(self, "ring", None)                # (none yet while the window is built)
+        t0 = float(ring.t[0]) if ring is not None and len(ring) else None
+        self._bounds = [b for b in self._bounds if t0 is None or b[0] >= t0 - 1e-9]
+        for t, kind, gap in sorted(self._bounds, key=lambda b: b[0]):   # (oldest first)
+            self._draw_boundary(t, kind, gap)
+
+    def _clear_bounds(self) -> None:
+        self._remove_bound_items()
+        self._bounds = []
+
+    def _mark_block_start(self) -> None:
+        """A recorded block's first sample arrived: a trial bar there (once a block)."""
+        rec = self.recorder
+        if rec.recording and rec.block_started and getattr(self, "_trial_marked", None) != rec.path:
+            self._trial_marked = rec.path
+            self._mark_boundary(rec.block_start + self._t_shift, "trial")
+
+    def rest_acquiring(self) -> None:
+        """Stop the stream for a while without leaving Start on: a protocol waiting a
+        long time between stimuli. Ends the block being recorded (Record stays on, so
+        resume_acquiring starts the next)."""
+        if self.recorder.recording:
+            self._stop_block()
+        self.backend.stop()
+        self._end_stretch()
+        self._stopped_at = time.monotonic()      # for the shaded band where it carries on
+
+    def _simple_windows(self, record_on: bool = False) -> bool:
+        """Simple Stimulus is on the run bar, set to save just around each stimulus, and
+        Record is on (or `record_on`: whatever Record is)."""
+        sp = getattr(self, "simple_page", None)
+        return (sp is not None and sp.windows.isChecked() and hasattr(self, "window_saver")
+                and self.settings.value("record_stim", "simple") == "simple"
+                and (record_on or self.btn_rec.isChecked()))
+
+    def _stop_when_stimuli_end(self) -> None:
+        """With the run bar's Stimulus on Simple or Complex, acquiring stops by itself
+        STIM_TAIL_S after the last stimulus: once one has been sent and nothing is
+        sending or still to come (no protocol, no Repeat)."""
+        if (not self.btn_run.isChecked() or not getattr(self, "_stim_sent", False)
+                or self.settings.value("record_stim", "simple") == "none"):
+            self._stim_idle_since = None
+            return
+        tp, sp = getattr(self, "trials_page", None), getattr(self, "simple_page", None)
+        ws = getattr(self, "window_saver", None)
+        if ((self.stim_out is not None and self.stim_out.busy) or self.repeating
+                or (tp is not None and tp.running) or (sp is not None and sp.repeating)
+                or (ws is not None and ws.pending)):          # (its After isn't recorded yet)
+            self._stim_idle_since = None
+            return
+        now = time.monotonic()
+        if getattr(self, "_stim_idle_since", None) is None:
+            self._stim_idle_since = now
+        elif now - self._stim_idle_since >= STIM_TAIL_S:
+            self.btn_run.setChecked(False)
+            self.statusBar().showMessage("Stimulus finished: stopped acquiring", 10000)
+
     def _stim_on_start(self) -> None:
         """Start runs the stimulus picked on the run bar: None sends nothing, Simple
         repeats Simple Stimulus's stimulus, Complex runs Complex Stimulus's trials."""
-        if self.stim_out is None:
+        if getattr(self, "_starting_for_stim", False):
             return
         mode = self.settings.value("record_stim", "simple")
+        if mode == "none" and hasattr(self, "dock_timed"):
+            self.dock_timed.begin()             # Acquire for, Repeats, Wait
+            return
+        if self.stim_out is None:
+            return
         if mode == "simple" and hasattr(self, "simple_page"):
             self.simple_page.start_repeat()
         elif mode == "complex" and hasattr(self, "dock_design"):
@@ -720,7 +1034,16 @@ class LiveMixin:
     def _toggle_rec(self, on: bool):
         """Record is an on/off switch. Turned on while acquiring, a block starts now;
         on while stopped, Start begins recording straight away. Off ends the block."""
-        if on and self.btn_run.isChecked() and not self.recorder.recording:
+        tp = getattr(self, "trials_page", None)
+        if tp is not None and tp.running:    # a protocol saves each stimulus's window instead
+            tp.set_saving_windows(on)
+        elif self._simple_windows(record_on=True):   # so does Simple Stimulus, if it's set to
+            if on and self.btn_run.isChecked() and self.backend.running:
+                sp = self.simple_page
+                self.window_saver.start(sp.before.value(), sp.after.value())
+            elif not on:
+                self.window_saver.stop()
+        elif on and self.btn_run.isChecked() and not self.recorder.recording:
             self._start_block()
         elif not on and self.recorder.recording:
             self._stop_block()
@@ -748,17 +1071,20 @@ class LiveMixin:
             self.session_dir = self._unsaved_dir() / datetime.now().strftime("session_%Y%m%d_%H%M%S")
             self.session_dir.mkdir(parents=True, exist_ok=True)
             self.session_saved = False
+            self.settings.setValue("last_live_session", str(self.session_dir))   # reopened on next start
         return self.session_dir
 
     def _start_block(self) -> None:
         self._ensure_session_dir()
         path = session.next_block_path(self.session_dir)
         path = self.recorder.start(path)
+        if self.trial_label:
+            self.recorder.set_attr("label", self.trial_label)
         if self.camera_panel.start_block(path, time.monotonic()):
             self.statusBar().showMessage(f"Recording {path.name} with video", 5000)
         # Time 0 = this block's first sample. Until it arrives, use the latest
         # sample; _refresh corrects it (by at most one read) once it's known.
-        self._set_axis_zero(self.recorder.last_t)
+        self._set_axis_zero(float(self.ring.t[-1]) if len(self.ring) else self._t_shift)
         self._block_on_screen = True
         self.blocks.append(path)
         self._update_title()
@@ -770,10 +1096,19 @@ class LiveMixin:
         self._block_changed(started=True)
 
     def _stop_block(self) -> None:
+        empty = self.recorder.samples_written == 0
         self.recorder.stop()
+        path = self.recorder.path
+        if empty and path is not None and path in self.blocks:   # no samples came: not a trial
+            self.blocks.remove(path)
+            try:
+                path.unlink()
+            except OSError:
+                pass
         self.camera_panel.stop_block()
         self._lock_channels(False)
-        self.statusBar().showMessage(f"Saved {self.recorder.path.name}", 10000)
+        if not empty:
+            self.statusBar().showMessage(f"Saved {self.recorder.path.name}", 10000)
         self._set_comment_box(False)
         self.analysis_page.source_changed()          # a new block to analyze
         self._block_changed(started=False)
@@ -809,6 +1144,74 @@ class LiveMixin:
         self.rate_box.setEnabled(not locked)
         self.wiring_menu.setEnabled(not locked and self.mode == LIVE)
 
+    # -- click and highlight (as in LabChart) ------------------------------------------------
+    def _readout(self, x0: float, x1: float | None, finished: bool) -> None:
+        """A click at x0 (x1 None): a cursor on every channel, each showing its value there.
+        A drag from x0 to x1: that stretch highlighted on every channel, each showing its
+        average over it. Esc clears it."""
+        if x1 is not None and abs(x1 - x0) < 1e-9:
+            return
+        self._readout_at = (x0, x1)
+        if not self._readout_items or (x1 is None) != isinstance(self._readout_items[0][0], pg.InfiniteLine):
+            self.clear_readout()
+            self._readout_at = (x0, x1)
+            for p in self.plots:
+                if x1 is None:
+                    mark = pg.InfiniteLine(x0, angle=90, pen=pg.mkPen("#6e7681", width=1.5))
+                else:
+                    mark = pg.LinearRegionItem((x0, x1), movable=False, brush=pg.mkBrush(70, 130, 220, 45),
+                                               pen=pg.mkPen(70, 130, 220, 140))
+                mark.setZValue(4)
+                p.addItem(mark, ignoreBounds=True)
+                label = pg.TextItem(anchor=(1, 0), color="#5c6370", fill=pg.mkBrush(255, 255, 255, 200))
+                label.setParentItem(p.vb)          # fixed in the plot's top-right corner
+                p.vb.sigResized.connect(lambda vb=p.vb, lab=label: lab.setPos(vb.width() - 4, 2))
+                label.setPos(p.vb.width() - 4, 2)
+                self._readout_items.append((mark, label, p))
+        for mark, label, p in self._readout_items:
+            if x1 is None:
+                mark.setValue(x0)
+            else:
+                mark.setRegion((x0, x1))
+        self._update_readout()
+
+    def _update_readout(self) -> None:
+        if self._readout_at is None:
+            return
+        x0, x1 = self._readout_at
+        for k, (mark, label, p) in enumerate(self._readout_items):
+            curve = self.curves[k] if k < len(self.curves) else None
+            unit = self.plot_units[k] if k < len(self.plot_units) else ""
+            x, y = curve.getOriginalDataset() if curve is not None else (None, None)
+            fmt = lambda v: format_y(float(v), unit, unit in _SI_BASE)
+            text = ""
+            if x is not None and len(x):
+                if x1 is None:
+                    i = int(np.clip(np.searchsorted(x, x0), 1, len(x) - 1))
+                    i = i - 1 if abs(x[i - 1] - x0) <= abs(x[i] - x0) else i
+                    if abs(x[i] - x0) <= 2 * (x[-1] - x[0]) / max(1, len(x) - 1) and np.isfinite(y[i]):
+                        text = f"{_time(x[i])} · {fmt(y[i])}"
+                else:
+                    sel = (x >= x0) & (x <= x1)
+                    if sel.any() and np.isfinite(y[sel]).any():
+                        text = (f"{_time(x0)}–{_time(x1)} · Δ {_time(x1 - x0)} · "
+                                f"mean {fmt(np.nanmean(y[sel]))}")
+            label.setText(text or ("no data here" if x1 is None else "no data in the highlight"))
+
+    def clear_readout(self) -> bool:
+        """Take the cursor or highlight away. True if there was one."""
+        had = bool(self._readout_items)
+        for mark, label, p in self._readout_items:
+            try:
+                p.removeItem(mark)
+                label.setParentItem(None)
+                if label.scene() is not None:
+                    label.scene().removeItem(label)
+            except RuntimeError:                  # its plot already went
+                pass
+        self._readout_items, self._readout_at = [], None
+        return had
+
     def _redraw_live(self):
         if self.buf_t.size and self.buf_y.shape[0] == len(self.cfg.channels) <= len(self.curves):
             for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
@@ -824,6 +1227,12 @@ class LiveMixin:
                 for ln in lines:
                     ln.setValue(ln.value() + delta)
                 self.markers[i] = (t + delta, lines)
+            for t, _, items, end in self._joins:  # (bars keep history times: only redrawn)
+                for it in items:
+                    if isinstance(it, pg.LinearRegionItem):
+                        it.setRegion((t - zero, end - zero))
+                    else:
+                        it.setValue(t - zero)
         self._axis_zero = zero
 
     def _refresh(self):
@@ -837,15 +1246,21 @@ class LiveMixin:
             self.set_repeat(False)
             self._stim_message(f"Stimulus failed: {err}", error=True)
         self._update_stim_chip()
+        self._stop_when_stimuli_end()
         ts, ys = [], []
         while True:
             try:
                 c = self.display_q.get_nowait()
             except queue.Empty:
                 break
-            ts.append(c.t)
+            ts.append(c.t + self._t_shift)     # (shifted: a run's stretches end to end)
             ys.append(c.data)
-        if not ts or self.mode != LIVE:
+        if not ts:
+            return
+        if self.mode != LIVE:                    # looking at a trial: keep the history going
+            for t, y in zip(ts, ys):
+                self.ring.append(t, y)
+            self._mark_block_start()
             return
         for t, y in zip(ts, ys):                 # only the new samples are written
             self.ring.append(t, y)
@@ -855,24 +1270,31 @@ class LiveMixin:
             if self._monitor is not None and self._monitor.running:
                 self._feed_monitor(y, calc)
         if self.recorder.recording and self.recorder.block_started:
-            self._set_axis_zero(self.recorder.block_start)   # exact block start
+            self._set_axis_zero(self.recorder.block_start + self._t_shift)   # exact block start
+            self._mark_block_start()
         if not self.plots:
             return
-        x = self.buf_t - self._axis_zero
+        buf_t, buf_y = self.buf_t, self.buf_y
+        t_min = buf_t[0] - self._axis_zero
+        win = self.window_box.value()
+        i0 = int(np.searchsorted(buf_t, buf_t[-1] - win - 1.0 / self.cfg.sample_rate))
+        buf_t, buf_y = buf_t[i0:], buf_y[:, i0:]   # only the Window: the buffer may hold more
+        x = buf_t - self._axis_zero
         t_end = x[-1]
         # the range first, so each TraceCurve groups its samples once for this frame (the views'
         # own limits are off while acquiring: they would lag a frame behind the newest data, and
-        # fight a held voltage range). Always a whole Window wide, with the newest sample at the
-        # right edge from the start: until the Window fills, the left of it is empty.
-        win = self.window_box.value()
-        start = t_end - win
+        # fight a held voltage range). Always a whole Window wide, never starting before 0 s:
+        # until the Window fills, the trace grows from the left; after that the newest
+        # sample stays at the right edge.
+        start = max(t_end - win, min(0.0, t_min))
         self.plots[0].setXRange(start, start + win, padding=0)
-        for ch, curve, y in zip(self.cfg.channels, self.curves, self.buf_y):
+        for ch, curve, y in zip(self.cfg.channels, self.curves, buf_y):
             curve.setData(x, ch.to_units(y))
         self._draw_calc_live()
         self._curves_updated()
-        # drop markers that scrolled off
-        t_min = x[0]
+        if self._joins and self._joins[0][0] < float(self.ring.t[0]) - 1e-9:
+            self._redraw_bounds()                # bars whose part of the history is gone
+        # drop markers that scrolled off (out of the buffer)
         while self.markers and self.markers[0][0] < t_min:
             _, lines = self.markers.pop(0)
             for p, ln in zip(self.plots, lines):

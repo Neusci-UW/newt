@@ -724,7 +724,7 @@ def test_averages_show_and_export_sd_and_sem(app, win, tmp_path):
     assert bands(R(raw)) == []
 
 
-# ---------------------------------------------------------------- measuring (the Measure tool, DataPad table, Scatter)
+# ---------------------------------------------------------------- measuring (the DataPad)
 def test_measurements():
     from neusci_daq import datapad as D
     fs = 10000.0
@@ -743,125 +743,119 @@ def test_measurements():
     assert np.isnan(D.measure("spikes", t, y, fs)) and np.isnan(D.measure("mean", t, np.full(len(t), np.nan), fs))
 
 
-def test_measure_windows_repeat_into_columns_in_time_or_phase():
-    from neusci_daq import measure as M
-    w = M.Window(1, "W1", M.TIME, 0.1, 0.05, "max", "Ch1", repeat=0.2)
-    assert w.starts(0.6) == pytest.approx([0.1, 0.3, 0.5])         # one more wouldn't fit
-    cols = M.columns([w, M.Window(2, "P1", M.PHASE, 0, 90, "tmax", "Ch1")], 0.6)
-    assert len(cols) == 4 and cols[-1].end == 90
-    assert cols[0].label(lambda c: "V") == "W1 @ 100 ms Ch1 Maximum (V)"
-    assert cols[-1].label(lambda c: "V") == "P1 Ch1 Phase of maximum (°)"
-    assert M.unit_label("slope", "mV", M.PHASE) == "mV/°" and M.unit_label("spikes", "", M.PHASE) == "per cycle"
-    R = np.vstack([np.sin(np.radians(np.arange(360))) * k for k in (1, 2)])   # two cycles, peaks at 90°
-    peak = M.Column(M.Window(3, "P2", M.PHASE, 0, 180, "tmax", "Ch1"), 0, 180)
-    assert M.measure_cycles(peak, R) == pytest.approx(90, abs=1)
-    mean = M.Column(M.Window(4, "P3", M.PHASE, 0, 360, "max", "Ch1"), 0, 360)
-    assert M.measure_cycles(mean, R) == pytest.approx(1.5, abs=0.01)  # the mean of the cycles' maxima
-    assert M.fmt((1.0, 0.5, 3), "V") == "1 V ± 500 mV" and M.fmt(0.0374, "V") == "37.4 mV"
-    assert M.next_name([w], M.TIME) == "W2" and M.next_name([], M.PHASE) == "P1"
+class _FakeSource:
+    """Three trials of a Complex Stimulus: A 0–0.1 s, B 0.1–0.4 s (a train of 3 pulses),
+    C 0.4–0.5 s; Vm steps up by (trial + 1) × 5 mV in B. Spikes in unit 0 and unit 1."""
+
+    def trials(self):
+        return [0, 1, 2]
+
+    def trace(self, i, ch):
+        fs = 1000.0
+        t = np.arange(500) / fs
+        return -65 + np.where((t >= 0.1) & (t < 0.4), (i + 1) * 5.0, 0.0), fs
+
+    def unit(self, ch):
+        return "mV"
+
+    def segments(self, i):
+        return [("A", 0.0, 0.1, {"kind": "base", "level": 0.0}),
+                ("B", 0.1, 0.4, {"kind": "pulse", "level": 1e-10 * (i + 1), "count": 3, "interval": 100.0}),
+                ("C", 0.4, 0.5, {"kind": "base", "level": 0.0})]
+
+    def spikes(self, i, units=None):
+        t, u = np.array([0.15, 0.2, 0.25, 0.45]), np.array([0, 1, 0, 0])
+        keep = np.ones(len(t), bool) if units in (None, [-1]) else np.isin(u, units)
+        return t[keep]
+
+    def spike_channel(self):
+        return "Vm"
+
+    def group(self, i):
+        return "Run 1", i + 1
+
+    def stim_units(self):
+        return "pA", 1e12
+
+    def duration(self, i):
+        return 0.5
 
 
-def test_the_measure_tool_makes_a_window_and_a_datapad_table(app, win, tmp_path):
-    from neusci_daq import datapad as D, measure as M
-    ap, raw = two_stimulus_charts(app, win)
-    canvas = ap.canvas
-    traces = C(raw, "Response")
-    canvas.set_tool("measure", "time")
-    assert traces.plots()[0].getPlotItem().vb.on_drag_select is not None   # the tool drags on charts against time
-    assert canvas.first("DataPad table") is None
-    ap.measure._dragged(traces, 0, 0.05, 0.15, True)
-    pump(app, 0.2)
-    table = canvas.first("DataPad table")
-    assert table is not None and len(ap.measure.windows) == 1         # the first window brings a table
-    w = ap.measure.windows[0]
-    assert w.name == "W1" and w.unit == M.TIME and w.start == pytest.approx(0.05) and w.width == pytest.approx(0.1)
-    assert any(isinstance(i, M_region()) for i in traces.plots()[0].getPlotItem().items)
-    chosen = raw.chosen_or_none()
-    assert len(table.rows) == len(chosen) and len(table.cols) == 1
-    i = chosen[0]
-    y = ap.trace(i, w.channel)
-    fs = ap.blocks[i]["sample_rate"]
-    t = np.arange(len(y)) / fs
-    sl = D.window(t, 0.05, 0.15)
-    assert table.rows[0]["values"][0] == pytest.approx(D.measure("max", t[sl], y[sl], fs))
-    table.rows_from.setCurrentIndex(table.rows_from.findData("spread"))
-    pump(app, 0.1)
-    assert len(table.rows) == len(ap.shown) and isinstance(table.rows[0]["values"][0], tuple)
-    table.rows_from.setCurrentIndex(table.rows_from.findData("average"))
-    pump(app, 0.1)
-    assert len(table.rows) == len(ap.shown) and np.isfinite(table.rows[0]["values"][0])
-    ap.measure.update(w.id, repeat=0.2)                               # a column each time it repeats
-    pump(app, 0.1)
-    assert len(table.cols) > 1
-    out = table.export(tmp_path / "pad.csv")
-    head = out.read_text().splitlines()[0]
-    assert "W1" in head and head.startswith("Group")
-    ap.measure.remove(w.id)
-    pump(app, 0.1)
-    assert not table.cols and table.empty_note.isVisibleTo(table)
+def test_datapad_columns_rows_and_formulas():
+    from neusci_daq import padmodel as P
+    pad = P.Pad()
+    pad.columns = [P.Column("Vrest", channel="Vm", sel=P.Selection.seg("A")),
+                   P.Column("V", channel="Vm", sel=P.Selection("B", "B", "last", 50)),
+                   P.Column("I_B", kind="level", sel=P.Selection.seg("B")),
+                   P.Column("dV", kind="formula", expr="V - Vrest"),
+                   P.Column("R", kind="formula", expr="dV / I_B * 1000"),
+                   P.Column("bad", kind="formula", expr="dV / nothing")]
+    tab = pad.compute(_FakeSource())
+    assert tab.values["V"] == pytest.approx([-60, -55, -50]) and tab.units["V"] == "mV"
+    assert tab.values["I_B"] == pytest.approx([100, 200, 300]) and tab.units["I_B"] == "pA"
+    assert tab.values["R"] == pytest.approx([50, 50, 50])
+    assert "nothing" in tab.errors["bad"] and np.isnan(tab.values["bad"]).all()
+    pad.rows_mode = "segment"                        # a row for each segment of each trial
+    assert [r.label for r in pad.rows(_FakeSource())] == ["A", "B", "C"] * 3
+    pad.rows_mode, pad.rows_seg = "pulse", "B"       # each pulse of B's train
+    rows = pad.rows(_FakeSource())
+    assert [r.label for r in rows[:3]] == ["B·1", "B·2", "B·3"] and rows[1].t0 == pytest.approx(0.2)
+    pad.rows_mode, pad.manual = "manual", [{"trial": 1, "t0": 0.1, "t1": 0.2}]
+    assert pad.rows(_FakeSource()) == [P.Row(1, 0.1, 0.2, "1")]
 
 
-def M_region():
-    from neusci_daq.measurecharts import _Region
-    return _Region
+def test_datapad_spike_columns_follow_the_units():
+    from neusci_daq import padmodel as P
+    pad = P.Pad()
+    pad.columns = [P.Column("n", key="spikes", sel=P.Selection.seg("B")),
+                   P.Column("n0", key="spikes", sel=P.Selection.seg("B"), units=[0]),
+                   P.Column("n1", key="spikes", over="row", units=[1])]
+    tab = pad.compute(_FakeSource())
+    assert tab.values["n"] == pytest.approx([3, 3, 3])     # 0.45 s is in C, not B
+    assert tab.values["n0"] == pytest.approx([2, 2, 2]) and tab.values["n1"] == pytest.approx([1, 1, 1])
+
+    class NoSpikes(_FakeSource):
+        def spikes(self, i, units=None):
+            return None
+    pad2 = P.Pad()
+    pad2.columns = [P.Column("n", key="spikes", sel=P.Selection.seg("B"))]
+    assert "No spikes found" in pad2.compute(NoSpikes()).errors["n"]
 
 
-def test_a_window_on_a_spike_chart_counts_spikes(app, win):
+def test_the_fx_bar_reads_recipes_back():
+    from neusci_daq import padmodel as P
+    c = P.Column("V", channel="Vm", sel=P.Selection.seg("B"))
+    for text in ("max(Vm, B-D, first 20 ms)", "slope(Vm, 100-200 ms)", "mean(Vm, row)", "mean(Vm, B, +5 to +25 ms)",
+                 "level(B)", "= dV / I_B", "spikes(B)", "rate(row, unit 2)", "spikes(B, all units)"):
+        got = P.parse_recipe(text, c, ["Vm", "Stim"])
+        assert P.parse_recipe(got.recipe(), c, ["Vm", "Stim"]).to_dict() == got.to_dict(), text
+    assert P.parse_recipe("rate(row, unit 2)", c, ["Vm"]).units == [1]
+    named = P.parse_recipe("max(window=B-D, channel=Vm, part=first 20 ms)", c, ["Vm"])
+    assert named.recipe() == "max(Vm, B-D, first 20 ms)"             # by name or by place: the same
+    assert P.parse_recipe("mean(Vm, window=B)", c, ["Vm"]).recipe() == "mean(Vm, B)"
+    assert P.parse_recipe("spikes(window=B, units=2)", c, ["Vm"]).units == [1]
+    assert P.parse_recipe("mean(dV)", c, ["Vm"]).kind == "formula"   # a column's mean, not a measurement
+    for bad in ("mean(window=B, Vm)", "mean(Vm, B, chan=Vm)", "mean(Vm, B, channel=Vm)"):
+        with pytest.raises(ValueError):
+            P.parse_recipe(bad, c, ["Vm"])
+    assert P.parse_recipe("= dV / I_B", c, ["Vm"]).kind == "formula"
+    with pytest.raises(ValueError, match="No channel"):
+        P.parse_recipe("mean(Xx, B)", c, ["Vm"])
+    with pytest.raises(ValueError):
+        P.parse_recipe("mean(Vm, Q?)", c, ["Vm"])
+
+
+def test_datapad_spike_column_counts_what_the_sorter_found(app, win):
+    from neusci_daq import padmodel as P
     ap, raw = two_stimulus_charts(app, win)
     ev = raw.find()
-    raster = C(raw, "Raster")
-    ap.canvas.set_tool("measure", "time")
-    ap.measure._dragged(raster, 0, 0.0, 10.0, True)
+    pv = ap.pad_view
+    pv.pad.columns = [P.Column("n", key="spikes", over="row")]
+    pv.column_edited()
     pump(app, 0.2)
-    w = ap.measure.windows[0]
-    assert w.key == "spikes"
-    table = ap.canvas.first("DataPad table")
-    total = sum(r["values"][0] for r in table.rows)
-    assert total == (np.isin(ev.block, raw.chosen_or_none())).sum()
-
-
-def test_phase_windows_measure_every_cycle_and_scatter_plots_the_columns(app, win):
-    from neusci_daq import measure as M
-    ap, _ = _sine_session(app, win)
-    canvas = ap.canvas
-    cycles = ap.chart("Response by cycle")
-    canvas.set_tool("measure", "time")
-    assert cycles.plot.getPlotItem().vb.on_drag_select is None        # Time doesn't measure in phase
-    canvas.set_tool("measure", "phase")
-    assert cycles.plot.getPlotItem().vb.on_drag_select is not None
-    ap.measure._dragged(cycles, 0, 0, 180, True)
-    ap.measure._dragged(cycles, 0, 180, 360, True)
-    pump(app, 0.2)
-    first, second = ap.measure.windows
-    assert first.unit == second.unit == M.PHASE and (first.name, second.name) == ("P1", "P2") and first.key == "mean"
-    table = canvas.first("DataPad table")
-    assert table.rows and all(np.isfinite(v) for v in table.rows[0]["values"])
-    scatter = canvas.add("Scatter")
-    pump(app, 0.2)
-    labels = [c.label(ap.unit_of) for c in table.cols]
-    scatter.x_box.setCurrentIndex(scatter.x_box.findData(labels[0]))
-    scatter.y_box.setCurrentIndex(scatter.y_box.findData(labels[1]))
-    scatter.fit_model.setCurrentIndex(scatter.fit_model.findData("poly"))
-    pump(app, 0.2)
-    assert "against" in scatter.plot.getPlotItem().titleLabel.text
-    assert "R²" in scatter.fit_note.text() or "fit" in scatter.fit_note.text().lower() or len(table.rows) < 2
-
-
-def test_a_window_dragged_on_its_chart_moves(app, win):
-    ap, raw = two_stimulus_charts(app, win)
-    traces = C(raw, "Response")
-    ap.measure.add("time", 0.1, 0.1, ap.raw.channel.currentText(), "mean")
-    pump(app, 0.1)
-    region = next(i for i in traces.plots()[0].getPlotItem().items if isinstance(i, M_region()))
-    region.setRegion((0.3, 0.45))
-    region._moved()
-    w = ap.measure.windows[0]
-    assert w.start == pytest.approx(0.3) and w.width == pytest.approx(0.15)
-
-
-
-
-
+    shown = list(raw.shown_units())
+    for r, row in zip(pv.tab.values["n"], pv.tab.rows):
+        assert r == ((ev.block == row.trial) & np.isin(ev.unit, shown)).sum()
 
 
 def test_fitting_models():
@@ -2213,8 +2207,9 @@ def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):
     ev = raw.events
     raw.set_unit_color(0, "#123456")
     raw.unit_opacity[0] = 0.5
-    ap.measure.add("time", 0.1, 0.2, "Ch2", "spikes")
-    n = len(ap.measure.windows)
+    from neusci_daq import padmodel as P
+    ap.pad_view.pad.columns.append(P.Column("n", key="spikes", over="row"))
+    n = len(ap.pad_view.pad.columns)
     assert ap.has_unsaved_analysis()
     asked = []
     win._ask_unsaved_analysis = lambda: asked.append(1) or "cancel"
@@ -2233,7 +2228,7 @@ def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):
     assert a2.raw.events is not None and len(a2.raw.events.t) == len(ev.t)
     assert a2.raw.events.t == pytest.approx(ev.t) and a2.raw.threshold.text() == "6 SD"
     assert a2.raw.color_of(0) == "#123456" and a2.raw.opacity_of(0) == 0.5
-    assert len(a2.measure.windows) == n and a2.measure.windows[-1].key == "spikes"
+    assert len(a2.pad_view.pad.columns) == n and a2.pad_view.pad.columns[-1].key == "spikes"
     assert not a2.has_unsaved_analysis()
     assert sorted(p.name for p in session.list_blocks(folder)) == before
     w2.close()

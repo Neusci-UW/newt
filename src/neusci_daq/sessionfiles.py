@@ -247,9 +247,22 @@ class SessionFilesMixin:
             (self.session_dir, self.blocks, self.session_saved, self._exported_n,
              self._live_comments_dirty, self._recolor_policy) = state
             self._live_comments_dirty = self._live_comments_dirty or self.session_saved
-        self._build_live_plots()
+            self.blocks = session.list_blocks(self.session_dir)   # with any saved while looking
+        self._build_live_plots()                  # (the live history, kept all along, is drawn again)
         self._set_mode(LIVE)
         self._fit_window()
+        wanted = self._window_wanted              # live's own Window (trials open fitted to theirs)
+        if wanted is not None:
+            self._fitting_window = True
+            self.window_box.setValue(min(wanted, self.window_box.maximum()))
+            self._fitting_window = False
+            if wanted <= self.window_box.maximum():
+                self._window_wanted = None
+            self._sync_time_bar()
+        self._redraw_bounds()                     # where its acquisitions and trials start
+        if not self.btn_run.isChecked():
+            self._redraw_live()                   # the history's traces (no refresh is coming)
+            self._show_stopped()                  # up to the last sample
         self.status.setText("")
         self._fill_recorded()
         self.analysis_page.source_changed()
@@ -285,6 +298,18 @@ class SessionFilesMixin:
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Could not save", repr(e))
         return False
+
+    def session_block_added(self, path: Path) -> None:
+        """A block was saved to the live session (e.g. a protocol's stimulus window):
+        list it, also while its blocks are being looked at."""
+        self.blocks.append(path)
+        if self.mode == REVIEW and self._live_state is not None and self.review_dir == self.session_dir:
+            self.review_blocks.append(path)
+            try:
+                self.block_combo.addItem(f"{path.stem}  ({self.store.info(path)['duration_s']:.1f} s)")
+            except Exception:
+                self.block_combo.addItem(f"{path.stem}  (unreadable)")
+        self._update_title()
 
     def open_session_dialog(self):
         if not self._leave_live():
@@ -377,11 +402,40 @@ class SessionFilesMixin:
     # ======================================================================
     # File menu: actions (no dialogs, so they can be tested directly)
     # ======================================================================
+    def reopen_last_session(self) -> bool:
+        """On start: carry on with the untitled live session NEWT was last recording into (its
+        trials listed, new ones added to it), if its folder is still there and its channels
+        still fit this setup. True if it was reopened."""
+        last = str(self.settings.value("last_live_session", "") or "")
+        if not last:
+            return False
+        path = Path(last)
+        try:
+            unsaved = path.resolve().parent == self._unsaved_dir().resolve()
+        except OSError:
+            return False
+        blocks = session.list_blocks(path) if path.is_dir() else []
+        if not unsaved or not blocks:
+            return False
+        problems, _ = session.append_check(path, self.cfg)
+        if problems:
+            self.statusBar().showMessage(f"Started a new session: the last one ({path.name}) was recorded with "
+                                         f"other channels. Open it with File › Open.", 15000)
+            return False
+        self.session_dir, self.blocks, self.session_saved = path, blocks, False
+        self._update_title()
+        self._fill_recorded()
+        self.analysis_page.source_changed()
+        self.statusBar().showMessage(f"Reopened your last session ({len(blocks)} trial"
+                                     f"{'' if len(blocks) == 1 else 's'}); File › New starts a fresh one", 15000)
+        return True
+
     def new_session(self) -> bool:
         """Start a blank, untitled session. Asks first if the current one is unsaved."""
         if not self._leave_live():
             return False
         self.back_to_live()
+        self.settings.setValue("last_live_session", "")     # a fresh one next start too, until recorded
         self.statusBar().showMessage("New session. Press Record to start; use Save to name it.", 10000)
         return True
 
@@ -578,15 +632,16 @@ class SessionFilesMixin:
         self.statusBar().showMessage(f"Saved to {path}", 10000)
         return path
 
-    def open_session(self, path: str | Path, remember: bool = True):
-        """Review a saved session."""
+    def open_session(self, path: str | Path, remember: bool = True, keep_acquiring: bool = False):
+        """Review a saved session. keep_acquiring: this live session's own blocks, looked
+        at while acquiring (and stimulating) carries on underneath."""
         self._live_state = None
         self._overlay_sel = []
         path = Path(path)
         blocks = session.list_blocks(path)
         if not blocks:
             raise session.SessionError(f"{path} has no block_NNN.h5 files, so it isn't a session.")
-        if self.btn_run.isChecked():
+        if self.btn_run.isChecked() and not keep_acquiring:
             self.btn_run.setChecked(False)
         self._flush_review_mat()
         self._review_source = None

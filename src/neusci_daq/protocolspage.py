@@ -22,9 +22,13 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from . import stim as stimmod
 from . import style, theme
 from . import protocols as T
+from . import recorder, session
 from .plotzoom import AxisGroup, light_curve, plot_widget
 
 ROW_GAP = 8          # px between the parts of a settings row (box, button, label)
+REST_MIN_S = 3.0     # a wait this long or longer between stimuli: stop acquiring during it
+FULL_MAX_SAMPLES = 20_000_000   # a whole protocol sent as one output, up to this many samples per output
+WAKE_SETTLE_S = 0.1  # acquiring again this long before the earliest sample a trial keeps
 B_COLORS = ("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#D55E00", "#0072B2", "#F0E442", "#999999")
 
 
@@ -242,6 +246,10 @@ class ProtocolsPage(QtWidgets.QWidget):
         self.trials: list[T.Trial] = []
         self.results: dict[int, T.Result] = {}
         self.running = False
+        self.resting, self._block_trials = False, []   # not acquiring during a long wait; trials in this block
+        self._full, self._out_on, self._sched, self._tw = True, False, {}, []   # the whole protocol as one output
+        self._windows, self._sent = False, {}            # saving each stimulus's window; what each trial sent
+        self._blocks_timer = QtCore.QTimer(self, singleShot=True, interval=500, timeout=self._blocks_saved)
         self.paused = False
         self.next_i = 0
         self._next_fire = 0.0
@@ -900,30 +908,51 @@ class ProtocolsPage(QtWidgets.QWidget):
         if problem:
             self.show_message(problem, error=True)
             return False
-        if not main.backend.running:                     # start acquiring for the protocol
-            main.btn_run.setChecked(True)
+        # With Record on, each stimulus's window (Before to After) is saved as a block of
+        # its own, and nothing in between: no block of the whole run.
+        self._windows = main.btn_rec.isChecked()
+        if not main.backend.running:                     # start acquiring for it
+            main.ensure_acquiring(record=not self._windows)
             if not main.backend.running:
                 self.show_message("Couldn't start acquiring.", error=True)
                 return False
         main.set_repeat(False)
         p = self.protocol
         self.trials = T.sequence(p, c.a_vals, c.b_vals)
-        rate = main.backend.actual_rate if main.backend.hardware_timed else cfg.sample_rate
-        chans = list(cfg.channels)
-        mon_row = next(i for i, ch in enumerate(chans) if ch.physical == cfg.stim_monitor)
-        to_units = lambda raw: np.vstack([ch.to_units(raw[i]) for i, ch in enumerate(chans)])
-        keep = max(10.0, 3 * (p.gap_s + c.longest_s + p.after_ms / 1000.0) + 2)
-        self.capture = T.Capture(rate, mon_row, to_units, keep, read_s=cfg.chunk_size / max(rate, 1e-9))
+        # Every trial's waveform, made now: the whole protocol goes to the output as one
+        # hardware-timed waveform (each trial at its exact time), not trial by trial.
+        try:
+            self._tw = [T.make_trial(main.stimulus, p, tr.a, tr.b, cfg.stim_rate, main.stimulus2,
+                                     (cfg.stim_output, main.second_output)) for tr in self.trials]
+        except ValueError as e:
+            self.show_message(f"Can't make the stimuli: {e}", error=True)
+            return False
+        longest = max((t.wave.shape[-1] for t in self._tw), default=0) / cfg.stim_rate
+        if longest > p.gap_s:
+            self.show_message(f"Every ({p.gap_s:g} s) is shorter than a stimulus ({longest:.3g} s): "
+                              "make Every longer.", error=True)
+            return False
+        total = (len(self._tw) - 1) * p.gap_s * cfg.stim_rate + (self._tw[-1].wave.shape[-1] if self._tw else 0)
+        self._full = total <= FULL_MAX_SAMPLES
+        if not self._full:
+            self.show_message(f"The whole protocol would be {total / 1e6:.0f} million samples per output: "
+                              "sending it stimulus by stimulus instead.")
+        self._out_on, self._sched = False, {}
+        if self._windows and main.recorder.recording:   # a block from before: end it here
+            main._stop_block()
+        self._sent = {}
+        self._new_capture(p, c)
         self._q = main.backend.subscribe()
         self._run = {"protocol": p, "stimulus": main.stimulus, "shape": self._shapes(),
                      "stimulus2": main.stimulus2, "outs": (cfg.stim_output, main.second_output),
-                     "a_vals": c.a_vals, "b_vals": c.b_vals, "channels": [ch.name for ch in chans],
-                     "units": [ch.units for ch in chans], "out_rate": cfg.stim_rate,
+                     "a_vals": c.a_vals, "b_vals": c.b_vals, "channels": [ch.name for ch in cfg.channels],
+                     "units": [ch.units for ch in cfg.channels], "out_rate": cfg.stim_rate,
                      "block": main.recorder.path.name if main.recorder.recording and main.recorder.path else ""}
         self.results = {}
         self.hidden = set()
         self.picked = None
         self.running, self.paused, self.next_i = True, False, 0
+        self.resting, self._block_trials = False, []
         self._next_fire = time.monotonic() + 0.2
         main._lock_channels(True)
         self.btn_pause.blockSignals(True)
@@ -940,11 +969,110 @@ class ProtocolsPage(QtWidgets.QWidget):
         main._update_stim_chip()
         return True
 
+    def _new_capture(self, p: T.Protocol, c) -> None:
+        """Somewhere to collect the stream for lining stimuli up: at the start, and
+        after a rest (the stream's clock starts again from 0)."""
+        main, cfg = self.main, self.main.cfg
+        rate = main.backend.actual_rate if main.backend.hardware_timed else cfg.sample_rate
+        chans = list(cfg.channels)
+        mon_row = next(i for i, ch in enumerate(chans) if ch.physical == cfg.stim_monitor)
+        to_units = lambda raw: np.vstack([ch.to_units(raw[i]) for i, ch in enumerate(chans)])
+        keep = max(10.0, 3 * (min(p.gap_s, REST_MIN_S) + c.longest_s + (p.before_ms + p.after_ms) / 1000.0) + 2)
+        self.capture = T.Capture(rate, mon_row, to_units, keep, read_s=cfg.chunk_size / max(rate, 1e-9))
+
+    def _start_output(self, first: int) -> bool:
+        """Send trials first.. to the end as one waveform, each `Every` after the one before,
+        timed by the output's own clock. Trial `first` starts now."""
+        p, main = self._run["protocol"], self.main
+        rate = self._run["out_rate"]
+        waves = self._tw[first:]
+        step = int(round(p.gap_s * rate))
+        n = step * (len(waves) - 1) + waves[-1].wave.shape[-1]
+        chans = waves[0].channels
+        full = np.zeros((len(chans), n)) if len(chans) > 1 else np.zeros(n)
+        for j, t in enumerate(waves):
+            full[..., j * step:j * step + t.wave.shape[-1]] = t.wave
+        if not main.send_wave(full, f"{p.name}: stimuli {first + 1}–{len(self.trials)}, every {p.gap_s:g} s",
+                              None, channels=chans):
+            self.stop_protocol(f"Stopped at stimulus {first + 1}")
+            return False
+        # each trial's time comes from when the output's clock really starts (writing a long
+        # protocol to the device takes a moment): set once it reports it
+        self._sched, self._sched_from = {}, (first, step / rate, len(waves))
+        self._next_fire = float("inf")
+        self._out_on = True
+        return True
+
+    def _mark_trial(self, i: int) -> None:
+        """Trial i is playing (the whole protocol was sent at once): note it to be lined up
+        on the recorded stimulus, and log it as sending it would."""
+        p, main = self._run["protocol"], self.main
+        tr, t = self.trials[i], self._tw[i]
+        label = f"Stimulus {tr.n}/{len(self.trials)}: " + T.describe(p, self._run["shape"], tr.a, tr.b)
+        # its time is known exactly (the output's clock): if this runs late, the app having
+        # been busy, look for it from when it really started, not from now
+        late = time.monotonic() - self._sched.get(i, time.monotonic())
+        self.capture.sent(tr, t.first, self._run["out_rate"], t.delay_ms, late_s=late)
+        if main.recorder.recording:
+            main._log_comment(label)
+        for fn in getattr(main, "sent_hooks", ()):
+            fn(label, t.stimulus)
+        self._set_row_status(tr.n, "sent")
+        self._block_trials.append(tr.n)
+        self._sent[tr.n] = (label, t.stimulus, t.stimulus2, t.delay_ms)
+        self.next_i += 1
+        self._next_fire = self._sched.get(self.next_i, time.monotonic())
+        main._update_stim_chip()
+
+    def _pre_s(self) -> float:
+        """How much of a trial is recorded before its stimulus is sent: the part of Before
+        that reaches past the start of the waveform (its leading baseline is sent, so it's
+        recorded after)."""
+        p = self._run["protocol"] if self._run else self.protocol
+        s = self._run["stimulus"] if self._run else self.main.stimulus
+        rate = self.main.cfg.stim_rate
+        onset = s.onset_samples(rate) / rate if rate > 0 else 0.0
+        return max(0.0, p.before_ms / 1000.0 - onset)
+
+    def _wake_lead(self) -> float:
+        """How long before the next stimulus to start acquiring again after a rest: just
+        what the trial keeps from before it's sent, and a moment to settle."""
+        return self._pre_s() + WAKE_SETTLE_S
+
+    def _rest(self) -> None:
+        """A long wait before the next stimulus: stop acquiring until just before it.
+        While recording, the stretch so far is saved as a block of its own."""
+        self._save_to_block()
+        self._block_trials = []
+        self.resting = True
+        self.main.rest_acquiring()
+        self.main._lock_channels(True)          # ending the block unlocked them
+
+    def _wake(self) -> bool:
+        """Acquiring again after a rest. False (protocol stopped) if it couldn't start."""
+        self.resting = False
+        self._drain()                           # anything left from before the rest
+        if not self.main.resume_acquiring(record=not self._windows, keep_trace=True):
+            self.stop_protocol("Stopped: couldn't start acquiring again")
+            return False
+        self.main._lock_channels(True)
+        self._new_capture(self._run["protocol"], self.chk)
+        return True
+
     def set_paused(self, on: bool) -> None:
         if not self.running:
             return
         self.paused = on
         self.btn_pause.setText("Resume" if on else "Pause")
+        if on and self._full and self._out_on:
+            # the rest of the protocol is sent again on Resume; the stimulus playing now finishes
+            self._out_on = False
+            self._pause_token = token = object()
+            i = self.next_i - 1
+            end = (self._sched.get(i, 0.0) + self._tw[i].wave.shape[-1] / self._run["out_rate"]) if i >= 0 else 0.0
+            wait_ms = max(0, int((end - time.monotonic()) * 1000) + 20)
+            QtCore.QTimer.singleShot(wait_ms, lambda: self.paused and self._pause_token is token
+                                     and self.main.stim_out.stop())
         if not on:
             self._next_fire = time.monotonic()
         self.show_message("Paused: Resume carries on with stimulus "
@@ -955,6 +1083,10 @@ class ProtocolsPage(QtWidgets.QWidget):
         if not self.running:
             return
         self.running = False
+        if self.resting:                        # Start is still on: back to streaming
+            self.resting = False
+            if self.main.btn_run.isChecked():
+                self.main.resume_acquiring(record=not self._windows, keep_trace=True)
         if self.main.stim_out is not None:
             self.main.stim_out.stop()          # output to 0 V
         self._drain()
@@ -991,6 +1123,9 @@ class ProtocolsPage(QtWidgets.QWidget):
         text = f"Stimulus {n} of {len(self.trials)}"
         if cur is not None:
             text += " · " + T.describe(self._run["protocol"], self._run["shape"], cur.a, cur.b)
+        wait = self._next_fire - time.monotonic()
+        if n < len(self.trials) and not self.paused and 1 <= wait < float("inf"):
+            text += f" · {'not acquiring, ' if self.resting else ''}next in {int(wait)} s"
         return ("Paused · " if self.paused else "") + text
 
     def _drain(self):
@@ -1012,13 +1147,44 @@ class ProtocolsPage(QtWidgets.QWidget):
             self._add_result(r)
         if not self.running:
             return
+        now = time.monotonic()
+        lead = self._wake_lead()
+        if self.resting:
+            if self.paused or now < self._next_fire - lead:
+                return
+            if not self._wake():
+                return
         if not self.main.backend.running:
             self.stop_protocol("Acquisition stopped")
             return
-        now = time.monotonic()
         if self.next_i < len(self.trials):
-            if self.paused or now < self._next_fire:
+            if (self.next_i and not self.paused and not self.capture.pending
+                    and (self._full or not self.main.stim_out.busy)        # (whole protocol: it's always busy)
+                    and self._next_fire - now >= max(REST_MIN_S, lead + 1.0)):
+                self._rest()                  # this one's data is in; nothing to record till the next
                 return
+            held = float(self.capture.t[-1] - self.capture.t[0]) if self.capture.t.size else 0.0
+            if self._full:
+                if not self._out_on:              # the start, or Resume: send the rest of it, once
+                    if self.paused or now < self._next_fire or held < self._pre_s() + 0.05:
+                        return                    # (the baseline before it isn't recorded yet)
+                    if self.main.stim_out.busy:   # (Resume: the last stimulus is still finishing)
+                        return
+                    if not self._start_output(self.next_i):
+                        return
+                if not self._sched:
+                    started = getattr(self.main.stim_out, "started_at", None)
+                    if started is None:
+                        return                    # still being written to the output
+                    first, dt, n = self._sched_from
+                    self._sched = {first + j: started + j * dt for j in range(n)}
+                    self._next_fire = self._sched[self.next_i]
+                if self.paused or now < self._next_fire:
+                    return
+                self._mark_trial(self.next_i)     # the output plays it now: line it up and log it
+                return
+            if self.paused or now < self._next_fire or held < self._pre_s() + 0.05:
+                return                        # (the baseline before it isn't recorded yet)
             if self.main.stim_out.busy or not self.capture.can_send(p.gap_s):
                 return                        # too soon after the last one; try again shortly
             tr = self.trials[self.next_i]
@@ -1037,11 +1203,15 @@ class ProtocolsPage(QtWidgets.QWidget):
             # lined up on the first output's waveform: that's the one recorded (Line up on)
             self.capture.sent(tr, t.first, self._run["out_rate"], t.delay_ms)
             self._set_row_status(tr.n, "sent")
+            self._block_trials.append(tr.n)
+            self._sent[tr.n] = (label, t.stimulus, t.stimulus2, t.delay_ms)
             self.next_i += 1
             self._next_fire = max(self._next_fire + p.gap_s, now + 0.05)
             self.main._update_stim_chip()
         elif not self.capture.pending:
             self._end("Protocol finished")
+            if self.main.btn_run.isChecked() and self.main.settings.value("record_stim", "simple") != "none":
+                self.main.btn_run.setChecked(False)   # its last window is in: stop now, no tail
 
     # ======================================================================
     # results
@@ -1060,8 +1230,52 @@ class ProtocolsPage(QtWidgets.QWidget):
         name = self.m_channel.currentText()
         return names.index(name) if name in names else None
 
+    def set_saving_windows(self, on: bool) -> None:
+        """Record turned on or off during a protocol: save the stimuli from now on, or not."""
+        self._windows = on
+
+    def _save_window(self, r: T.Result) -> None:
+        """One stimulus's window as a block of its own: Before to After, every channel,
+        with the stimulus that was sent, so Analysis groups it with the identical ones."""
+        if r.raw is None or self.capture is None or r.trial.n not in self._sent:
+            return
+        import json
+        main, run = self.main, self._run
+        p = run["protocol"]
+        label, s1, s2, delay_ms = self._sent[r.trial.n]
+        rate = self.capture.rate
+        at = r.raw_before_s                             # the stimulus's time 0 is here in the block
+        sent = {"t": at - delay_ms / 1000.0, "rate": run["out_rate"], "settings": s1.to_dict(),
+                "output": run["outs"][0]}
+        if s2 is not None:
+            sent["second"] = {"output": run["outs"][1], "settings": s2.to_dict()}
+        tr = r.trial
+        trials = {"protocol": p.to_dict(), "stimulus": run["stimulus"].to_dict(),
+                  "trials": [{"n": tr.n, "rep": tr.rep, "a": tr.a, "b": tr.b, "found": bool(r.found),
+                              "use": bool(r.use), "t": at if r.found else None}]}
+        path = session.next_block_path(main._ensure_session_dir())
+        try:
+            recorder.write_block(path, main.backend, r.raw, rate,
+                                 {"stimuli": json.dumps([sent]), "trials": json.dumps(trials),
+                                  **({"label": main.trial_label} if main.trial_label else {})},
+                                 [{"t": at, "sample_index": int(round(at * rate)), "text": label}])
+        except OSError as e:
+            self.show_message(f"Couldn't save stimulus {tr.n}: {e}", error=True)
+            return
+        main.session_block_added(path)
+        if np.isfinite(r.t0):                           # a trial bar on the live history
+            main.mark_trial_start(r.t0 - r.raw_before_s, r.raw.shape[1] / rate)
+        self._blocks_timer.start()                      # show them, a few at a time
+
+    def _blocks_saved(self) -> None:
+        main = self.main
+        main.analysis_page.source_changed()             # new blocks to analyze and group
+        main._block_changed(started=False)
+
     def _add_result(self, r: T.Result):
         self.results[r.trial.n] = r
+        if self._windows:
+            self._save_window(r)
         self._set_row_status(r.trial.n, "done")
         self._draw_result(r)
         self._update_average(r.trial.ia, r.trial.ib)
@@ -1424,11 +1638,13 @@ class ProtocolsPage(QtWidgets.QWidget):
     def _save_to_block(self):
         """Keep the protocol and each trial's values and timing with the recording."""
         rec = self.main.recorder
-        if not rec.recording or not self._run:
+        if not rec.recording or not self._run or not self._block_trials:
             return
         import json
         trials = []
         for tr in self.trials:
+            if tr.n not in self._block_trials:   # sent in an earlier block (before a rest), or not yet
+                continue
             r = self.results.get(tr.n)
             trials.append({"n": tr.n, "rep": tr.rep, "a": tr.a, "b": tr.b,
                            "found": bool(r and r.found), "use": bool(r and r.use),

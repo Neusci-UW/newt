@@ -35,6 +35,7 @@ class _TraceViewBox(WheelViewBox):
     the newest data at the right edge."""
 
     y_room = 1.0              # zoom out in y to 3x the data's range, and always to 0
+    drag_pans_time = True     # grab the traces and drag: every channel pans in time together
 
     def __init__(self, zoom_time, pan_time, zoom_to=None, autoscale=None, **kw):
         super().__init__(**kw)

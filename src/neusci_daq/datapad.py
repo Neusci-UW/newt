@@ -25,6 +25,7 @@ MEASUREMENTS = {
     "rise": ("Max rate of rise", "{u}/s", "Largest dV/dt"),
     "fall": ("Max rate of fall", "{u}/s", "Most negative dV/dt"),
     "freq": ("Main frequency", "Hz", "Frequency of the largest peak in the spectrum"),
+    "value": ("Value", "{u}", "The value at a point (a window of one moment: its sample)"),
     "start": ("Value at start", "{u}", "The first sample in the window"),
     "end": ("Value at end", "{u}", "The last sample in the window"),
     "spikes": ("Spike count", "", "The action potentials found, in the window"),
@@ -92,7 +93,7 @@ def measure(key: str, t: np.ndarray, y: np.ndarray, fs: float, spike_times=None)
             den = a - 2 * b + c
             k = k + (0.5 * (a - c) / den if den else 0.0)
         return float(k * fs / len(y))
-    if key == "start":
+    if key in ("start", "value"):
         return float(y[0])
     if key == "end":
         return float(y[-1])

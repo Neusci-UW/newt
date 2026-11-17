@@ -343,7 +343,7 @@ class Chart(View):
         ev = self.page.events
         if ev is None:
             return None
-        return replace_events(ev, np.isin(ev.block, self.blocks()))
+        return self.page.chart_events(replace_events(ev, np.isin(ev.block, self.blocks())))
 
     def _units_mode_changed(self) -> None:
         on = self.units_own.isChecked()
@@ -408,9 +408,6 @@ class Chart(View):
         for pw in self.plots():
             add_buttons(pw)
             self._texts.watch(pw)
-        measure = getattr(self.page, "measure", None)
-        if measure is not None:
-            measure.decorate(self)
         self.apply_look()
 
     # -- its look --------------------------------------------------------------------------------

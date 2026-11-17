@@ -91,13 +91,13 @@ def test_pick_tabs_and_split(win):
     win.tabs.pick(0, "stim")
     assert shown(win) == ["stim"]
     win.tabs.set_layout(SIDE)
-    assert shown(win) == ["stim", "acq"] and win.split_buttons[SIDE].isChecked()
+    assert shown(win) == ["stim", "acq"]
     win.tabs.pick(1, "trials")
     assert shown(win) == ["stim", "trials"]
     win.tabs.set_layout(STACKED)
     assert win.tabs.splitter.orientation().name == "Vertical"
     win.tabs.set_layout(ONE)
-    assert shown(win) == ["stim"] and win.split_buttons[ONE].isChecked()
+    assert shown(win) == ["stim"]
 
 
 def test_same_tab_in_both_halves_goes_back_to_one_tab(win):
@@ -345,7 +345,7 @@ def test_everything_fits_on_a_1024_px_wide_window(app, scaled_win, mode):
         win.btn_comments.setText("Comments (88)")              # longest button text
         pump(app, 0.2)
         for w in (win.btn_run, win.btn_rec, win.rate_box, win.window_box, win.comment_edit,
-                  win.stim_chip, win.btn_comments, win.btn_theme, win.split_group):
+                  win.stim_chip, win.btn_comments, win.btn_theme):
             assert w.isVisible(), w                            # not in the overflow menu
             right = w.mapTo(win, w.rect().topRight()).x()
             assert right < win.width(), w
@@ -405,7 +405,7 @@ def test_closing_stops_the_redraw_timer(app, win):
     win._refresh()                                             # and is harmless if it does run
 
 
-def test_split_and_theme_controls_sit_on_the_toolbar_row(app, win):
+def test_theme_control_sits_on_the_toolbar_row(app, win):
     """Same row as Start and Record, at the right end, on every tab and in split view."""
     win.resize(1300, 600)
     win.show()
@@ -413,9 +413,8 @@ def test_split_and_theme_controls_sit_on_the_toolbar_row(app, win):
         win.tabs.pick(0, pick)
         win.tabs.set_layout(mode)
         pump(app, 0.05)
-        assert win.split_group.isVisible() and win.btn_theme.isVisible()
+        assert win.btn_theme.isVisible()
         mid = lambda w: w.mapTo(win, w.rect().center()).y()
-        assert abs(mid(win.split_group) - mid(win.btn_run)) <= 1
         assert abs(mid(win.btn_theme) - mid(win.btn_run)) <= 1
         right = win.btn_theme.mapTo(win, win.btn_theme.rect().topRight()).x()
         assert right > win.width() - 40                      # right end of the toolbar

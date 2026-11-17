@@ -63,7 +63,7 @@ from .simplestim import SimpleStimPage
 from .dockstim import DockedDesign, DockedStimulator, DockedTimed
 from .windowsaver import WindowSaver
 from .ministim import MiniStimulator
-from .tabs import ONE, SIDE, STACKED, TabArea, layout_icon
+from .tabs import TabArea
 from . import colors
 from .channelsetup import ChannelSetupMixin
 from .commentcontrol import CommentsMixin
@@ -244,36 +244,16 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_chip_stop.clicked.connect(self.stop_stimulus)
         cl.addWidget(dot); cl.addWidget(self.stim_chip_text); cl.addWidget(self.btn_chip_stop)
         self._tb_chip = A(self.stim_chip)
-        # Split view: one tab, side by side, or top and bottom.
-        self.split_group = QtWidgets.QWidget()
-        self.split_group.setObjectName("splitGroup")
-        self.split_group.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
-        sl = QtWidgets.QHBoxLayout(self.split_group)
-        sl.setContentsMargins(2, 2, 2, 2)
-        sl.setSpacing(2)
-        self.split_buttons = {}
-        group = QtWidgets.QButtonGroup(self)
-        group.setExclusive(True)
-        for mode, tip in ((ONE, "One tab"), (SIDE, "Split: side by side"), (STACKED, "Split: top and bottom")):
-            b = QtWidgets.QToolButton(checkable=True)
-            b.setToolTip(tip)
-            b.setAccessibleName(tip)
-            b.clicked.connect(lambda _=False, mode=mode: self.tabs.set_layout(mode))
-            group.addButton(b)
-            sl.addWidget(b)
-            self.split_buttons[mode] = b
-        self.split_buttons[ONE].setChecked(True)
         self.btn_theme = QtWidgets.QToolButton()
         self.btn_theme.setAutoRaise(True)
         self.btn_theme.setIconSize(QtCore.QSize(20, 20))
         self.btn_theme.clicked.connect(self.toggle_plot_theme)
-        # Split buttons and the light/dark toggle sit at the right end of the toolbar,
-        # on the same row as Start and Record, and show on every tab.
+        # The light/dark toggle sits at the right end of the toolbar,
+        # on the same row as Start and Record, and shows on every tab.
         self.tab_corner = QtWidgets.QWidget()
         cl2 = QtWidgets.QHBoxLayout(self.tab_corner)
         cl2.setContentsMargins(0, 0, 0, 0)
         cl2.setSpacing(6)
-        cl2.addWidget(self.split_group)
         cl2.addWidget(self.btn_theme)
         self.logo = QtWidgets.QLabel()
         self.logo.setPixmap(app_icon().pixmap(QtCore.QSize(26, 26)))
@@ -680,8 +660,6 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_theme.setIcon(theme.toggle_icon(self.plot_mode, ink))
         self.btn_theme.setToolTip("Dark mode: click for light mode" if self.plot_mode == theme.DARK
                                   else "Light mode: click for dark mode")
-        for mode, b in getattr(self, "split_buttons", {}).items():
-            b.setIcon(layout_icon(mode, ink))
         for kind, b in getattr(self, "_time_buttons", {}).items():
             icon = style.scale_icon(kind, ink)
             if kind in ("box", "overlay"):          # white on the accent blue while on
@@ -775,8 +753,6 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         return w
 
     def _tabs_changed(self):
-        for mode, b in self.split_buttons.items():
-            b.setChecked(mode == self.tabs.layout_mode)
         self._fit_strips()
         self._update_toolbar()
 

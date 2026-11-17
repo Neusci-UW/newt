@@ -102,8 +102,6 @@ QToolButton#tool:checked:hover {{ background: {t['focus']}; }}
 QToolButton#remove {{ background: {t['button']}; color: {t['muted']}; }}
 QToolButton#remove:hover {{ background: {t['button_hover']}; }}
 QToolButton#remove:disabled {{ background: {t['disabled']}; color: {t['disabled_ink']}; }}
-QWidget#splitGroup {{ background: {t['field']}; border: 1px solid {t['field_border']}; border-radius: 6px; }}
-QWidget#splitGroup QToolButton {{ padding: 2px 6px; border-radius: 4px; }}
 
 QLineEdit, QComboBox, QAbstractSpinBox {{
     background: {t['field']}; color: {t['ink']}; border: 1px solid {t['field_border']}; border-radius: 6px;

@@ -28,3 +28,25 @@ def _no_waiting_dialogs(monkeypatch):
                        (QtWidgets.QMessageBox, ("information", "warning", "critical", "question"))):
         for n in names:
             monkeypatch.setattr(cls, n, stuck(f"{cls.__name__}.{n}"))
+
+
+@pytest.fixture(autouse=True)
+def _free_windows(_no_dialog_about_analysis, _no_waiting_dialogs):
+    """Delete every window a test leaves behind. Closing only hides a window: each one kept
+    its plots and timers alive, so the suite grew ~35 MB and a little slower with every test
+    (4.5 s alone, 36 s at test 170). Runs before the dialog patches above are undone."""
+    yield
+    import gc
+    from pyqtgraph.Qt import QtCore, QtWidgets
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return
+    from neusci_daq.gui import MainWindow
+    for w in app.topLevelWidgets():
+        if isinstance(w, MainWindow):            # its plots and pages go with it
+            if w.isVisible():
+                w.close()
+            w.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    app.processEvents()
+    gc.collect()

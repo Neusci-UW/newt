@@ -27,7 +27,9 @@ from . import analysisfile
 from . import colors
 from . import dsp
 from . import groupsfile
+from . import stimmeasures as SM
 from . import style
+from .alikepanel import AlikePanel
 from .trialsbrowser import TrialsBrowser
 from .canvas import ChartCanvas
 from .padpage import PadView
@@ -100,6 +102,14 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.hide_changed.connect(self.set_hidden)
         self.blocks_panel.group_moved.connect(self.move_group)
         self.blocks_panel.sort_picked.connect(self.sort_groups)
+        self.blocks_panel.combine_requested.connect(self.combine_pages)
+        self.blocks_panel.split_page_requested.connect(self.split_page)
+        self._auto: list[tuple[str, list[int]]] = []   # the stimulus groups, before names and moves
+        self._stim_label: dict[int, str] = {}          # block -> its stimulus group's label
+        self._kinds: dict[str, str] = {}               # groups holding several stimuli: "alike" or "combined"
+        self._map: dict | None = None                  # Group alike stimuli's map (stimmeasures.alike_map)
+        self._page_values: dict[str, float] = {}       # what each group is colored along (Color groups by)
+        self._shape_cache: tuple = (None, None)        # (the stimuli compared, how alike in shape)
         self.blocks_panel.rename_requested.connect(self.main._rename_dialog)
         self.blocks_panel.move_requested.connect(
             lambda i, page: self.main.move_block(i, page) if page else self.main._new_page_dialog(i))
@@ -240,6 +250,13 @@ class AnalysisPage(QtWidgets.QWidget):
         # left: the strip and the panel it folds out; right: the picked chart's settings
         self.group_colors = GroupColors(self)
         self.blocks_panel.group_extras.layout().insertWidget(0, self.group_colors)
+        self.alike = AlikePanel()
+        extras = self.blocks_panel.group_extras.layout()
+        extras.insertWidget(extras.indexOf(self.blocks_panel.btn_reset), self.alike)
+        self.alike.changed.connect(self.set_alike)
+        self.alike.keep_requested.connect(self.keep_alike)
+        self.alike.color_by_picked.connect(lambda v: self._set_look("color_by", v))
+        self.alike.avg_each_picked.connect(lambda v: self._set_look("avg_each", v))
         self.blocks_panel.btn_groups.clicked.connect(lambda: self.open_panel("groups"))
         self.rail = Rail()
         self.drawer = QtWidgets.QWidget()            # one panel shows at a time; the hidden ones take no room
@@ -1081,14 +1098,22 @@ class AnalysisPage(QtWidgets.QWidget):
         how = self.how()
         d = groupsfile.load(self._folder())
         self._show_looks(d)                           # the stimulus fit is one of them
+        d = {**d, **{k: self._looks.get(k, d[k]) for k in ("sorts", "alike", "color_by", "avg_each")}}
         self.blocks_panel.set_organize(d["organize"], self._folder() is not None)
         auto = self._group(self.blocks, how, self._fitted_signature_of(self._paths, how))
+        self._auto = auto
+        self._stim_label = {i: label for label, blocks in auto for i in blocks}
+        d = self._alike_groups(auto, how, d)          # the stimuli Group alike stimuli joins
+        self._looks = {**self._looks, "merged": d["merged"]}
+        self._kinds = groupsfile.kinds(auto, d)
         # the pages of the Blocks panel: your names, and blocks you moved
         changed = d["moved"] or d["renamed"]
         stems = [p.stem for p in self._paths]
         shown = self.arranged(groupsfile.apply(auto, stems, d), self._paths, how, d) if stems else []
         self.groups = shown if auto or changed else []
         self.shown = shown
+        self._page_values = self._values_of(shown, how)
+        self.blocks_panel.page_kinds = self._kinds
         self.picked, self.picked_pages = self._ticked()
         labels = {i: (stem, f"{b['duration_s']:.1f} s" if b is not None else "?", *self._stimuli_note(b),
                       *self._label_note(i))
@@ -1096,7 +1121,8 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.populate(None, shown, [self.group_color(g) for g in range(max(1, len(shown)))], labels,
                                    lambda i: groupsfile.auto_page(auto, i, d), bool(changed), False,
                                    self._looks["hidden_groups"], self.hidden_blocks())
-        self.blocks_panel.sort_box.setCurrentIndex(max(0, self.blocks_panel.sort_box.findData(self._looks["sort"])))
+        self.blocks_panel.sort_box.set_sorts(d["sorts"], () if self._map is not None else ("pc1",))
+        self._show_alike(shown, how)
         self.blocks_panel.select(*self._highlighted)
         self.update_preview()
         n = len([g for g in self.groups if g[0] != "No stimulus found"])
@@ -1128,19 +1154,161 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def arranged(self, shown: list, paths: list[Path], how: str, d: dict) -> list:
         """The pages in the order asked for (`how`: as for _group)."""
-        sig = self._signature_of(paths, how)
+        return groupsfile.arrange(shown, d, self._page_measures(paths, how))
 
-        def measure(blocks: list[int]) -> tuple[float, float]:
-            """The frequency and amplitude of a page's stimulus: the first of its blocks'."""
-            b = self._read(paths[blocks[0]])
-            k = sig(blocks[0], b["data"][b["channel_names"].index(how)], b["sample_rate"]) \
-                if how in b["channel_names"] else None
-            if k is None:
-                return 0.0, 0.0
-            if k[0] == "pulse":
-                return (1000 / k[4] if k[4] else 0.0), abs(k[2])
-            return float(k[1]), float(k[2])
-        return groupsfile.arrange(shown, d, measure)
+    # -- what each stimulus is like: sorting, coloring, Group alike stimuli -------------------
+    @staticmethod
+    def _stim_wave(b: dict | None, how: str):
+        """(trace, sample rate) of a trial's stimulus: the stimulus channel as recorded, or
+        (with none) the first stimulus it saved it sent, with rest around it. None if neither."""
+        if b is None:
+            return None
+        names = b["channel_names"]
+        if how in names:
+            return np.asarray(b["data"][names.index(how)], float), float(b["sample_rate"])
+        for sent in b.get("stimuli") or ():
+            try:
+                rate = float(sent["rate"])
+                w = np.asarray(Stimulus.from_dict(sent["settings"]).waveform(rate), float)
+            except (ValueError, KeyError, TypeError):
+                continue
+            return np.r_[np.zeros(w.size), w, np.zeros(w.size)], rate
+        return None
+
+    def _block_measures(self, path: Path, how: str) -> dict | None:
+        """A trial's stimulus measures (stimmeasures.MEASURES), worked out once per file."""
+        def work():
+            try:
+                w = self._stim_wave(self._read(path), how)
+            except Exception:
+                return None
+            return SM.measure(*w) if w is not None else None
+        return self.main.store.memo(path, ("stim measures", how), work)
+
+    def _mean_measures(self, blocks: list[int], paths: list[Path], how: str) -> dict | None:
+        """These trials' stimulus measures, averaged; None if none has a stimulus."""
+        ms = [m for m in (self._block_measures(paths[i], how) for i in blocks if i < len(paths)) if m]
+        return {k: float(np.mean([m[k] for m in ms])) for k in SM.MEASURES} if ms else None
+
+    def _page_measures(self, paths: list[Path], how: str):
+        """measure(blocks): a page's measures, to sort and color by: its trials' stimulus
+        measures, averaged; "trials", how many it has; "pc1", where it sits along the map."""
+        here = self._map is not None and list(paths) == list(self._paths)
+        at = {label: k for k, label in enumerate(self._map["labels"])} if here else {}
+
+        def measure(blocks: list[int]) -> dict:
+            m = dict(self._mean_measures(blocks, paths, how) or {})
+            m["trials"] = float(len(blocks))
+            xs = [self._map["X"][at[self._stim_label[i]], 0] for i in blocks if self._stim_label.get(i) in at]
+            if xs:
+                m["pc1"] = float(np.mean(xs))
+            return m
+        return measure
+
+    def _values_of(self, shown: list, how: str) -> dict[str, float]:
+        """{group: the value it's colored along} (Color groups by); {} for the Groups setting."""
+        key = self._looks.get("color_by")
+        if not key:
+            return {}
+        measure = self._page_measures(self._paths, how)
+        out = {}
+        for name, blocks in shown:
+            v = measure(blocks).get(key)
+            if v is not None and v == v:
+                out[name] = float(v)
+        return out
+
+    def _shapes(self, points: list, how: str) -> np.ndarray:
+        """How alike in shape each stimulus group is (its first trial's), worked out again only
+        when the stimuli change."""
+        key = (tuple(str(self._paths[blocks[0]]) for _, blocks in points), how)
+        if self._shape_cache[0] != key:
+            waves = []
+            for _, blocks in points:
+                try:
+                    waves.append(self._stim_wave(self._read(self._paths[blocks[0]]), how))
+                except Exception:
+                    waves.append(None)
+            self._shape_cache = (key, SM.shape_alike(waves))
+        return self._shape_cache[1]
+
+    def _alike_groups(self, auto: list, how: str, d: dict) -> dict:
+        """Group alike stimuli: the map of the stimulus groups by the measures ticked
+        (self._map), and the ones it joins now, saved (d["merged"]) when they change."""
+        a = d["alike"]
+        points = [(label, blocks) for label, blocks in auto if label != NO_STIMULUS]
+        self._map = None
+        merged = []
+        if a["feats"] and len(points) >= 2 and how and how != "notes":
+            meas = [self._mean_measures(blocks, self._paths, how) for _, blocks in points]
+            shape = self._shapes(points, how) if SM.SHAPE in a["feats"] else None
+            m = SM.alike_map(meas, a["feats"], shape)
+            if m is not None:
+                m["labels"] = [label for label, _ in points]
+                self._map = m
+                if a["by"] == "close":
+                    groups = SM.cut(m["D"], close=a["close"] / 100 * float(m["D"].max()))
+                else:
+                    groups = SM.cut(m["D"], groups=a["n"] if 0 < a["n"] < len(points) else None)
+                merged = [[m["labels"][k] for k in g] for g in groups if len(g) > 1]
+        if merged != d["merged"]:
+            d = {**d, "merged": merged}
+            if self._folder() is not None:
+                groupsfile.save(self._folder(), d)
+        return d
+
+    def _show_alike(self, shown: list, how: str) -> None:
+        """Group alike stimuli's panel, as things are now."""
+        a, m = self._looks["alike"], self._map
+        n = len([label for label, _ in self._auto if label != NO_STIMULUS])
+        page_of = {i: g for g, (_, blocks) in enumerate(shown) for i in blocks}
+        drawn = None
+        if m is not None:
+            points, joined = [], {}
+            for k, label in enumerate(m["labels"]):
+                blocks = next((b for lab, b in self._auto if lab == label), [])
+                g = next((page_of[i] for i in blocks if i in page_of), None)
+                points.append((float(m["X"][k, 0]), float(m["X"][k, 1]),
+                               self.group_color(g) if g is not None else "#888888", label))
+                if g is not None:
+                    joined.setdefault(g, []).append(k)
+            drawn = {"points": points, "joined": list(joined.values()), "share": m["share"], "mostly": m["mostly"]}
+        why = ("" if m is not None else
+               "Pick the stimulus channel (in Channels) to compare the stimuli" if not how or how == "notes" else
+               "Needs two different stimuli or more" if n < 2 else
+               "Tick a measure to place each stimulus on a map" if not a["feats"] else
+               "The measures ticked are the same for every stimulus")
+        self.alike.show_state({"feats": a["feats"], "by": a["by"], "n": a["n"], "close": a["close"], "stimuli": n,
+                               "map": drawn, "why": why, "color_by": self._looks.get("color_by", ""),
+                               "avg_each": bool(self._looks.get("avg_each")),
+                               "can_keep": "alike" in self._kinds.values()})
+
+    def set_alike(self, change: dict) -> None:
+        """Change Group alike stimuli's setting (feats, by, n, close): the groups follow."""
+        self._looks = {**self._looks, "alike": {**self._looks["alike"], **change}}
+        self._save_looks()
+
+    def _edit_groups(self, change) -> None:
+        """Change the session's groups (pages.json) and show them."""
+        folder = self._folder()
+        if folder is None:
+            return
+        groupsfile.save(folder, change(groupsfile.load(folder)))
+        self.main._fill_recorded()
+        self.source_changed()
+
+    def combine_pages(self, names: list[str]) -> None:
+        """Make these groups one; Split puts them back."""
+        if len(set(names)) >= 2:
+            self._edit_groups(lambda d: groupsfile.combine(self._auto, d, names))
+
+    def split_page(self, name: str) -> None:
+        """A group you combined back into its stimuli."""
+        self._edit_groups(lambda d: groupsfile.split(self._auto, d, name))
+
+    def keep_alike(self) -> None:
+        """Keep the groups the map joined as ordinary groups."""
+        self._edit_groups(lambda d: groupsfile.keep(self._auto, d))
 
     def hidden_blocks(self) -> set[int]:
         """The blocks left out of everything: those of unticked pages, and those you unticked,
@@ -1185,11 +1353,15 @@ class AnalysisPage(QtWidgets.QWidget):
         at = names.index(name)
         names.pop(at)
         names.insert(row - 1 if at < row else row, name)
-        self._looks = {**self._looks, "order": names, "sort": ""}
+        self._looks = {**self._looks, "order": names, "sort": "", "sorts": []}
         self._save_looks()
 
-    def sort_groups(self, how: str) -> None:
-        self._looks = {**self._looks, "sort": how}
+    def sort_groups(self, sorts) -> None:
+        """Keep the groups sorted: [[measure, 1 smallest first or -1]...], the first first ("frequency"
+        or "amplitude" as before); [] your order."""
+        if isinstance(sorts, str):
+            sorts = groupsfile.OLD_SORTS.get(sorts, [])
+        self._looks = {**self._looks, "sorts": [list(x) for x in sorts], "sort": ""}
         self._save_looks()
 
     def _folder(self):
@@ -1232,7 +1404,8 @@ class AnalysisPage(QtWidgets.QWidget):
             groupsfile.save(folder, {**d, **{k: self._looks.get(k, "") for k in ("colors", "page_map", "trial_map",
                                                                     "base_color", "trial_opacity", "gains",
                                                                     "stim_fit", "hidden_groups", "hidden_trials",
-                                                                    "shown_trials", "order", "sort")}})
+                                                                    "shown_trials", "order", "sort", "sorts",
+                                                                    "alike", "color_by", "avg_each")}})
         self._compute_groups()
         self.main._fill_recorded()                  # the Acquisition Blocks panel shows them too
         self.groups_changed()
@@ -1264,6 +1437,14 @@ class AnalysisPage(QtWidgets.QWidget):
         given = looks["colors"].get(names[g]) if g < len(names) else None
         if given:
             return given
+        values = self._page_values if looks.get("color_by") else {}
+        if g < len(names) and names[g] in values:      # Color groups by: along a measure
+            left = [n for n in names if n in values and n not in looks["hidden_groups"]] or [names[g]]
+            lo, hi = min(values[n] for n in left), max(values[n] for n in left)
+            f = (values[names[g]] - lo) / (hi - lo) if hi > lo else 0.5
+            if looks["page_map"] == colors.SHADES:
+                return colors.shade(looks.get("base_color") or colors.BASE_COLOR, f).name()
+            return colors.sample(looks["page_map"] if looks["page_map"] in colors.MAPS else "Viridis", f).name()
         if looks["page_map"] in (colors.ONE, colors.SHADES):
             base = looks.get("base_color") or colors.BASE_COLOR
             if looks["page_map"] == colors.ONE:
@@ -1289,8 +1470,20 @@ class AnalysisPage(QtWidgets.QWidget):
         averaged = [(g, name, [i for i in blocks if i in wanted]) for g, (name, blocks) in enumerate(self.shown)
                     if not picked or name in pages_picked]
         averaged = [a for a in averaged if a[2]]
+        if self._looks.get("avg_each"):           # a combined group: an average for each stimulus in it
+            averaged = [part for a in averaged for part in self._each_stimulus(a)]
         done = {i for _, _, blocks in averaged for i in blocks}
         return averaged, [i for i in chosen if i not in done]
+
+    def _each_stimulus(self, entry: tuple) -> list[tuple]:
+        """A combined group's (page number, name, blocks) as one for each stimulus in it."""
+        g, name, blocks = entry
+        if name not in self._kinds:
+            return [entry]
+        parts: dict[str, list[int]] = {}
+        for i in blocks:
+            parts.setdefault(self._stim_label.get(i, name), []).append(i)
+        return [(g, f"{name}: {label}", bl) for label, bl in parts.items()] if len(parts) > 1 else [entry]
 
     def averages(self, chosen: list[int], Y: np.ndarray, averaged: list):
         """[(page number, label, mean, SD, SEM, n blocks)]: each of these pages (as from plan)
@@ -1453,6 +1646,9 @@ class AnalysisPage(QtWidgets.QWidget):
         self.pad_view.refresh()
         self.rail.restyle(mode)
         self.side.restyle(mode)
+
+
+NO_STIMULUS = "No stimulus found"           # analysis.group_blocks's group of trials without one
 
 
 def _flexible_label() -> QtWidgets.QLabel:

@@ -2186,7 +2186,49 @@ def test_groups_can_be_dragged_and_sorted(app, win):
     sizes = [abs(ap._signature_of(ap._paths, "Stim")(b[0], ap.recorded(b[0], "Stim"), ap.blocks[b[0]]["sample_rate"])[2])
              for _, b in ap.shown]
     assert sizes == sorted(sizes)
-    assert ap.blocks_panel.sort_box.currentData() == "amplitude"
+    assert ap.blocks_panel.sort_box.sorts == [["amp", 1]]
+
+
+def test_groups_combine_split_and_join_by_likeness(app, win):
+    two_stimulus_session(app, win)
+    win.show()
+    win.tabs.pick(0, "analysis")
+    pump(app, 0.2)
+    ap = win.analysis_page
+    one, two = [n for n, _ in ap.shown]                               # Pulse 1 V, Pulse 2 V
+    ap.combine_pages([one, two])
+    pump(app, 0.1)
+    both = ap.shown[0][0]
+    assert [b for _, b in ap.shown] == [[0, 1, 2, 3]] and ap._kinds == {both: "combined"}
+    assert "combined" in ap.blocks_panel.tree.topLevelItem(0).text(0)
+    assert [name for _, name, _ in ap.plan([0, 1, 2, 3])[0]] == [both]           # one average of all its trials
+    ap._set_look("avg_each", True)                                    # or one for each stimulus in it
+    assert [(name, b) for _, name, b in ap.plan([0, 1, 2, 3])[0]] == [(f"{both}: {one}", [0, 1]),
+                                                                      (f"{both}: {two}", [2, 3])]
+    ap.split_page(both)
+    pump(app, 0.1)
+    assert [n for n, _ in ap.shown] == [one, two] and ap._kinds == {}
+    # Group alike stimuli: the map joins them live, Keep makes that a group you can split
+    ap.set_alike({"feats": ["amp"]})
+    assert ap._map is not None and len(ap.shown) == 2 and ap.alike.plot.isVisibleTo(ap.alike)
+    ap.set_alike({"n": 1})
+    assert [b for _, b in ap.shown] == [[0, 1, 2, 3]] and list(ap._kinds.values()) == ["alike"]
+    assert ap.alike.keep.isEnabled()
+    ap.keep_alike()
+    pump(app, 0.1)
+    d = groupsfile.load(ap._folder())
+    assert d["merged"] == [] and d["alike"]["n"] == 0 and d["alike"]["feats"] == ["amp"]
+    assert list(ap._kinds.values()) == ["combined"]
+    ap.split_page(ap.shown[0][0])
+    pump(app, 0.1)
+    assert [n for n, _ in ap.shown] == [one, two]
+    # sorted by several measures, and colored along one
+    ap.sort_groups([["amp", -1]])
+    assert [n for n, _ in ap.shown] == [two, one]
+    ap.sort_groups([["pc1", 1], ["trials", -1]])                      # along the map: amplitude, growing
+    assert [n for n, _ in ap.shown] == [one, two] and ap.blocks_panel.sort_box.sorts == [["pc1", 1], ["trials", -1]]
+    ap._set_look("color_by", "amp")
+    assert ap.group_color(0) == cm.sample("Viridis", 0.0).name() and ap.group_color(1) == cm.sample("Viridis", 1.0).name()
 
 
 def test_saved_order_goes_first_and_new_groups_after():

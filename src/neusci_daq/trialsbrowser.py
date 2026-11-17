@@ -14,9 +14,88 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 
 from . import style, theme
+from .stimmeasures import MEASURES
 
 LIVE, BACK = "live", "back"
 ROLE = QtCore.Qt.ItemDataRole.UserRole
+SORTS = [("pc1", "Along the map"), *((k, name) for k, (name, _) in MEASURES.items()), ("trials", "Number of trials")]
+
+
+def sort_way(key: str) -> int:
+    """How a sort starts when ticked: 1 smallest first; the number of trials, biggest first."""
+    return -1 if key == "trials" else 1
+
+
+class SortPicker(QtWidgets.QToolButton):
+    """Sort by: tick measures in turn; the first ticked sorts first and the next breaks ties.
+    Each ticked one has its arrow: ↑ smallest first, ↓ biggest first. None: your order."""
+    picked = QtCore.Signal(list)                 # [[key, 1 or -1]...]
+
+    def __init__(self):
+        super().__init__()
+        self.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(60)
+        menu = QtWidgets.QMenu(self)
+        box = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(box)
+        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(2)
+        self.rows = {}
+        for r, (key, label) in enumerate(SORTS):
+            tick = QtWidgets.QCheckBox(label)
+            tick.toggled.connect(lambda on, k=key: self._tick(k, on))
+            place = QtWidgets.QLabel()
+            way = QtWidgets.QToolButton()
+            way.setAutoRaise(True)
+            way.clicked.connect(lambda _=False, k=key: self._flip(k))
+            grid.addWidget(tick, r, 0)
+            grid.addWidget(place, r, 1)
+            grid.addWidget(way, r, 2)
+            self.rows[key] = (tick, place, way)
+        note = QtWidgets.QLabel("Ticked first sorts first; the next breaks ties.\nDragging a group goes back "
+                                "to your order")
+        note.setStyleSheet("color: gray")
+        grid.addWidget(note, len(SORTS), 0, 1, 3)
+        act = QtWidgets.QWidgetAction(menu)
+        act.setDefaultWidget(box)
+        menu.addAction(act)
+        self.setMenu(menu)
+        self.sorts: list = []
+        self.set_sorts([])
+
+    def set_sorts(self, sorts: list, unavailable=()) -> None:
+        """Show these sorts; those `unavailable` (Along the map, with no map) greyed out."""
+        self.sorts = [list(x) for x in sorts]
+        on = {k: way for k, way in self.sorts if k not in unavailable}
+        order = [k for k, _ in self.sorts if k in on]
+        names = dict(SORTS)
+        for key, (tick, place, way) in self.rows.items():
+            tick.blockSignals(True)
+            tick.setChecked(key in on)
+            tick.setEnabled(key not in unavailable)
+            tick.setToolTip("Tick a measure under Group alike stimuli first" if key in unavailable else "")
+            tick.blockSignals(False)
+            place.setText(str(order.index(key) + 1) if key in on else "")
+            way.setVisible(key in on)
+            way.setText("↑" if on.get(key, 1) > 0 else "↓")
+            way.setToolTip("Smallest first: click for biggest first" if on.get(key, 1) > 0
+                           else "Biggest first: click for smallest first")
+        text = " › ".join(f"{names[k]} {'↑' if on[k] > 0 else '↓'}" for k in order) or "Your order"
+        self.setText(text)
+        self.setToolTip(f"The order of the groups: {text}. Tick measures in turn; dragging a group by its ⠿ "
+                        "goes back to your order")
+
+    def _tick(self, key: str, on: bool) -> None:
+        sorts = [x for x in self.sorts if x[0] != key] + ([[key, sort_way(key)]] if on else [])
+        self.set_sorts(sorts)
+        self.picked.emit(sorts)
+
+    def _flip(self, key: str) -> None:
+        sorts = [[k, -way if k == key else way] for k, way in self.sorts]
+        self.set_sorts(sorts)
+        self.picked.emit(sorts)
 
 
 class TrialPreview(QtWidgets.QWidget):
@@ -186,7 +265,10 @@ class TrialsBrowser(QtWidgets.QWidget):
     color_cleared = QtCore.Signal(str)           # a page's name: back to the default color
     hide_changed = QtCore.Signal(object, bool)   # ("page", name) or ("block", i), and whether it's hidden
     group_moved = QtCore.Signal(str, int)        # a page's name, the row it goes to
-    sort_picked = QtCore.Signal(str)             # "frequency", "amplitude" or "" for your order
+    sort_picked = QtCore.Signal(list)            # [[measure, 1 smallest first or -1]...]; [] your order
+    combine_requested = QtCore.Signal(list)      # pages' names: make them one group
+    split_page_requested = QtCore.Signal(str)    # a page you combined: back into its stimuli
+    page_kinds: dict = {}                        # set by the owner: {page name: "alike" or "combined"}
     tick_highlighted = QtCore.Signal(list, list, bool)   # blocks, pages; True: untick everything else
     step_requested = QtCore.Signal(int)
     step_extend_requested = QtCore.Signal(int)   # Shift+Up/Down: the next trial too (Record page)          # Up or Down in the list: the trial before or after
@@ -264,11 +346,8 @@ class TrialsBrowser(QtWidgets.QWidget):
         lay.addSpacing(6)
         self.title = QtWidgets.QLabel("<b>Trials</b>")
         lay.addWidget(self.title)
-        self.sort_box = QtWidgets.QComboBox()
-        for label, key in (("Your order", ""), ("Frequency", "frequency"), ("Amplitude", "amplitude")):
-            self.sort_box.addItem(label, key)
-        self.sort_box.setToolTip("The order of the groups. Dragging a group by its ⠿ goes back to your order")
-        self.sort_box.activated.connect(lambda *_: self.later(lambda: self.sort_picked.emit(self.sort_box.currentData())))
+        self.sort_box = SortPicker()
+        self.sort_box.picked.connect(lambda sorts: self.later(lambda: self.sort_picked.emit(sorts)))
         sort = QtWidgets.QHBoxLayout()
         sort.addWidget(QtWidgets.QLabel("Sort by"))
         sort.addWidget(self.sort_box, 1)
@@ -290,15 +369,29 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.btn_select.setToolTip("Tick every group and trial")
         self.btn_deselect = QtWidgets.QPushButton("Deselect all")
         self.btn_deselect.setToolTip("Untick every group and trial")
+        self.btn_combine = QtWidgets.QPushButton("Combine")
+        self.btn_combine.setToolTip("Make the highlighted groups one group (Cmd/Shift-click to highlight several). "
+                                    "Each keeps its stimuli inside, so Split puts them back")
+        self.btn_combine.clicked.connect(
+            lambda: self.later(lambda names=self._pages_highlighted(): self.combine_requested.emit(names)))
+        self.btn_split = QtWidgets.QPushButton("Split")
+        self.btn_split.clicked.connect(
+            lambda: self.later(lambda names=self._pages_highlighted(): self.split_page_requested.emit(names[0])))
+        for b in (self.btn_combine, self.btn_split):
+            b.setEnabled(False)
         hl = QtWidgets.QGridLayout()                  # all the ticking buttons together
         hl.setSpacing(4)
         hl.addWidget(self.btn_tick_hl, 0, 0)
         hl.addWidget(self.btn_only_hl, 0, 1)
         hl.addWidget(self.btn_select, 1, 0)
         hl.addWidget(self.btn_deselect, 1, 1)
+        hl.addWidget(self.btn_combine, 2, 0)
+        hl.addWidget(self.btn_split, 2, 1)
         if for_analysis:
             lay.addLayout(hl)
         else:
+            self.btn_combine.hide()
+            self.btn_split.hide()
             self.btn_select.hide()
             self.btn_deselect.hide()
             self.btn_tick_hl.hide()
@@ -417,7 +510,9 @@ class TrialsBrowser(QtWidgets.QWidget):
         for g, (name, blocks) in enumerate(pages):
             ticked = [i for i in blocks if i not in hidden_blocks]
             some = self.for_analysis and 0 < len(ticked) < len(blocks)
+            kind = self.page_kinds.get(name, "") if self.for_analysis else ""
             head = bold(QtWidgets.QTreeWidgetItem([("⠿ " if self.for_analysis else "") + f"{name}  ({len(blocks)})"
+                                                   + (f"  · {kind}" if kind else "")
                                                    + (f"  · {len(ticked)} ticked" if some else "")]))
             head.setData(0, ROLE, ("page", name))
             if name not in hidden_pages or some:
@@ -425,7 +520,10 @@ class TrialsBrowser(QtWidgets.QWidget):
             self._tick(head, name in hidden_pages and not ticked, True)
             if some:                              # some of its trials ticked: say so, even folded away
                 head.setCheckState(0, QtCore.Qt.CheckState.PartiallyChecked)
-            head.setToolTip(0, f"{name}: " + ("click to see this group's average; double-click to rename it; "
+            head.setToolTip(0, f"{name}: " + ("joined by Group alike stimuli (Keep these groups to keep it); "
+                                              if kind == "alike" else "groups you combined (Split puts them back); "
+                                              if kind == "combined" else "")
+                            + ("click to see this group's average; double-click to rename it; "
                                               "right-click to change its color" if self.for_analysis else
                                               "double-click to rename this group; its trials take the new name"))
             tree.addTopLevelItem(head)
@@ -547,6 +645,16 @@ class TrialsBrowser(QtWidgets.QWidget):
         on = bool(self.tree.selectedItems())
         self.btn_tick_hl.setEnabled(on)
         self.btn_only_hl.setEnabled(on)
+        names = self._pages_highlighted()
+        self.btn_combine.setEnabled(len(names) >= 2)
+        kind = self.page_kinds.get(names[0], "") if len(names) == 1 else ""
+        self.btn_split.setEnabled(kind == "combined")
+        self.btn_split.setToolTip("Made by Group alike stimuli: Keep these groups (in Groups) first, then Split"
+                                  if kind == "alike" else "Put a group you combined back into its stimuli")
+
+    def _pages_highlighted(self) -> list[str]:
+        """The groups highlighted (or whose Average is), once each."""
+        return list(dict.fromkeys(self.selected_pages()))
 
     def selected_blocks(self) -> list[int]:
         """The blocks selected; a selected page counts as all its blocks."""
@@ -605,6 +713,13 @@ class TrialsBrowser(QtWidgets.QWidget):
             if many:                          # Repeat or Raise sent several: a trial for each
                 menu.addAction("Split into a trial per stimulus…",
                                lambda: self.later(lambda: self.split_requested.emit(many)))
+            names = self._pages_highlighted() if self.for_analysis else []
+            if len(names) >= 2:
+                menu.addAction(f"Combine {len(names)} groups",
+                               lambda: self.later(lambda: self.combine_requested.emit(names)))
+            elif len(names) == 1 and self.page_kinds.get(names[0]) == "combined":
+                menu.addAction("Split into its stimuli",
+                               lambda: self.later(lambda: self.split_page_requested.emit(names[0])))
             menu.addAction(f"Delete {n} trial{'' if n == 1 else 's'}…", self._delete_highlighted)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 

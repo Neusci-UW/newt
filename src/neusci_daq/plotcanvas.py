@@ -23,6 +23,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import figspec as F
 from . import stim as stimmod
+from .viewkit import with_slider
 
 PX = 4.0                          # scene units per mm
 PAPERS = {"A4 portrait": (210, 297), "A4 landscape": (297, 210), "Letter portrait": (216, 279),
@@ -68,7 +69,7 @@ class Panel(QtWidgets.QGraphicsObject):
 
     def __init__(self, canvas: "PlotCanvasPage", spec: dict, data: dict, linked: bool = True):
         super().__init__()
-        self.canvas, self.spec, self.data, self.linked = canvas, spec, data, linked
+        self.canvas, self.spec, self.data, self.linked = canvas, F.on_page(spec, data), data, linked
         self.letter = ""
         self._img: QtGui.QImage | None = None
         self._resizing = None
@@ -389,9 +390,24 @@ class PlotCanvasPage(QtWidgets.QWidget):
         self.btn_in.setToolTip("Zoom in (⌘/Ctrl and scroll, or pinch)")
         self.btn_fit = QtWidgets.QPushButton("Fit page")
         self.btn_export = QtWidgets.QPushButton("Export…")
+        # one text size for every figure on the page: the same number prints the same everywhere
+        self.text_pt = QtWidgets.QDoubleSpinBox(decimals=1, minimum=4, maximum=36, value=9, singleStep=0.5,
+                                                suffix=" pt")
+        self.text_pt.setToolTip("The axis labels of every figure on the page, in pt as they print; each "
+                                "figure's numbers and title keep their size against them. Changing one "
+                                "figure's labels in Single Plot changes them all")
+        self._text_timer = QtCore.QTimer(self, singleShot=True, interval=200)     # redraw once you stop
+        self._text_timer.timeout.connect(lambda: self.set_text(self.text_pt.value()))
+        self._quiet = False                               # the box set from here: don't redraw again
+        self.text_pt.valueChanged.connect(lambda *_: None if self._quiet else self._text_timer.start())
+        text_row = with_slider(self.text_pt)
+        text_row.setMinimumWidth(170)
         bar.addWidget(QtWidgets.QLabel("Page"))
         bar.addWidget(self.paper)
         bar.addWidget(self.letters)
+        bar.addSpacing(8)
+        bar.addWidget(QtWidgets.QLabel("Text"))
+        bar.addWidget(text_row)
         bar.addSpacing(12)
         for b in (self.btn_edit, self.btn_freeze, self.btn_dup, self.btn_del):
             bar.addWidget(b)
@@ -505,6 +521,16 @@ class PlotCanvasPage(QtWidgets.QWidget):
     # -- panels -----------------------------------------------------------------------------
     def add_panel(self, spec: dict, data: dict, at: tuple[float, float] | None = None,
                   linked: bool = True, edited: "Panel | None" = None) -> Panel:
+        spec = F.on_page(spec, data)
+        charts = [q for q in self.panels if q.spec.get("kind") != "image" and q is not edited]
+        if spec.get("kind") != "image":                   # every figure's text the same size
+            pt = float(spec.get("font") or 9.0)
+            if edited is not None and edited in self.panels and abs(pt - self.text_pt.value()) > 1e-6:
+                self.set_text(pt, but=edited)             # you changed this one's: the page's follows
+            elif not charts:
+                self._show_text(pt)                       # the first figure sets the page's
+            else:
+                spec = F.with_text(spec, self.text_pt.value())
         if edited is not None and edited in self.panels:
             edited.spec, edited.data = spec, data
             edited.rerender()
@@ -578,6 +604,22 @@ class PlotCanvasPage(QtWidgets.QWidget):
         self.btn_edit.setEnabled(n == 1)
         for b in (self.btn_freeze, self.btn_dup, self.btn_del):
             b.setEnabled(n > 0)
+
+    def _show_text(self, pt: float) -> None:
+        """The page's text size in its box (and slider), without redrawing for it."""
+        self._quiet = True
+        self.text_pt.setValue(pt)
+        self._quiet = False
+
+    def set_text(self, pt: float, but: "Panel | None" = None) -> None:
+        """Every figure's labels at `pt` on the page (their numbers and titles keeping their size
+        against them), but `but`, which already has them."""
+        self._show_text(pt)
+        for p in self.panels:
+            if p is not but and p.spec.get("kind") != "image" and abs(float(p.spec.get("font") or 9) - pt) > 1e-6:
+                p.spec = F.with_text(p.spec, pt)
+                p.rerender()
+        self.scene.update()                               # the panel letters follow
 
     def edit(self, p: Panel | None) -> None:
         if p is None:
@@ -764,6 +806,7 @@ class PlotCanvasPage(QtWidgets.QWidget):
     # -- saving with the session ---------------------------------------------------------------
     def state(self) -> dict:
         return {"paper": self.paper.currentText(), "letters": self.letters.isChecked(),
+                "text_pt": self.text_pt.value(),
                 "panels": [p.state() for p in self.panels], "annotations": [a.state() for a in self.annotations]}
 
     def restore(self, s: dict | None) -> None:
@@ -778,6 +821,8 @@ class PlotCanvasPage(QtWidgets.QWidget):
             return
         self.paper.setCurrentText(s.get("paper", "A4 portrait"))
         self.letters.setChecked(s.get("letters", True))
+        if s.get("text_pt"):
+            self._show_text(float(s["text_pt"]))
         for d in s.get("panels", []):
             try:
                 self.add_panel(d["spec"], d["data"], (d["x_mm"], d["y_mm"]), d.get("linked", True))

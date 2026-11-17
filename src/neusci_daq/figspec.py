@@ -162,10 +162,58 @@ def draw(fig, spec: dict, data: dict, ax=None, letter: str = "") -> None:
                     fontweight="bold", va="bottom", ha="left")
 
 
+TEXT_KEYS = ("font", "font_ticks", "font_title")
+
+
+def _base_px(data: dict | None) -> float:
+    """The width a chart drew its plain lines on screen (the most common): Lines is theirs."""
+    widths = [float(c["width_px"]) for c in (data or {}).get("curves", []) if c.get("width_px")]
+    if not widths:
+        return 1.0
+    import statistics
+    return float(statistics.median(widths)) or 1.0
+
+
+def on_page(spec: dict, data: dict | None = None) -> dict:
+    """The figure with its text, lines and tick marks in pt on the page, whatever size it's
+    drawn: made from a live chart they scaled with its width (see _scaled); on the Plot Canvas
+    they stay put, so the same size prints the same on every figure and resizing one doesn't
+    change them. Lines (lw) is then what a plain line prints at; lines the chart drew thicker
+    keep their ratio to it. Converted once, at the size it has now (so it looks the same),
+    and marked on_page."""
+    if spec.get("on_page"):
+        return spec
+    spec = dict(spec)
+    w0, w = spec.get("w0_mm"), spec.get("w_mm")
+    k = float(w) / float(w0) if w0 and w else 1.0
+    for key in TEXT_KEYS + ("tick_len",):
+        if spec.get(key):
+            spec[key] = round(float(spec[key]) * k, 2)
+    lw = float(spec.get("lw", 1.2) or 1.2)
+    if data and data.get("curves") and any(c.get("width_px") for c in data["curves"]):
+        lw = _base_px(data) * float(data.get("pt_px", 0.35)) * lw / float(data.get("lw0", lw) or lw)
+    spec["lw"] = round(lw * k, 2)
+    spec["on_page"] = True
+    return spec
+
+
+def with_text(spec: dict, pt: float) -> dict:
+    """The figure with its labels at `pt` on the page (on_page), its numbers and title
+    keeping their size against the labels (or Auto)."""
+    spec = on_page(spec)
+    old = float(spec.get("font") or 9.0)
+    spec = dict(spec, font=float(pt))
+    for key in ("font_ticks", "font_title"):
+        if spec.get(key):
+            spec[key] = round(float(spec[key]) * float(pt) / old, 2)
+    return spec
+
+
 def _scaled(spec: dict, data: dict) -> tuple[dict, dict, float]:
     """A figure made from a live chart is designed at the chart's size on screen (w0_mm), so
     its text, lines and markers keep the chart's proportions; drawn at another size (w_mm),
-    all of them scale with it, as a picture would."""
+    all of them scale with it, as a picture would. On the page (on_page), only markers do:
+    text, lines and ticks stay the pt they're set to."""
     w0 = spec.get("w0_mm")
     if not w0 or not spec.get("w_mm"):
         return spec, data, 1.0
@@ -173,7 +221,7 @@ def _scaled(spec: dict, data: dict) -> tuple[dict, dict, float]:
     if abs(k - 1.0) < 1e-6:
         return spec, data, 1.0
     spec = dict(spec)
-    for key in ("font", "font_ticks", "font_title", "tick_len", "lw", "ms"):
+    for key in (("ms",) if spec.get("on_page") else TEXT_KEYS + ("tick_len", "lw", "ms")):
         if spec.get(key):
             spec[key] = float(spec[key]) * k
     data = dict(data)
@@ -181,7 +229,7 @@ def _scaled(spec: dict, data: dict) -> tuple[dict, dict, float]:
         data["pt_px"] = float(data["pt_px"]) * k
     if data.get("lw0"):
         data["lw0"] = float(data["lw0"]) * k
-    return spec, data, k
+    return spec, data, (1.0 if spec.get("on_page") else k)     # axes, ticks and gaps: pt on the page
 
 
 def _draw(ax, spec: dict, data: dict) -> None:
@@ -321,7 +369,9 @@ def _curves(ax, spec, data, lw):
     for k, c in enumerate(data.get("curves", [])):
         x, y = np.asarray(c["x"], float), np.asarray(c["y"], float)
         st = "o" if c.get("points") else None
-        if "width_px" in c:                       # as on screen; Lines (lw) scales from what it was then
+        if "width_px" in c and spec.get("on_page"):   # Lines is a plain line's; thicker ones keep their ratio
+            width = lw * float(c["width_px"]) / _base_px(data)
+        elif "width_px" in c:                     # as on screen; Lines (lw) scales from what it was then
             width = c["width_px"] * float(data.get("pt_px", 0.35)) * lw / float(data.get("lw0", lw) or lw)
         else:                                     # an older figure
             width = lw * c.get("width", 1.0)
@@ -438,7 +488,7 @@ def _marker_px(it, d) -> float:
 def paper_font(spec: dict) -> float:
     """The label size in pt as it prints, at the figure's width."""
     f = float(spec.get("font", 9.0))
-    if spec.get("w0_mm") and spec.get("w_mm"):
+    if spec.get("w0_mm") and spec.get("w_mm") and not spec.get("on_page"):
         f *= float(spec["w_mm"]) / float(spec["w0_mm"])
     return f
 

@@ -27,7 +27,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import chartstyle as CS
 from . import figspec as F
-from .viewkit import scroll_column
+from .viewkit import scroll_column, with_slider
 
 
 def _opt_float(text: str):
@@ -294,7 +294,9 @@ class SinglePlotPage(QtWidgets.QWidget):
         sl.addWidget(_head("Look"))
         g = QtWidgets.QFormLayout()
         self.font = QtWidgets.QDoubleSpinBox(decimals=1, minimum=5, maximum=96, singleStep=0.5, suffix=" pt")
-        self.lw = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0.2, maximum=24, singleStep=0.2, suffix=" pt")
+        self.lw = QtWidgets.QDoubleSpinBox(decimals=2, minimum=0.1, maximum=24, singleStep=0.1, suffix=" pt")
+        self.lw.setToolTip("How thick the lines print (on the Canvas: a plain line's width; lines drawn "
+                           "thicker keep their ratio to it)")
         self.ms = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0.5, maximum=60, singleStep=0.5, suffix=" pt")
         self.legend = QtWidgets.QComboBox()
         self.legend.addItems(F.LEGENDS)
@@ -320,12 +322,13 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.ticks.setToolTip("Which way the tick marks point from the axis")
         self.tick_len = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0, maximum=40, singleStep=0.5, suffix=" pt")
         self.tick_len.setToolTip("How long the tick marks are (0: none)")
-        g.addRow("Labels", self.font)
-        g.addRow("Numbers", self.font_ticks)
-        g.addRow("Title", self.font_title)
-        g.addRow("Ticks", _row(self.ticks, self.tick_len))
-        g.addRow("Lines", self.lw)
-        g.addRow("Points", self.ms)
+        g.addRow("Labels", with_slider(self.font))
+        g.addRow("Numbers", with_slider(self.font_ticks))
+        g.addRow("Title", with_slider(self.font_title))
+        g.addRow("Ticks", self.ticks)
+        g.addRow("Tick length", with_slider(self.tick_len))
+        g.addRow("Lines", with_slider(self.lw))
+        g.addRow("Points", with_slider(self.ms))
         g.addRow("Legend", self.legend)
         g.addRow(self.despine)
         g.addRow(self.grid)
@@ -336,7 +339,8 @@ class SinglePlotPage(QtWidgets.QWidget):
             self.shape.addItem(lab, a)
         self.shape.setToolTip("The chart's shape (height to width), on screen and on the Canvas")
         g.addRow("Shape", self.shape)
-        g.addRow("Size", _row(self.w_mm, QtWidgets.QLabel("×"), self.h_mm))
+        g.addRow("Width", with_slider(self.w_mm))
+        g.addRow("Height", with_slider(self.h_mm))
         sl.addLayout(g)
         sl.addStretch(1)
         scroll = scroll_column(self.side)

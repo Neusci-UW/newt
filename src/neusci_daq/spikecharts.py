@@ -143,7 +143,7 @@ class RasterChart(SpikeChart):
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid, "Events by trial")
-        self.point_size = dot_size(self.main.settings, "raster_point_size", 2, 12, "The size of the dots")
+        self.point_size = dot_size(self.main.settings, "raster_point_size", 2, 20, "The size of the dots")
         self.field("dots", "Dot size", self.point_size)
         p = self.plot.getPlotItem()
         p.setLabel("left", "trial")
@@ -153,10 +153,13 @@ class RasterChart(SpikeChart):
         self.raster_dots = pg.ScatterPlotItem(size=2, pen=None)
         p.addItem(self.raster_dots)
         self._rows: dict[int, int] = {}                  # block -> its row
-        # each block's stimulus group, as a colored mark at the start of its row
-        self.group_marks = pg.ScatterPlotItem(size=8, symbol="s", pen=None)
+        # each block's stimulus group, as a colored bar the height of its row at the start of it
+        self.group_marks = pg.BarGraphItem(x0=[], y0=[], width=0, height=1.0, pen=None)
         self.group_marks.setZValue(5)
         p.addItem(self.group_marks)
+        self._marks: tuple[list, list] = ([], [])        # rows, brushes
+        p.vb.sigXRangeChanged.connect(self._size_marks)
+        p.vb.sigResized.connect(self._size_marks)
         self.cur_band = pg.LinearRegionItem(movable=False, orientation="horizontal")
         self.cur_band.setZValue(-10)
         p.addItem(self.cur_band)
@@ -164,6 +167,13 @@ class RasterChart(SpikeChart):
 
     def scale_bars(self) -> list[tuple]:
         return [(self.plot, None, None)]
+
+    def _size_marks(self, *_) -> None:
+        """The group bars: 6 px wide at any zoom, each filling its row top to bottom."""
+        rows, brushes = self._marks
+        w = 6 * (self.plot.getPlotItem().vb.viewPixelSize()[0] or 0)
+        self.group_marks.setOpts(x0=[0.0] * len(rows), y0=[r - 0.5 for r in rows], width=w,
+                                 height=1.0, brushes=brushes)
 
     def draw(self) -> None:
         chosen = self.blocks()                           # in the Trials browser's order: row 1 at the top
@@ -178,8 +188,8 @@ class RasterChart(SpikeChart):
         self.time_range(self._span(chosen))
         marks = [(i, self.page.group_of(i)) for i in chosen]
         marks = [(i, g) for i, g in marks if g is not None]
-        self.group_marks.setData([0.0] * len(marks), [rows[i] for i, _ in marks],
-                                 brush=[pg.mkBrush(self.page.group_color(g)) for _, g in marks])
+        self._marks = ([rows[i] for i, _ in marks], [pg.mkBrush(self.page.group_color(g)) for _, g in marks])
+        self._size_marks()
         ev = self.events()
         if ev is None or not len(ev.t):
             self.raster_dots.setData([], [])

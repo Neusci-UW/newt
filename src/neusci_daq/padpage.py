@@ -109,6 +109,24 @@ class _View(pg.ViewBox):
         super().__init__()
         self.preview = preview
 
+    def _refresh_limits(self) -> None:
+        """Zooming out or panning stops at the data's ends in time (both plots' data)."""
+        from .plotzoom import WheelViewBox
+        lo, hi = np.inf, -np.inf
+        for p in (getattr(self.preview, "p_stim", None), getattr(self.preview, "p_resp", None)):
+            b = WheelViewBox._data_limits(p.getViewBox(), 0) if p is not None else None
+            if b is not None:
+                lo, hi = min(lo, b[0]), max(hi, b[1])
+        self.state["limits"]["xLimits"] = [lo, hi] if hi > lo else [None, None]
+
+    def setRange(self, *a, **kw):
+        self._refresh_limits()
+        super().setRange(*a, **kw)
+
+    def updateViewRange(self, forceX=False, forceY=False):
+        self._refresh_limits()
+        super().updateViewRange(forceX, forceY)
+
     def mouseDragEvent(self, ev, axis=None):
         if ev.button() != QtCore.Qt.MouseButton.LeftButton:
             return super().mouseDragEvent(ev, axis)

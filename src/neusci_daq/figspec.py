@@ -310,6 +310,12 @@ def _scale_bar(ax, spec, data) -> None:
 
 def _marks_and_lines(ax, spec, data, lw):
     """A chart's spike markers (each its unit's color and shape) and levels across (the threshold)."""
+    for b in data.get("bands", []):                   # bars a fixed width on the page, as the raster's group colors
+        from matplotlib.transforms import ScaledTranslation
+        w = float(b.get("w_px", 6.0)) * float(data.get("pt_px", 0.75))     # screen pixels to points
+        tr = ax.transData + ScaledTranslation(w / 2 / 72, 0, ax.figure.dpi_scale_trans)
+        for x0, y0, h, c in zip(b["x0"], b["y0"], b["h"], b["colors"]):
+            ax.plot([x0, x0], [y0, y0 + h], color=c, linewidth=w, solid_capstyle="butt", transform=tr, zorder=5)
     for m in data.get("marks", []):
         sym = np.asarray(m.get("symbols", []), object)
         x, y = np.asarray(m["x"], float), np.asarray(m["y"], float)
@@ -449,8 +455,16 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
                     kx = 1.0
                 else:
                     ky = 1.0
-    curves, marks, lines = [], [], []
+    curves, marks, lines, bands = [], [], [], []
     for it in item.items:
+        if isinstance(it, pg.BarGraphItem) and it.isVisible() and len(it.opts.get("x0") or []):
+            o = it.opts                                   # the raster's group colors: each bar its row, a fixed width
+            px = item.getViewBox().viewPixelSize()[0] or 1.0
+            n = len(o["x0"])
+            bands.append({"x0": [float(v) * kx for v in o["x0"]], "y0": [float(v) * ky for v in o["y0"]],
+                          "h": [float(o["height"]) * ky] * n, "w_px": float(o["width"]) / px,
+                          "colors": [pg.mkBrush(b).color().name() for b in (o.get("brushes") or [])]})
+            continue
         if isinstance(it, pg.ScatterPlotItem) and it.isVisible() and len(it.data):
             d = it.data                                   # spike markers: each point its color and shape
             cols = [pg.mkBrush(b).color() for b in d["brush"]]
@@ -586,7 +600,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             data_ticks[key] = [round(float(v) * k_, 12) for v in vals]
         except Exception:
             pass
-    data = {"curves": curves, "marks": marks, **data_ticks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
+    data = {"curves": curves, "marks": marks, "bands": bands, **data_ticks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
             "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item),
             "pt_px": pt_px, "lw0": float(spec.get("lw", 1.2))}
     return spec, data

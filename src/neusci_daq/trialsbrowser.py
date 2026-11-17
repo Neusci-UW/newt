@@ -328,6 +328,8 @@ class TrialsBrowser(QtWidgets.QWidget):
             lambda: self.later(lambda picked=self.selected_blocks(): self.selection.emit(picked)))
         self.tree.itemSelectionChanged.connect(self._highlight_changed)
         lay.addWidget(self.tree, 1)
+        if for_analysis:                          # a click anywhere outside the browser drops the highlight
+            QtWidgets.QApplication.instance().installEventFilter(self)
         self.preview = TrialPreview()
         self.preview.hide()
         if for_analysis:
@@ -352,6 +354,13 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.group_settings.addRow(label, widget)
 
     # -- acting once Qt is done with the event ---------------------------------------------
+    def eventFilter(self, obj, ev):
+        if ev.type() == QtCore.QEvent.Type.MouseButtonPress and isinstance(obj, QtWidgets.QWidget) \
+                and obj.window() is self.window() and self.isVisible() and self.tree.selectedItems() \
+                and not self.isAncestorOf(obj) and obj is not self:
+            self.tree.clearSelection()
+        return False
+
     def later(self, fn) -> None:
         """Run fn once Qt is done with the event in hand (the timer goes with the panel)."""
         self._queue.append(fn)

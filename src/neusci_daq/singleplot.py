@@ -331,7 +331,9 @@ class SinglePlotPage(QtWidgets.QWidget):
     # -- the figure -------------------------------------------------------------------------
     def show_spec(self, spec: dict | None, live: bool = False) -> None:
         if self.focus_chart is not None and not live:
+            keep = (self.data, self.editing)       # leaving puts back the figure from before; keep the caller's
             self.leave_focus(switch=False)
+            self.data, self.editing = keep
         self.spec = spec
         has = spec is not None
         self.side.setEnabled(has)

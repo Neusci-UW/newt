@@ -1074,7 +1074,7 @@ class SpikeCycleChart(CycleChart):
 
     def __init__(self, page, cid: str = ""):
         super().__init__(page, cid)
-        self.point_size = dot_size(self.main.settings, "raster_point_size", 2, 12, "The size of the dots")
+        self.point_size = dot_size(self.main.settings, "raster_point_size", 2, 20, "The size of the dots")
         self.field("dots", "Dot size", self.point_size)
         p = self.plot.getPlotItem()
         p.invertY(True)                                  # the first cycle at the top

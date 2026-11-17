@@ -253,6 +253,11 @@ def _marks_and_lines(ax, spec, data, lw):
                     for i in k]
             ax.scatter(x[k], y[k], s=size ** 2, c=rgba, marker=_SYMBOLS.get(s_, "o"), linewidths=0, zorder=5)
     lo, hi = spec.get("ylim") or [None, None]
+    if lo is None or hi is None:                      # automatic: a level off the traces doesn't stretch the axis
+        d0, d1 = ax.get_ylim()
+        pad = 0.05 * (d1 - d0)
+        lo = d0 - pad if lo is None else lo
+        hi = d1 + pad if hi is None else hi
     for ln in data.get("lines", []):
         if (lo is not None and ln["y"] < lo) or (hi is not None and ln["y"] > hi):
             continue                                  # off the plot: no line, and no label out in the margin
@@ -294,7 +299,7 @@ def _decimate(x: np.ndarray, y: np.ndarray, n: int = 4000) -> tuple[np.ndarray, 
     return np.asarray(xs), np.asarray(ys)
 
 
-def from_chart(chart, max_points: int = 4000) -> tuple[dict, dict]:
+def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, dict]:
     """(spec, data): a whiteboard chart's first plot as a figure, looking as it does: every line
     (each trial of a group too) in its color, opacity and width; the axes in the units shown
     (mV, ms…), over the same range; its grid."""
@@ -314,6 +319,41 @@ def from_chart(chart, max_points: int = 4000) -> tuple[dict, dict]:
         k = getattr(ax, "autoSIPrefixScale", 1.0) if getattr(ax, "autoSIPrefix", False) else 1.0
         return float(k or 1.0) * float(getattr(ax, "scale", 1.0) or 1.0)
     kx, ky = scale(bottom), scale(left)
+    prefixes = {}
+    if not view:
+        # drawn off screen, its axes never chose their units: choose them as pyqtgraph would, from
+        # the size of the numbers (V → mV for millivolts, s stays s); the range is the data's
+        def biggest(axis: int) -> float:
+            m = 0.0
+            for it in item.items:
+                if not isinstance(it, pg.PlotDataItem) or not it.isVisible():
+                    continue
+                if hasattr(it, "_Y"):
+                    X, Y = it.getOriginalDataset()
+                    v = (X if axis == 0 else Y)
+                elif getattr(it, "_full", None) is not None:
+                    v = it._full[axis]
+                else:
+                    got = it.getData()
+                    v = got[axis] if got[axis] is not None else np.empty(0)
+                v = np.asarray(v, float)
+                if v.size and np.isfinite(v).any():
+                    m = max(m, float(np.nanmax(np.abs(v))))
+            return m
+        for ax_, k_, axis in ((bottom, "x", 0), (left, "y", 1)):
+            if (ax_.labelUnits or "").strip():
+                sc, pre = pg.siScale(biggest(axis) or 1.0)
+                prefixes[k_] = pre
+                if k_ == "x":
+                    kx = sc
+                else:
+                    ky = sc
+            else:
+                prefixes[k_] = ""
+                if k_ == "x":
+                    kx = 1.0
+                else:
+                    ky = 1.0
     curves, marks, lines = [], [], []
     for it in item.items:
         if isinstance(it, pg.ScatterPlotItem) and it.isVisible() and len(it.data):
@@ -362,12 +402,16 @@ def from_chart(chart, max_points: int = 4000) -> tuple[dict, dict]:
     def label(ax) -> str:
         text = (ax.labelText or "").strip()
         units = (ax.labelUnits or "").strip()
-        prefix = (getattr(ax, "labelUnitPrefix", "") or "") if units else ""
+        if not view:
+            prefix = prefixes.get("x" if ax is bottom else "y", "") if units else ""
+        else:
+            prefix = (getattr(ax, "labelUnitPrefix", "") or "") if units else ""
         return f"{text} ({prefix}{units})" if units else text
     (x0, x1), (y0, y1) = item.getViewBox().viewRange()
     spec = new_spec(kind="curves")
     spec["title"] = getattr(chart, "name", "") or ""
-    spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
+    if view:
+        spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
     spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
         if hasattr(item, "ctrl") else False
     spec["lw"] = 1.2

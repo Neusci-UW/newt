@@ -796,6 +796,8 @@ class LiveMixin:
             self.btn_run.setText("Start")
             self._show_rec_armed()
             self._fit_window()
+            if self.mode == LIVE:
+                self._redraw_live()              # all of the trace held, not just the last Window drawn while running
 
     def resume_acquiring(self, record: bool = True, keep_trace: bool = False, new_run: bool = False) -> bool:
         """Start the stream afresh (Start, or a run carrying on after a wait) and, with

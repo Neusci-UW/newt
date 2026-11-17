@@ -24,7 +24,7 @@ def test_starts_on_acquisition_record_with_sub_pages(win):
     assert shown(win) == ["acq"]
     pane = win.tabs.panes[0]
     assert tab_texts(pane.bar) == ["Acquisition", "Analysis", "Data Simulation", "Lessons"]
-    assert tab_texts(pane.sub_bar) == ["Record", "Stimulator", "Protocols"]
+    assert tab_texts(pane.sub_bar) == ["Record", "Simple Stimulus", "Complex Stimulus"]
     assert pane.sub_bar.currentIndex() == 0 and not pane.sub_head.isHidden()
 
 
@@ -39,23 +39,23 @@ def test_sub_page_bar_only_under_tabs_that_have_sub_pages(win):
 
 
 def test_a_tab_comes_back_to_the_sub_page_last_used(win):
-    win.tabs.pick(0, "trials")
+    win.tabs.pick(0, "stim")
     win.tabs.pick_group(0, "analysis")
     win.tabs.pick_group(0, "acquisition")
-    assert shown(win) == ["trials"]
+    assert shown(win) == ["stim"]
     assert win.tabs.panes[0].sub_bar.currentIndex() == 2
 
 
 def test_clicking_the_sub_page_bar_picks_the_page(win):
     pane = win.tabs.panes[0]
     pane.sub_bar.tabBarClicked.emit(1)
-    assert shown(win) == ["stim"] and pane.bar.currentIndex() == 0
+    assert shown(win) == ["simple"] and pane.bar.currentIndex() == 0
 
 
 def test_any_page_can_go_in_either_half(win):
     """Two sub-pages of Acquisition side by side, or a sub-page beside another tab."""
     win.tabs.set_layout(SIDE)
-    for left, right in (("acq", "stim"), ("trials", "acq"), ("stim", "analysis"), ("analysis", "trials"),
+    for left, right in (("acq", "stim"), ("simple", "acq"), ("stim", "analysis"), ("analysis", "simple"),
                         ("sim", "stim"), ("acq", "sim")):
         if win.tabs.shown[1] == left:                        # move it out of the way first,
             spare = next(p for p in win.tabs.ids if p not in (left, right, win.tabs.shown[0]))
@@ -68,13 +68,13 @@ def test_any_page_can_go_in_either_half(win):
 
 
 def test_picking_a_tab_in_a_split_avoids_the_page_the_other_half_shows(win):
-    win.tabs.set_layout(SIDE)                                # Record | Stimulator
+    win.tabs.set_layout(SIDE)                                # Record | Simple Stimulus
     win.tabs.pick_group(1, "analysis")                       # Record | Analysis
-    win.tabs.pick_group(1, "acquisition")                    # back: Stimulator, not Record again
-    assert shown(win) == ["acq", "stim"] and win.tabs.layout_mode == SIDE
-    win.tabs.pick_group(0, "analysis")
-    win.tabs.pick_group(1, "analysis")                       # only one page: shows it full screen
-    assert win.tabs.layout_mode == ONE and shown(win) == ["analysis"]
+    win.tabs.pick_group(1, "acquisition")                    # back: Simple Stimulus, not Record again
+    assert shown(win) == ["acq", "simple"] and win.tabs.layout_mode == SIDE
+    win.tabs.pick_group(0, "analysis")                       # DataPad | Simple Stimulus
+    win.tabs.pick_group(1, "analysis")                       # DataPad | Single Plot: another of its pages
+    assert win.tabs.layout_mode == SIDE and shown(win) == ["analysis", "singleplot"]
 
 
 def test_tab_bars_never_show_scroll_arrows(app, win):
@@ -91,9 +91,9 @@ def test_pick_tabs_and_split(win):
     win.tabs.pick(0, "stim")
     assert shown(win) == ["stim"]
     win.tabs.set_layout(SIDE)
+    assert shown(win) == ["stim", "simple"]                  # the other half keeps its page
+    win.tabs.pick(1, "acq")
     assert shown(win) == ["stim", "acq"]
-    win.tabs.pick(1, "trials")
-    assert shown(win) == ["stim", "trials"]
     win.tabs.set_layout(STACKED)
     assert win.tabs.splitter.orientation().name == "Vertical"
     win.tabs.set_layout(ONE)
@@ -102,7 +102,7 @@ def test_pick_tabs_and_split(win):
 
 def test_same_tab_in_both_halves_goes_back_to_one_tab(win):
     win.tabs.set_layout(SIDE)
-    assert shown(win) == ["acq", "stim"]
+    assert shown(win) == ["acq", "simple"]
     win.tabs.pick(1, "acq")                                  # already open on the left
     assert win.tabs.layout_mode == ONE and shown(win) == ["acq"]
 
@@ -112,28 +112,32 @@ def test_open_stim_window_shows_the_tab(win):
     assert win.tabs.is_visible("stim")
     win.tabs.pick(0, "acq")
     win.tabs.set_layout(SIDE)
-    win.tabs.pick(1, "trials")
+    win.tabs.pick(1, "simple")
     win.open_stim_window()                                   # puts it in the second half
     assert shown(win) == ["acq", "stim"]
 
 
 def test_toolbar_follows_visible_tabs(app, win):
-    win.resize(1300, 600)       # a narrow window moves toolbar items into its overflow menu
+    win.resize(1300, 600)
     win.show()
     pump(app, 0.05)
-    assert win.comment_edit.isVisible() and win.window_box.isVisible() and win.btn_comments.isVisible()
+    assert win.comment_edit.isVisible() and win.btn_comments.isVisible() and win.btn_run.isVisible()
     win.tabs.pick(0, "stim")
     pump(app, 0.05)
-    assert not win.comment_edit.isVisible() and not win.window_box.isVisible()
-    assert not win.btn_comments.isVisible()                  # it's part of the Acquisition page
-    assert win.btn_run.isVisible() and win.btn_rec.isVisible() and win.rate_box.isVisible()
-    win.tabs.set_layout(SIDE)                                # stim | acq
+    assert not win.comment_edit.isVisible()
+    assert not win.btn_comments.isVisible() and not win.btn_run.isVisible()   # they're on the Record page
+    assert win.btn_theme.isVisible()                         # the toolbar's right end shows on every tab
+    win.tabs.set_layout(SIDE)
+    win.tabs.pick(1, "acq")                                  # Complex Stimulus | Record
     pump(app, 0.05)
-    assert win.comment_edit.isVisible()
+    assert win.comment_edit.isVisible() and win.btn_run.isVisible()
 
 
 # ---------------------------------------------------------------- hover strips
-def test_strips_compact_only_when_acquisition_shares_the_screen(win):
+def test_strips_compact_only_when_acquisition_shares_the_screen(app, win):
+    win.resize(1300, 1000)                                   # tall enough for both strips open
+    win.show()
+    pump(app, 0.05)
     assert not any(s.compact for s in win.strips)
     win.tabs.set_layout(SIDE)
     assert all(s.compact and not s.expanded for s in win.strips)
@@ -259,7 +263,7 @@ def test_chip_shows_on_every_tab_while_repeating_and_stops_it(app, win):
     pump(app, 0.05)
     assert win.stim_chip.isVisible() and win.stim_chip_text.text() == "Stimulating"
     assert "every 0.2 s" in win.stim_chip.toolTip()
-    win.tabs.pick(0, "trials")                                # still visible on another tab
+    win.tabs.pick(0, "analysis")                              # still visible on another tab
     pump(app, 0.05)
     assert win.stim_chip.isVisible()
     win.btn_chip_stop.click()
@@ -295,12 +299,12 @@ def test_stim_tab_output_and_record_on(app, win):
 def test_stimulator_tab_shows_the_stimulus_that_fires(win):
     """Setting the stimulus from outside the tab must update the tab, or editing a
     field would silently swap back to the old one."""
-    win.set_stimulus(Stimulus(shape="pulse", amplitude_v=2, width_ms=5, count=4, interval_ms=60))
+    s = Stimulus(shape="pulse", amplitude_v=2, width_ms=5, count=4, interval_ms=60)
+    win.set_stimulus(s)
     page = win.stim_page
-    assert page.p_amp.value() == 2 and page.p_count.value() == 4
-    page.p_width.setValue(4)                                   # edit one field
-    s = win.stimulus
-    assert (s.amplitude_v, s.width_ms, s.count, s.interval_ms) == (2, 4, 4, 60)
+    rate = 5000.0
+    assert np.allclose(page.stimulus().waveform(rate), s.waveform(rate))    # its segments are the pulses
+    assert np.allclose(win.stimulus.waveform(rate), s.waveform(rate))       # and loading them changed nothing
 
 
 @pytest.fixture
@@ -344,13 +348,12 @@ def test_everything_fits_on_a_1024_px_wide_window(app, scaled_win, mode):
         win.set_repeat(True)                                   # chip showing too
         win.btn_comments.setText("Comments (88)")              # longest button text
         pump(app, 0.2)
-        for w in (win.btn_run, win.btn_rec, win.rate_box, win.window_box, win.comment_edit,
+        for w in (win.btn_run, win.btn_rec, win.lbl_rate, win.rate_box, win.window_readout, win.comment_edit,
                   win.stim_chip, win.btn_comments, win.btn_theme):
             assert w.isVisible(), w                            # not in the overflow menu
             right = w.mapTo(win, w.rect().topRight()).x()
             assert right < win.width(), w
-        # Labels give way in order: "Sampling rate" goes before "Window".
-        assert not (win.lbl_rate.isVisible() and not win.lbl_window.isVisible())
+        assert win.btn_rec.text().startswith("Stop recording · ")       # in full: the run bar has room
         assert win.btn_rec.text().endswith("0:00") or win.btn_rec.text().endswith("0:01")
         win.stop_stimulus()
         win.btn_rec.setChecked(False)
@@ -362,34 +365,17 @@ def test_everything_fits_on_a_1024_px_wide_window(app, scaled_win, mode):
         app.setPalette(old_pal)
 
 
-def test_toolbar_labels_and_full_record_text_come_back_when_wide(app, win):
+def test_record_text_is_always_in_full_on_the_run_bar(app, win):
+    """Start, Record and the rate sit on the run bar under the channels, with room to
+    spare: Record always says "Stop recording · 0:12" and the rate keeps its label."""
     win.resize(1024, 640)
     win.show()
     win.btn_run.setChecked(True)
     win.btn_rec.setChecked(True)
     pump(app, 0.1)
-    win.resize(1600, 640)
-    pump(app, 0.1)
-    assert win.lbl_rate.isVisible() and win.lbl_window.isVisible()
-    assert win.btn_rec.text().startswith("Stop recording · ")
+    assert win.btn_rec.text().startswith("Stop recording · ") and win.lbl_rate.isVisible()
     win.btn_rec.setChecked(False)
-    win.btn_run.setChecked(False)
-
-
-def test_short_record_text_keeps_its_meaning_in_a_tooltip(app, win):
-    win.resize(1024, 640)
-    win.show()
-    win.btn_run.setChecked(True)
-    win.btn_rec.setChecked(True)
-    pump(app, 0.1)
-    win.toolbar.setFixedWidth(300)                             # far too narrow: the window's minimum
-    pump(app, 0.1)                                             # width follows the font, so resizing
-    win._fit_toolbar()                                         # it may leave room (it did on Windows)
-    assert win.btn_rec.text() in ("0:00", "0:01")
-    assert win.btn_rec.toolTip() == "Stop recording"
-    assert not win.lbl_rate.isVisible() and not win.lbl_window.isVisible()
-    win.btn_rec.setChecked(False)
-    assert (win.btn_rec.text(), win.btn_rec.toolTip()) == ("Record: Off", "")
+    assert win.btn_rec.text() == "Record: Off"
     win.btn_run.setChecked(False)
 
 
@@ -406,16 +392,16 @@ def test_closing_stops_the_redraw_timer(app, win):
 
 
 def test_theme_control_sits_on_the_toolbar_row(app, win):
-    """Same row as Start and Record, at the right end, on every tab and in split view."""
+    """On the toolbar, the comment box's row, at the right end, on every tab and in split view."""
     win.resize(1300, 600)
     win.show()
-    for pick, mode in (("acq", ONE), ("stim", ONE), ("trials", SIDE)):
+    for pick, mode in (("acq", ONE), ("stim", ONE), ("analysis", SIDE)):
         win.tabs.pick(0, pick)
         win.tabs.set_layout(mode)
         pump(app, 0.05)
         assert win.btn_theme.isVisible()
         mid = lambda w: w.mapTo(win, w.rect().center()).y()
-        assert abs(mid(win.btn_theme) - mid(win.btn_run)) <= 1
+        assert abs(mid(win.btn_theme) - mid(win.toolbar)) <= 2
         right = win.btn_theme.mapTo(win, win.btn_theme.rect().topRight()).x()
         assert right > win.width() - 40                      # right end of the toolbar
     for pane in win.tabs.panes:                              # nothing left on the tab bars
@@ -534,9 +520,9 @@ def test_wheel_zoom_works_while_acquisition_is_stopped(app, win):
     assert win.window_box.value() == pytest.approx(0.5)
     assert hi - lo == pytest.approx(0.5) and lo < t_end - 1.0 < hi   # the view moved with it
     assert len(win.buf_t) == n                               # the trace wasn't trimmed
-    win._zoom_time(4.0, x=t_end - 1.0)                       # and back out: all of it again
+    win._zoom_time(4.0, x=t_end - 1.0)                       # and back out: the 2 s Window again
     lo, hi = vb.viewRange()[0]
-    assert hi - lo == pytest.approx(2.0, abs=1e-3) and lo <= win.buf_t[0] - win._axis_zero + 0.01   # stops at the last sample
+    assert hi - lo == pytest.approx(2.0, abs=1e-3) and hi <= t_end + 0.01   # stops at the last sample
     yr = vb.viewRange()[1]
     vb.wheelEvent(_Wheel(vb, delta=120, cmd=True))           # Cmd: voltage zoom while stopped too
     assert vb.viewRange()[1][1] - vb.viewRange()[1][0] < yr[1] - yr[0]
@@ -835,10 +821,10 @@ def test_stacked_plots_line_up(app, win):
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    for k in ("Response", "Raster", "Rate"):
+    for k in ("Raster", "Rate"):                             # (a Response chart has no plot until its channels are picked)
         ap.canvas.add(k)
     pump(app, 0.2)
-    ws = [ap.chart(k).plots()[0].getPlotItem().getAxis("left").width() for k in ("Response", "Raster", "Rate")]
+    ws = [ap.chart(k).plots()[0].getPlotItem().getAxis("left").width() for k in ("Raster", "Rate")]
     assert max(ws) - min(ws) < 0.5
 
 

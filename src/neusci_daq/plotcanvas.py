@@ -171,6 +171,119 @@ class Panel(QtWidgets.QGraphicsObject):
                 "x_mm": self.pos().x() / PX, "y_mm": self.pos().y() / PX}
 
 
+# ------------------------------------------------------------------------------- annotations
+TOOLS = (("select", "Select", "Pick, move and resize things (Delete removes what's picked)"),
+         ("text", "Text", "Click to type a label; double-click a label to change it"),
+         ("line", "Line", "Drag to draw a line"),
+         ("arrow", "Arrow", "Drag to draw an arrow, pointing where you let go"),
+         ("rect", "Box", "Drag to draw a box"),
+         ("ellipse", "Ellipse", "Drag to draw an ellipse or circle"))
+
+
+def pt_px(pt: float) -> float:
+    """Points (1/72 in) to scene units."""
+    return pt / 72 * 25.4 * PX
+
+
+class AnnText(QtWidgets.QGraphicsTextItem):
+    """A label on the page: drag it to move it, double-click to change the words."""
+
+    def __init__(self, canvas: "PlotCanvasPage", text: str, size: float, color: str, bold: bool = False):
+        super().__init__(text)
+        self.canvas, self.size, self.color, self.bold = canvas, size, color, bold
+        self.setFlags(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+                      | QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setZValue(50)
+        self.restyle()
+
+    def restyle(self) -> None:
+        f = QtGui.QFont()
+        f.setPixelSize(max(1, int(round(pt_px(self.size)))))
+        f.setBold(self.bold)
+        self.setFont(f)
+        self.setDefaultTextColor(QtGui.QColor(self.color))
+
+    def mouseDoubleClickEvent(self, ev):
+        self.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextEditorInteraction)
+        self.setFocus()
+        super().mouseDoubleClickEvent(ev)
+
+    def focusOutEvent(self, ev):
+        self.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.NoTextInteraction)
+        super().focusOutEvent(ev)
+        if not self.toPlainText().strip():               # emptied: gone
+            self.canvas.remove_annotation(self)
+
+    def state(self) -> dict:
+        return {"kind": "text", "x_mm": self.pos().x() / PX, "y_mm": self.pos().y() / PX, "text": self.toPlainText(),
+                "size": self.size, "color": self.color, "bold": self.bold}
+
+
+class AnnShape(QtWidgets.QGraphicsObject):
+    """A line, arrow, box or ellipse, from one corner (or end) to the other, in scene units."""
+
+    def __init__(self, canvas: "PlotCanvasPage", kind: str, p0: QtCore.QPointF, p1: QtCore.QPointF,
+                 color: str, width: float):
+        super().__init__()
+        self.canvas, self.kind, self.color, self.width = canvas, kind, color, width
+        self.p0, self.p1 = QtCore.QPointF(p0), QtCore.QPointF(p1)
+        self.setFlags(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+                      | QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setZValue(40)
+
+    def set_end(self, p1: QtCore.QPointF) -> None:
+        self.prepareGeometryChange()
+        self.p1 = QtCore.QPointF(p1)
+        self.update()
+
+    def boundingRect(self):
+        m = pt_px(self.width) + pt_px(6)
+        return QtCore.QRectF(self.p0, self.p1).normalized().adjusted(-m, -m, m, m)
+
+    def shape(self):
+        path = QtGui.QPainterPath()
+        if self.kind in ("line", "arrow"):
+            path.moveTo(self.p0)
+            path.lineTo(self.p1)
+            stroker = QtGui.QPainterPathStroker()
+            stroker.setWidth(max(pt_px(self.width), 8))
+            return stroker.createStroke(path)
+        path.addRect(QtCore.QRectF(self.p0, self.p1).normalized())
+        return path
+
+    def paint(self, p, opt, widget=None):
+        pen = QtGui.QPen(QtGui.QColor(self.color), pt_px(self.width))
+        pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        r = QtCore.QRectF(self.p0, self.p1).normalized()
+        if self.kind in ("line", "arrow"):
+            p.drawLine(self.p0, self.p1)
+            if self.kind == "arrow":
+                d = self.p1 - self.p0
+                L = (d.x() ** 2 + d.y() ** 2) ** 0.5 or 1.0
+                ux, uy = d.x() / L, d.y() / L
+                head = pt_px(4 + 2 * self.width)
+                a = QtCore.QPointF(self.p1.x() - head * (ux - 0.5 * uy), self.p1.y() - head * (uy + 0.5 * ux))
+                b = QtCore.QPointF(self.p1.x() - head * (ux + 0.5 * uy), self.p1.y() - head * (uy - 0.5 * ux))
+                p.setBrush(QtGui.QColor(self.color))
+                p.drawPolygon(QtGui.QPolygonF([self.p1, a, b]))
+        elif self.kind == "rect":
+            p.drawRect(r)
+        else:
+            p.drawEllipse(r)
+        if self.isSelected():
+            p.setPen(QtGui.QPen(QtGui.QColor("#1a5fd0"), 1, QtCore.Qt.PenStyle.DashLine))
+            p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            p.drawRect(r.adjusted(-2, -2, 2, 2))
+
+    def state(self) -> dict:
+        o = self.pos()
+        return {"kind": self.kind, "x0": (self.p0.x() + o.x()) / PX, "y0": (self.p0.y() + o.y()) / PX,
+                "x1": (self.p1.x() + o.x()) / PX, "y1": (self.p1.y() + o.y()) / PX,
+                "color": self.color, "width": self.width}
+
+
 class _View(QtWidgets.QGraphicsView):
     def __init__(self, scene, canvas):
         super().__init__(scene)
@@ -203,6 +316,11 @@ class _View(QtWidgets.QGraphicsView):
         return super().viewportEvent(ev)
 
     def mousePressEvent(self, ev):
+        tool = self.canvas.tool()
+        if ev.button() == QtCore.Qt.MouseButton.LeftButton and tool != "select":
+            at = self.mapToScene(ev.position().toPoint())
+            self.canvas.start_drawing(tool, at)
+            return
         if ev.button() == QtCore.Qt.MouseButton.MiddleButton:    # the middle button drags the page about
             self._pan = ev.position()
             self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
@@ -210,6 +328,9 @@ class _View(QtWidgets.QGraphicsView):
         super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
+        if self.canvas.drawing is not None:
+            self.canvas.drawing.set_end(self.mapToScene(ev.position().toPoint()))
+            return
         if self._pan is not None:
             d = ev.position() - self._pan
             self._pan = ev.position()
@@ -219,6 +340,9 @@ class _View(QtWidgets.QGraphicsView):
         super().mouseMoveEvent(ev)
 
     def mouseReleaseEvent(self, ev):
+        if self.canvas.drawing is not None:
+            self.canvas.end_drawing(self.mapToScene(ev.position().toPoint()))
+            return
         if self._pan is not None:
             self._pan = None
             self.unsetCursor()
@@ -226,8 +350,13 @@ class _View(QtWidgets.QGraphicsView):
         super().mouseReleaseEvent(ev)
 
     def keyPressEvent(self, ev):
+        focus = self.scene().focusItem()
+        if isinstance(focus, AnnText) and focus.textInteractionFlags() != QtCore.Qt.TextInteractionFlag.NoTextInteraction:
+            return super().keyPressEvent(ev)            # typing in a label
         if ev.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
             self.canvas.remove_picked()
+        elif ev.key() == QtCore.Qt.Key.Key_Escape:
+            self.canvas.set_tool("select")
         else:
             super().keyPressEvent(ev)
 
@@ -273,6 +402,46 @@ class PlotCanvasPage(QtWidgets.QWidget):
         bar.addWidget(self.btn_fit)
         bar.addWidget(self.btn_export)
         lay.addLayout(bar)
+        # the annotation tools: text and shapes drawn on the page, over the figures
+        draw = QtWidgets.QHBoxLayout()
+        draw.addWidget(QtWidgets.QLabel("Draw"))
+        self.tools = QtWidgets.QButtonGroup(self)
+        self._tool_btn = {}
+        for key, label, tip in TOOLS:
+            b = QtWidgets.QToolButton(text=label)
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            self.tools.addButton(b)
+            self._tool_btn[key] = b
+            draw.addWidget(b)
+        self._tool_btn["select"].setChecked(True)
+        self.ann_color = "#000000"
+        self.btn_color = QtWidgets.QToolButton()
+        self.btn_color.setToolTip("The color of new drawings, and of the ones picked")
+        self.btn_color.clicked.connect(self._pick_color)
+        self.ann_width = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0.25, maximum=12, value=1.0, singleStep=0.25,
+                                                  suffix=" pt")
+        self.ann_width.setToolTip("Line width of new lines and shapes, and of the ones picked")
+        self.ann_size = QtWidgets.QDoubleSpinBox(decimals=1, minimum=4, maximum=72, value=10, singleStep=1,
+                                                 suffix=" pt")
+        self.ann_size.setToolTip("Text size of new labels, and of the ones picked")
+        self.ann_bold = QtWidgets.QToolButton(text="B")
+        self.ann_bold.setCheckable(True)
+        self.ann_bold.setToolTip("Bold labels")
+        for lab, w in (("Color", self.btn_color), ("Width", self.ann_width), ("Text", self.ann_size)):
+            draw.addSpacing(6)
+            draw.addWidget(QtWidgets.QLabel(lab))
+            draw.addWidget(w)
+        draw.addWidget(self.ann_bold)
+        draw.addStretch(1)
+        lay.addLayout(draw)
+        self._show_color()
+        self.ann_width.valueChanged.connect(lambda v: self._restyle_picked(width=v))
+        self.ann_size.valueChanged.connect(lambda v: self._restyle_picked(size=v))
+        self.ann_bold.toggled.connect(lambda on: self._restyle_picked(bold=on))
+        self.tools.buttonClicked.connect(lambda *_: self._tool_changed())
+        self.annotations: list = []
+        self.drawing: AnnShape | None = None
         self.scene = QtWidgets.QGraphicsScene(self)
         self.view = _View(self.scene, self)
         lay.addWidget(self.view, 1)
@@ -434,7 +603,123 @@ class PlotCanvasPage(QtWidgets.QWidget):
         for p in self.picked():
             self.scene.removeItem(p)
             self.panels.remove(p)
+        for a in [a for a in self.annotations if a.isSelected()]:
+            self.remove_annotation(a)
         self.relabel()
+
+    # -- annotations ------------------------------------------------------------------------
+    def tool(self) -> str:
+        return next((k for k, b in self._tool_btn.items() if b.isChecked()), "select")
+
+    def set_tool(self, key: str) -> None:
+        self._tool_btn[key].setChecked(True)
+        self._tool_changed()
+
+    def _tool_changed(self) -> None:
+        drawing = self.tool() != "select"
+        self.view.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag if drawing
+                              else QtWidgets.QGraphicsView.DragMode.RubberBandDrag)
+        self.view.viewport().setCursor(QtCore.Qt.CursorShape.CrossCursor if drawing
+                                       else QtCore.Qt.CursorShape.ArrowCursor)
+
+    def start_drawing(self, tool: str, at: QtCore.QPointF) -> None:
+        if tool == "text":
+            t = AnnText(self, "Text", self.ann_size.value(), self.ann_color, self.ann_bold.isChecked())
+            self.scene.addItem(t)
+            t.setPos(at)
+            self.annotations.append(t)
+            self.set_tool("select")
+            t.setSelected(True)
+            t.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextEditorInteraction)
+            t.setFocus()
+            cur = t.textCursor()
+            cur.select(QtGui.QTextCursor.SelectionType.Document)
+            t.setTextCursor(cur)
+            return
+        self.drawing = AnnShape(self, tool, at, at, self.ann_color, self.ann_width.value())
+        self.scene.addItem(self.drawing)
+
+    def end_drawing(self, at: QtCore.QPointF) -> None:
+        d, self.drawing = self.drawing, None
+        d.set_end(at)
+        if (d.p1 - d.p0).manhattanLength() < 3:          # just a click: nothing drawn
+            self.scene.removeItem(d)
+            return
+        self.annotations.append(d)
+        self.scene.clearSelection()
+        d.setSelected(True)
+
+    def remove_annotation(self, a) -> None:
+        if a in self.annotations:
+            self.annotations.remove(a)
+            self.scene.removeItem(a)
+
+    def _show_color(self) -> None:
+        pix = QtGui.QPixmap(16, 16)
+        pix.fill(QtGui.QColor(self.ann_color))
+        self.btn_color.setIcon(QtGui.QIcon(pix))
+
+    def _pick_color(self) -> None:
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.ann_color), self, "Drawing color")
+        if c.isValid():
+            self.ann_color = c.name()
+            self._show_color()
+            self._restyle_picked(color=self.ann_color)
+
+    def _restyle_picked(self, **kw) -> None:
+        for a in self.annotations:
+            if not a.isSelected():
+                continue
+            if isinstance(a, AnnText):
+                for k in ("color", "size", "bold"):
+                    if k in kw:
+                        setattr(a, k, kw[k])
+                a.restyle()
+            else:
+                for k in ("color", "width"):
+                    if k in kw:
+                        setattr(a, k, kw[k])
+                a.prepareGeometryChange()
+                a.update()
+
+    def _add_annotation(self, d: dict) -> None:
+        if d.get("kind") == "text":
+            t = AnnText(self, d.get("text", ""), float(d.get("size", 10)), d.get("color", "#000000"),
+                        bool(d.get("bold")))
+            t.setPos(d["x_mm"] * PX, d["y_mm"] * PX)
+            self.scene.addItem(t)
+            self.annotations.append(t)
+        else:
+            a = AnnShape(self, d["kind"], QtCore.QPointF(d["x0"] * PX, d["y0"] * PX),
+                         QtCore.QPointF(d["x1"] * PX, d["y1"] * PX), d.get("color", "#000000"),
+                         float(d.get("width", 1.0)))
+            self.scene.addItem(a)
+            self.annotations.append(a)
+
+    def _export_annotations(self, fig, W: float, H: float) -> None:
+        """The drawings in the saved page: text as text, lines and shapes as vector objects."""
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Ellipse, FancyArrowPatch, Rectangle
+        for a in self.annotations:
+            d = a.state()
+            if d["kind"] == "text":
+                fig.text(d["x_mm"] / W, 1 - d["y_mm"] / H, d["text"], fontsize=d["size"], color=d["color"],
+                         fontweight="bold" if d.get("bold") else "normal", va="top", ha="left")
+                continue
+            x0, y0, x1, y1 = d["x0"] / W, 1 - d["y0"] / H, d["x1"] / W, 1 - d["y1"] / H
+            lw = d["width"]
+            if d["kind"] == "line":
+                fig.add_artist(Line2D([x0, x1], [y0, y1], transform=fig.transFigure, color=d["color"], linewidth=lw,
+                                      solid_capstyle="round"))
+            elif d["kind"] == "arrow":
+                fig.add_artist(FancyArrowPatch((x0, y0), (x1, y1), transform=fig.transFigure, color=d["color"],
+                                               linewidth=lw, arrowstyle="-|>", mutation_scale=8 + 3 * lw))
+            elif d["kind"] == "rect":
+                fig.add_artist(Rectangle((min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0),
+                                         transform=fig.transFigure, fill=False, edgecolor=d["color"], linewidth=lw))
+            else:
+                fig.add_artist(Ellipse(((x0 + x1) / 2, (y0 + y1) / 2), abs(x1 - x0), abs(y1 - y0),
+                                       transform=fig.transFigure, fill=False, edgecolor=d["color"], linewidth=lw))
 
     def data_changed(self) -> None:
         """The DataPad changed: the linked figures follow."""
@@ -449,7 +734,7 @@ class PlotCanvasPage(QtWidgets.QWidget):
 
     # -- export -----------------------------------------------------------------------------
     def export(self) -> None:
-        if not self.panels:
+        if not self.panels and not self.annotations:
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export the page", "figure.pdf",
                                                         "PDF (*.pdf);;SVG (*.svg);;PNG (*.png)")
@@ -473,17 +758,21 @@ class PlotCanvasPage(QtWidgets.QWidget):
             if self.letters.isChecked():
                 fig.text(px / W, 1 - py / H, p.letter, fontsize=p.spec.get("font", 9) * 1.4,
                          fontweight="bold", va="top", ha="left")
+        self._export_annotations(fig, W, H)
         fig.savefig(path, dpi=dpi, facecolor="white")
 
     # -- saving with the session ---------------------------------------------------------------
     def state(self) -> dict:
         return {"paper": self.paper.currentText(), "letters": self.letters.isChecked(),
-                "panels": [p.state() for p in self.panels]}
+                "panels": [p.state() for p in self.panels], "annotations": [a.state() for a in self.annotations]}
 
     def restore(self, s: dict | None) -> None:
         for p in list(self.panels):
             self.scene.removeItem(p)
         self.panels = []
+        for a in list(self.annotations):
+            self.scene.removeItem(a)
+        self.annotations = []
         if not s:
             self.relabel()
             return
@@ -493,6 +782,11 @@ class PlotCanvasPage(QtWidgets.QWidget):
             try:
                 self.add_panel(d["spec"], d["data"], (d["x_mm"], d["y_mm"]), d.get("linked", True))
             except (KeyError, TypeError):
+                continue
+        for d in s.get("annotations", []):
+            try:
+                self._add_annotation(d)
+            except (KeyError, TypeError, ValueError):
                 continue
 
 

@@ -245,7 +245,7 @@ def _marks_and_lines(ax, spec, data, lw):
         sym = np.asarray(m.get("symbols", []), object)
         x, y = np.asarray(m["x"], float), np.asarray(m["y"], float)
         cols, alphas = m.get("colors", []), m.get("alpha", [])
-        size = float(m.get("size", 7.0)) * 0.9
+        size = float(m.get("size", 7.0)) * 0.75          # screen pixels to points
         for s_ in (set(sym.tolist()) if len(sym) else {"o"}):
             k = np.flatnonzero(sym == s_) if len(sym) else np.arange(len(x))
             from matplotlib.colors import to_rgba
@@ -297,6 +297,15 @@ def _decimate(x: np.ndarray, y: np.ndarray, n: int = 4000) -> tuple[np.ndarray, 
             xs.append(x[k])
             ys.append(y[k])
     return np.asarray(xs), np.asarray(ys)
+
+
+def _marker_px(it, d) -> float:
+    """A scatter's marker size in screen pixels (each point's, else the item's own)."""
+    sizes = np.asarray(d["size"], float) if len(d["size"]) else np.empty(0)
+    sizes = sizes[sizes > 0]
+    if sizes.size:
+        return float(np.median(sizes))
+    return float(it.opts.get("size", 7) or 7)
 
 
 def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, dict]:
@@ -362,7 +371,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             marks.append({"x": [float(v) * kx for v in d["x"]], "y": [float(v) * ky for v in d["y"]],
                           "colors": [c.name() for c in cols], "alpha": [round(c.alphaF(), 3) for c in cols],
                           "symbols": [str(sym) for sym in d["symbol"]],
-                          "size": float(np.nanmedian(d["size"])) if len(d["size"]) else 7.0})
+                          "size": _marker_px(it, d)})
             continue
         if isinstance(it, pg.InfiniteLine) and it.isVisible() and it.angle % 180 == 0:
             pen = it.pen                                  # a level across, as the spike threshold
@@ -395,7 +404,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
             curves.append({"x": [float(v) for v in x * kx], "y": [float(v) for v in y * ky],
                            "color": color.name() if color is not None else "",
                            "alpha": round(color.alphaF(), 3) if color is not None else 1.0,
-                           "name": it.name() or "", "width": round(width / 1.5, 3), "points": bool(sym),
+                           "name": it.name() or "", "width": round(width * 0.5, 3), "points": bool(sym),
                            "z": float(it.zValue())})
     curves.sort(key=lambda c: c["z"])
 
@@ -409,7 +418,15 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
         return f"{text} ({prefix}{units})" if units else text
     (x0, x1), (y0, y1) = item.getViewBox().viewRange()
     spec = new_spec(kind="curves")
-    spec["title"] = getattr(chart, "name", "") or ""
+    # the plot's own title (its channel, Ch2), and the shape it has on screen
+    own = (item.titleLabel.text or "").strip() if getattr(item, "titleLabel", None) is not None else ""
+    spec["title"] = re.sub("<[^>]+>", "", own) if own else ""
+    vb = item.getViewBox()
+    r = vb.sceneBoundingRect()
+    wpx, hpx = r.width(), r.height()
+    if wpx > 50 and hpx > 50:
+        spec["w_mm"] = 120.0
+        spec["h_mm"] = round(max(40.0, min(160.0, 120.0 * hpx / wpx + 18)), 1)    # + room for the labels
     if view:
         spec["xlim"], spec["ylim"] = [x0 * kx, x1 * kx], [y0 * ky, y1 * ky]     # the same view as the chart
     spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
@@ -422,7 +439,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
                 if lab is not None and lab.isVisible():
                     ln["label"] = lab.toPlainText()
     data = {"curves": curves, "marks": marks, "lines": lines, "xlabel": label(bottom), "ylabel": label(left),
-            "chart": getattr(chart, "name", "")}
+            "chart": getattr(chart, "name", ""), "kx": kx, "ky": ky, "plot": pis.index(item)}
     return spec, data
 
 

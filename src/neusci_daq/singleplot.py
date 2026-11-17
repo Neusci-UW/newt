@@ -20,6 +20,8 @@ from __future__ import annotations
 import io
 
 from matplotlib.figure import Figure
+import numpy as np
+import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import figspec as F
@@ -299,6 +301,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.right.addTab(scroll, "Figure")
         self.right.addTab(self._fit_tab(), "Fit")
         fig_lay.addWidget(self.right)
+        self._fig_lay = fig_lay
 
         for w in (self.t_title, self.t_x, self.t_y, self.x0, self.x1, self.y0, self.y1):
             w.editingFinished.connect(self._edited)
@@ -318,8 +321,8 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.show_spec(None)
 
     # -- the figure -------------------------------------------------------------------------
-    def show_spec(self, spec: dict | None) -> None:
-        if self.focus_chart is not None:
+    def show_spec(self, spec: dict | None, live: bool = False) -> None:
+        if self.focus_chart is not None and not live:
             self.leave_focus(switch=False)
         self.spec = spec
         has = spec is not None
@@ -368,8 +371,10 @@ class SinglePlotPage(QtWidgets.QWidget):
         for w in (self.kind, self.btn_add):
             w.setVisible(not drawn)
         self.from_chart.setVisible(drawn)
-        self.from_chart.setText("The lines of a quick chart, as they were when you made the figure. "
-                                "Make it again from the chart to update it." if drawn else "")
+        self.from_chart.setText(("The live chart: these settings change it as you go, and Send to Canvas "
+                                 "takes them along. What it shows is set in the Chart tab." if live else
+                                 "The lines of a quick chart, as they were when you made the figure. "
+                                 "Make it again from the chart to update it.") if drawn else "")
         self._loading = False
         self.data_changed()
 
@@ -404,6 +409,8 @@ class SinglePlotPage(QtWidgets.QWidget):
             return
         s = self.spec
         kind = s["kind"] if s.get("kind") in ("curves", "image") else self.kind.currentData()   # a chart stays a chart
+        if (self.w_mm.value(), self.h_mm.value()) != (s.get("w_mm"), s.get("h_mm")):
+            s["auto_size"] = False                # a size you set: kept (else a chart's comes from its shape)
         s.update(kind=kind, title=self.t_title.text(), xlabel=self.t_x.text(),
                  ylabel=self.t_y.text(), xlim=[_opt_float(self.x0.text()), _opt_float(self.x1.text())],
                  ylim=[_opt_float(self.y0.text()), _opt_float(self.y1.text())], xlog=self.xlog.isChecked(),
@@ -415,9 +422,16 @@ class SinglePlotPage(QtWidgets.QWidget):
                  w_mm=self.w_mm.value(), h_mm=self.h_mm.value())
         self.draw()
 
+    def _live(self) -> bool:
+        return self.focus_chart is not None and self.mode.currentIndex() == 1
+
     def data_changed(self) -> None:
         """The DataPad changed (or what's plotted): read the columns again and draw."""
         if self.spec is None:
+            return
+        if self._live():                          # the live chart: its look, and the lines a fit can use
+            self._apply_live()
+            self._show_fit()
             return
         if self.spec["kind"] == "curves":
             self.title.setText(f"<b>{self.data.get('chart', 'Chart')}</b> · drawn from a quick chart")
@@ -431,8 +445,87 @@ class SinglePlotPage(QtWidgets.QWidget):
         self._show_fit()
 
     def draw(self) -> None:
+        if self._live():
+            self._apply_live()
+            return
         if self.spec is not None and self.isVisible():
             self._redraw.start()
+
+    # -- the look, on the live chart ---------------------------------------------------------
+    def _apply_live(self) -> None:
+        """Put the Figure and Fit settings on the live chart: title, axis labels, ranges, text
+        sizes, tick marks, grid and the fitted curve. (Size in mm and the legend are for the Canvas.)"""
+        chart, s = self.focus_chart, self.spec
+        if chart is None or s is None or not chart.plots():
+            return
+        try:
+            self.data = F.from_chart(chart)[1]   # the lines as drawn now, for fitting
+        except Exception:
+            pass
+        kx, ky = float(self.data.get("kx", 1.0) or 1.0), float(self.data.get("ky", 1.0) or 1.0)
+        pis = [p.getPlotItem() if hasattr(p, "getPlotItem") else p for p in chart.plots()]
+        main = pis[min(int(self.data.get("plot", 0)), len(pis) - 1)]
+        label_pt = float(s.get("font", 9.0))
+        tick_pt = float(s.get("font_ticks") or label_pt * 0.9)
+        title_pt = float(s.get("font_title") or label_pt * 1.1)
+        tick_px = float(s.get("tick_len", 3.5)) * 1.33
+        tick_len = tick_px if s.get("ticks") == "in" else -tick_px
+        tf = QtGui.QFont()
+        tf.setPointSizeF(tick_pt)
+        for k, pi in enumerate(pis):
+            for side in ("left", "bottom"):
+                ax = pi.getAxis(side)
+                ax.setStyle(tickFont=tf, tickLength=int(round(tick_len)))
+                text, units = ax.labelText, ax.labelUnits
+                if side == "left" and pi is main and s.get("ylabel"):
+                    text, units = _html_sub(s["ylabel"]), ""
+                if side == "bottom" and k == len(pis) - 1 and s.get("xlabel"):
+                    text, units = _html_sub(s["xlabel"]), ""
+                if text or units:
+                    ax.setLabel(text, units, **{"font-size": f"{label_pt}pt"})
+            pi.showGrid(x=bool(s.get("grid")), y=bool(s.get("grid")), alpha=0.25)
+        if s.get("title"):
+            pis[0].setTitle(_html_sub(s["title"]), size=f"{title_pt}pt")
+        x0, x1 = (list(s.get("xlim") or []) + [None, None])[:2]
+        if x0 is not None and x1 is not None and x1 > x0:
+            main.setXRange(x0 / kx, x1 / kx, padding=0)
+        y0, y1 = (list(s.get("ylim") or []) + [None, None])[:2]
+        if y0 is not None and y1 is not None and y1 > y0:
+            main.setYRange(y0 / ky, y1 / ky, padding=0)
+        old = getattr(chart, "_sp_fit_item", None)          # the fitted curve, drawn over the chart
+        if old is not None:
+            try:
+                old.getViewBox() and old.getViewBox().removeItem(old)
+            except (RuntimeError, AttributeError):
+                pass
+            chart._sp_fit_item = None
+        got = F.do_fit(s, self.data) if s.get("fit") else None
+        if got is not None:
+            _, f, xu = got
+            xs = np.linspace(float(np.nanmin(xu)), float(np.nanmax(xu)), 300)
+            item = pg.PlotDataItem(xs / kx, f.predict(xs) / ky,
+                                   pen=pg.mkPen("#c62828", width=2, style=QtCore.Qt.PenStyle.DashLine))
+            item.setZValue(30)
+            main.addItem(item)
+            chart._sp_fit_item = item
+
+    def figure_of_chart(self) -> tuple[dict, dict]:
+        """The live chart as a figure, with the look you gave it here (for the Canvas, or to edit)."""
+        chart = self.focus_chart
+        base, data = F.from_chart(chart)
+        look = F.clone(getattr(chart, "fig_spec", None) or {})
+        spec = F.clone(base)
+        for k, v in look.items():
+            if k in ("kind", "series"):
+                continue
+            if k in ("xlim", "ylim") and not any(x is not None for x in (v or [])):
+                continue                          # not set: the chart's own view
+            if k in ("title", "xlabel", "ylabel") and not v:
+                continue
+            if k in ("w_mm", "h_mm") and look.get("auto_size", True):
+                continue                          # the chart's own shape, as it is on screen
+            spec[k] = v
+        return spec, data
 
     def _render(self) -> None:
         """Draw the figure at its size, scaled to fit the area, sharp on high-density screens."""
@@ -560,11 +653,33 @@ class SinglePlotPage(QtWidgets.QWidget):
         frame.layout().removeWidget(chart)
         self.focus_holder.addWidget(chart, 1)
         chart.show()
-        self.focus_side.addWidget(self.page.side_scroll)
-        self.page.side_scroll.show()
         self.page.canvas.select(chart)
+        # beside it: the chart's own settings (Chart), and the look (Figure) and Fit, on this chart
+        self._prev = (self.spec, self.data, self.editing)
+        self._fig_lay.removeWidget(self.right)
+        self.right.insertTab(0, self.page.side_scroll, "Chart")
+        self.page.side_scroll.show()
+        self.focus_side.addWidget(self.right)
+        self.right.setCurrentIndex(0)
+        if getattr(chart, "fig_spec", None) is None:
+            try:
+                base = F.from_chart(chart)[0]
+            except Exception:
+                base = F.new_spec(kind="curves")
+            base.update(title="", xlabel="", ylabel="", xlim=[None, None], ylim=[None, None], auto_size=True)
+            chart.fig_spec = base
+        orig = chart.apply_look
+
+        def apply_look(*a, _orig=orig, **k):      # the chart redrew: its look from here again
+            _orig(*a, **k)
+            if self.focus_chart is chart:
+                QtCore.QTimer.singleShot(0, self._apply_live)
+        chart.apply_look = apply_look
+        chart._sp_orig_look = orig
         self.focus_title.setText(f"<b>{getattr(chart, 'name', '')}</b> · its settings are on the right")
         self.mode.setCurrentIndex(1)
+        self.editing = None
+        self.show_spec(chart.fig_spec, live=True)
         self.page.show_sub("singleplot")
         if hasattr(chart, "refresh"):
             chart.refresh()
@@ -630,7 +745,16 @@ class SinglePlotPage(QtWidgets.QWidget):
         chart = self.focus_chart
         if chart is None:
             return
+        if hasattr(chart, "_sp_orig_look"):
+            chart.apply_look = chart._sp_orig_look
+            del chart._sp_orig_look
         self.focus_chart = None
+        i = self.right.indexOf(self.page.side_scroll)        # the tabs go back to the figure page
+        if i >= 0:
+            self.right.removeTab(i)
+        self.focus_side.removeWidget(self.right)
+        self._fig_lay.addWidget(self.right)
+        self.page.side_scroll.setParent(self.page)
         self.focus_holder.removeWidget(chart)
         home = self._home
         try:
@@ -640,6 +764,9 @@ class SinglePlotPage(QtWidgets.QWidget):
             pass
         self.page.side_scroll.hide()
         self.mode.setCurrentIndex(0)
+        prev = getattr(self, "_prev", (None, {}, None))
+        self.spec, self.data, self.editing = prev[0], prev[1], prev[2]
+        self.show_spec(prev[0])
         if switch:
             self.page.show_sub("analysis")
 
@@ -648,7 +775,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         if self.focus_chart is None:
             return
         try:
-            spec, data = F.from_chart(self.focus_chart)
+            spec, data = self.figure_of_chart()
         except Exception as e:
             QtWidgets.QMessageBox.information(self, "Send to Canvas", f"Can't make a figure of it: {e}")
             return
@@ -659,7 +786,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         if self.focus_chart is None:
             return
         try:
-            spec, data = F.from_chart(self.focus_chart)
+            spec, data = self.figure_of_chart()
         except Exception as e:
             QtWidgets.QMessageBox.information(self, "Make a figure", f"Can't make a figure of it: {e}")
             return
@@ -695,6 +822,12 @@ class SinglePlotPage(QtWidgets.QWidget):
 
     def state(self) -> dict | None:
         return F.clone(self.spec) if self.spec else None
+
+
+def _html_sub(text: str) -> str:
+    """Plain label text with true subscripts for the live chart: V_m → V<sub>m</sub>."""
+    import re
+    return re.sub(r"(?<![\w])([^\W\d_]+)_(\w+)", r"\1<sub>\2</sub>", text or "")
 
 
 def _head(text: str) -> QtWidgets.QLabel:

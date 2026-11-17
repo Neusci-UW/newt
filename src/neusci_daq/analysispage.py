@@ -139,8 +139,9 @@ class AnalysisPage(QtWidgets.QWidget):
         self.page_map.addItems(colors.PAGE_STYLES)
         self.page_map.setToolTip("Colors every group at once. Palette: a different color each; One color: all "
                                  "the same (Color… picks it); Shades of one color: pale to deep, first group to "
-                                 "last; a color map: across its colors. A color you give a group (right-click it) "
-                                 "stays. Saved with the session")
+                                 "last; From one color to another: first group in one color (First…), last in "
+                                 "another (Last…), the ones between in shades of both; a color map: across its "
+                                 "colors. A color you give a group (right-click it) stays. Saved with the session")
         self.trial_map = QtWidgets.QComboBox()
         self.trial_map.addItems(colors.TRIAL_STYLES)
         self.trial_map.setToolTip("How a group's trials are drawn. Solid: all in the group's color; Shades: "
@@ -151,6 +152,17 @@ class AnalysisPage(QtWidgets.QWidget):
         self.base_btn = QtWidgets.QPushButton("Color…")      # the one color (and the shades' hue)
         self.base_btn.setToolTip("The color every group shares (One color), or whose shades they take")
         self.base_btn.clicked.connect(self._pick_base_color)
+        self.first_btn = QtWidgets.QPushButton("First…")     # From one color to another: its two ends
+        self.first_btn.setToolTip("The first group's color; the groups after it blend toward Last")
+        self.first_btn.clicked.connect(lambda: self._pick_end_color("first_color"))
+        self.last_btn = QtWidgets.QPushButton("Last…")
+        self.last_btn.setToolTip("The last group's color; the groups before it blend back toward First")
+        self.last_btn.clicked.connect(lambda: self._pick_end_color("last_color"))
+        self.color_btns = QtWidgets.QWidget()                # where they sit, under Groups
+        cbl = QtWidgets.QHBoxLayout(self.color_btns)
+        cbl.setContentsMargins(0, 0, 0, 0)
+        for b in (self.base_btn, self.first_btn, self.last_btn):
+            cbl.addWidget(b)
         self.page_map.currentTextChanged.connect(lambda *_: self._show_base_btn())
         self._show_base_btn()
         self.trial_map.currentTextChanged.connect(lambda v: self._set_look("trial_map", v))
@@ -228,7 +240,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self.blocks_panel.add_setting("Analyze", self.raw.channel)
         self.blocks_panel.add_group_setting("Spread", self.spread_box)
         self.blocks_panel.add_group_setting("Groups", self.page_map)
-        self.blocks_panel.add_group_setting("", self.base_btn)
+        self.blocks_panel.add_group_setting("", self.color_btns)
         self.blocks_panel.add_group_setting("Trials", self.trial_map)
         # how solid trials are drawn: Auto (by the Trials style) or a level you set
         op = QtWidgets.QWidget()
@@ -1404,12 +1416,17 @@ class AnalysisPage(QtWidgets.QWidget):
         self._show_gain()
 
     def _show_base_btn(self) -> None:
-        on = self.page_map.currentText() in (colors.ONE, colors.SHADES)
-        self.base_btn.setVisible(on)
-        c = self._looks.get("base_color") or colors.BASE_COLOR
-        pix = QtGui.QPixmap(14, 14)
-        pix.fill(QtGui.QColor(c))
-        self.base_btn.setIcon(QtGui.QIcon(pix))
+        """Color… for One color / Shades, First… and Last… for From one color to another, each with its swatch."""
+        style = self.page_map.currentText()
+        for btn, key, default, on in (
+                (self.base_btn, "base_color", colors.BASE_COLOR, style in (colors.ONE, colors.SHADES)),
+                (self.first_btn, "first_color", colors.FIRST_COLOR, style == colors.TWO),
+                (self.last_btn, "last_color", colors.LAST_COLOR, style == colors.TWO)):
+            btn.setVisible(on)
+            pix = QtGui.QPixmap(14, 14)
+            pix.fill(QtGui.QColor(self._looks.get(key) or default))
+            btn.setIcon(QtGui.QIcon(pix))
+        self.color_btns.setVisible(style in (colors.ONE, colors.SHADES, colors.TWO))
 
     def _pick_base_color(self) -> None:
         c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._looks.get("base_color") or colors.BASE_COLOR), self,
@@ -1418,12 +1435,23 @@ class AnalysisPage(QtWidgets.QWidget):
             self._set_look("base_color", c.name())
             self._show_base_btn()
 
+    def _pick_end_color(self, key: str) -> None:
+        """First… / Last…: one end of From one color to another."""
+        default = colors.FIRST_COLOR if key == "first_color" else colors.LAST_COLOR
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._looks.get(key) or default), self,
+                                            "The first group's color" if key == "first_color"
+                                            else "The last group's color")
+        if c.isValid():
+            self._set_look(key, c.name())
+            self._show_base_btn()
+
     def _save_looks(self) -> None:
         folder = self._folder()
         if folder is not None:
             d = groupsfile.load(folder)
             groupsfile.save(folder, {**d, **{k: self._looks.get(k, "") for k in ("colors", "page_map", "trial_map",
-                                                                    "base_color", "trial_opacity", "gains",
+                                                                    "base_color", "first_color", "last_color",
+                                                                    "trial_opacity", "gains",
                                                                     "stim_fit", "hidden_groups", "hidden_trials",
                                                                     "shown_trials", "order", "sort", "sorts",
                                                                     "alike", "color_by", "avg_each")}})
@@ -1465,6 +1493,8 @@ class AnalysisPage(QtWidgets.QWidget):
             f = (values[names[g]] - lo) / (hi - lo) if hi > lo else 0.5
             if looks["page_map"] == colors.SHADES:
                 return colors.shade(looks.get("base_color") or colors.BASE_COLOR, f).name()
+            if looks["page_map"] == colors.TWO:
+                return colors.blend(looks.get("first_color"), looks.get("last_color"), f).name()
             return colors.sample(looks["page_map"] if looks["page_map"] in colors.MAPS else "Viridis", f).name()
         if looks["page_map"] in (colors.ONE, colors.SHADES):
             base = looks.get("base_color") or colors.BASE_COLOR
@@ -1473,10 +1503,13 @@ class AnalysisPage(QtWidgets.QWidget):
             left = [n for n in names if n not in looks["hidden_groups"]]
             place = left.index(names[g]) if g < len(names) and names[g] in left else g
             return colors.shade(base, place / max(1, len(left) - 1) if len(left) > 1 else 1.0).name()
-        if looks["page_map"] in colors.MAPS:           # across the pages left showing
+        if looks["page_map"] in colors.MAPS or looks["page_map"] == colors.TWO:    # across the pages left showing
             left = [n for n in names if n not in looks["hidden_groups"]]
             place = left.index(names[g]) if g < len(names) and names[g] in left else g
-            return colors.sample(looks["page_map"], place / max(1, len(left) - 1)).name()
+            f = place / max(1, len(left) - 1)
+            if looks["page_map"] == colors.TWO:
+                return colors.blend(looks.get("first_color"), looks.get("last_color"), f).name()
+            return colors.sample(looks["page_map"], f).name()
         return colors.group_color(g)
 
     def plan(self, chosen: list[int], picked: list[int] | None = None, pages_picked: list[str] | None = None

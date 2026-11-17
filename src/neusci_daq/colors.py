@@ -79,9 +79,19 @@ MAPS = {
 }
 SOLID, OPACITY, SHADES_T = "Solid", "Opacity", "Shades"
 TRIAL_STYLES = (SOLID, OPACITY, SHADES_T, *MAPS)
-PALETTE_STYLE, ONE, SHADES = "Palette", "One color", "Shades of one color"
-PAGE_STYLES = (PALETTE_STYLE, ONE, SHADES, *MAPS)
+PALETTE_STYLE, ONE, SHADES, TWO = "Palette", "One color", "Shades of one color", "From one color to another"
+PAGE_STYLES = (PALETTE_STYLE, ONE, SHADES, TWO, *MAPS)
 BASE_COLOR = "#0072B2"             # one color / shades: until you pick one
+FIRST_COLOR, LAST_COLOR = "#0072B2", "#D55E00"     # from one color to another: until you pick them
+
+
+def blend(first: str, last: str, f: float):
+    """The color f (0 to 1) of the way from `first` to `last`, as a QColor ("" for either: the default)."""
+    from pyqtgraph.Qt import QtGui
+    a, b = QtGui.QColor(first or FIRST_COLOR), QtGui.QColor(last or LAST_COLOR)
+    f = min(1.0, max(0.0, f))
+    return QtGui.QColor(*(round(x + (y - x) * f) for x, y in
+                          ((a.red(), b.red()), (a.green(), b.green()), (a.blue(), b.blue()))))
 
 
 def shade(color: str, f: float):

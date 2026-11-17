@@ -11,6 +11,8 @@ What you change is kept in the session folder, in pages.json:
   moved    {block file stem: the page you put it in}
   colors   {page's name: the color you gave it}
   page_map the color map across the pages (colors.PAGE_STYLES)
+  base_color  One color / Shades of one color: the color ("" until picked)
+  first_color, last_color  From one color to another: its two ends ("" until picked)
   trial_map how the trials of a page are drawn (colors.TRIAL_STYLES)
   gains    {channel: the amplifier gain its data is divided by when read}
   stim_fit the fit applied to the stimulus channel when it's read (analysis.FITS)
@@ -85,7 +87,7 @@ def kinds(auto: list[tuple[str, list[int]]], d: dict) -> dict[str, str]:
 
 def load(folder: str | Path | None) -> dict:
     out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "base_color": "",
-           "trial_opacity": 0,
+           "first_color": "", "last_color": "", "trial_opacity": 0,
            "gains": {}, "stim_fit": "",
            "hidden_groups": [], "hidden_trials": [], "shown_trials": [], "order": [], "sort": "",
            "sorts": [], "alike": dict(ALIKE), "merged": [], "color_by": "", "avg_each": False,
@@ -98,7 +100,8 @@ def load(folder: str | Path | None) -> dict:
         out["moved"] = {str(k): str(v) for k, v in d.get("moved", {}).items()}
         out["colors"] = {str(k): str(v) for k, v in d.get("colors", {}).items()}
         out["page_map"], out["trial_map"] = str(d.get("page_map", "")), str(d.get("trial_map", ""))
-        out["base_color"] = str(d.get("base_color", ""))
+        for key in ("base_color", "first_color", "last_color"):
+            out[key] = str(d.get(key, ""))
         out["trial_opacity"] = int(d.get("trial_opacity", 0) or 0)
         out["gains"] = {str(k): float(v) for k, v in d.get("gains", {}).items()}
         out["stim_fit"] = str(d.get("stim_fit", ""))

@@ -184,9 +184,8 @@ class ChartGroups(QtWidgets.QGroupBox):
         for g, (name, blocks) in enumerate(self.page.shown):
             box = NameBox(name)
             box.setIcon(style.dot_icon(self.page.group_color(g)))
-            ticked = [own and name in c.pin.get("pages", []) for c in self.charts] if own else \
-                [name not in self.page._looks["hidden_groups"]] * len(self.charts)
-            box.setTristate(False)
+            ticked = [name in c.pin.get("pages", []) for c in self.charts] if own else \
+                [name not in self.page._looks["hidden_groups"]]
             box.setChecked(all(ticked))
             box.setEnabled(own)
             box.toggled.connect(lambda on, n=name: self._tick(n, on))

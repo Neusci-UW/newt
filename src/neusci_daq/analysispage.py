@@ -149,22 +149,25 @@ class AnalysisPage(QtWidgets.QWidget):
                                   "faint to solid, first to last; a color map: across its colors, first to "
                                   "last. Saved with the session")
         self.page_map.currentTextChanged.connect(lambda v: self._set_look("page_map", v))
-        self.base_btn = QtWidgets.QPushButton("Color…")      # the one color (and the shades' hue)
-        self.base_btn.setToolTip("The color every group shares (One color), or whose shades they take")
-        self.base_btn.clicked.connect(self._pick_base_color)
-        self.first_btn = QtWidgets.QPushButton("First…")     # From one color to another: its two ends
-        self.first_btn.setToolTip("The first group's color; the groups after it blend toward Last")
-        self.first_btn.clicked.connect(lambda: self._pick_end_color("first_color"))
-        self.last_btn = QtWidgets.QPushButton("Last…")
-        self.last_btn.setToolTip("The last group's color; the groups before it blend back toward First")
-        self.last_btn.clicked.connect(lambda: self._pick_end_color("last_color"))
-        self.color_btns = QtWidgets.QWidget()                # where they sit, under Groups
+        # the colors the Groups setting is made from (colors.PICKS), under it: key: (button, what it's for)
+        self.color_btns = QtWidgets.QWidget()
         cbl = QtWidgets.QHBoxLayout(self.color_btns)
         cbl.setContentsMargins(0, 0, 0, 0)
-        for b in (self.base_btn, self.first_btn, self.last_btn):
+        self._pick_btns: dict[str, tuple[QtWidgets.QPushButton, str]] = {}
+        for key, text, what, tip in (
+                ("base_color", "Color…", "The groups' color",
+                 "The color every group shares (One color), or whose shades they take"),
+                ("first_color", "First…", "The first group's color",
+                 "The first group's color; the groups after it blend toward Last"),
+                ("last_color", "Last…", "The last group's color",
+                 "The last group's color; the groups before it blend back toward First")):
+            b = QtWidgets.QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, k=key: self._pick_look_color(k))
             cbl.addWidget(b)
-        self.page_map.currentTextChanged.connect(lambda *_: self._show_base_btn())
-        self._show_base_btn()
+            self._pick_btns[key] = (b, what)
+        self.page_map.currentTextChanged.connect(lambda *_: self._show_color_btns())
+        self._show_color_btns()
         self.trial_map.currentTextChanged.connect(lambda v: self._set_look("trial_map", v))
         self.groups: list[tuple[str, list[int]]] = []
         self.stim_channel.currentIndexChanged.connect(lambda *_: self._stim_channel_picked())
@@ -1128,9 +1131,8 @@ class AnalysisPage(QtWidgets.QWidget):
     def _compute_groups(self) -> None:
         """Group the blocks by their stimulus (see Stimulus channel) and list the groups."""
         how = self.how()
-        d = groupsfile.load(self._folder())
-        self._show_looks(d)                           # the stimulus fit is one of them
-        d = {**d, **{k: self._looks.get(k, d[k]) for k in ("sorts", "alike", "color_by", "avg_each")}}
+        self._show_looks(groupsfile.load(self._folder()))     # the stimulus fit is one of them
+        d = self._looks                               # the file's, or (with no session yet) as set here
         self.blocks_panel.set_organize(d["organize"], self._folder() is not None)
         auto = self._group(self.blocks, how, self._fitted_signature_of(self._paths, how), *self._stim_units())
         self._auto = auto
@@ -1386,15 +1388,12 @@ class AnalysisPage(QtWidgets.QWidget):
         at = names.index(name)
         names.pop(at)
         names.insert(row - 1 if at < row else row, name)
-        self._looks = {**self._looks, "order": names, "sort": "", "sorts": []}
+        self._looks = {**self._looks, "order": names, "sorts": []}
         self._save_looks()
 
-    def sort_groups(self, sorts) -> None:
-        """Keep the groups sorted: [[measure, 1 smallest first or -1]...], the first first ("frequency"
-        or "amplitude" as before); [] your order."""
-        if isinstance(sorts, str):
-            sorts = groupsfile.OLD_SORTS.get(sorts, [])
-        self._looks = {**self._looks, "sorts": [list(x) for x in sorts], "sort": ""}
+    def sort_groups(self, sorts: list) -> None:
+        """Keep the groups sorted: [[measure, 1 smallest first or -1]...], the first first; [] your order."""
+        self._looks = {**self._looks, "sorts": [list(x) for x in sorts]}
         self._save_looks()
 
     def _folder(self):
@@ -1408,53 +1407,33 @@ class AnalysisPage(QtWidgets.QWidget):
             box.blockSignals(True)
             box.setCurrentIndex(max(0, box.findText(self._looks.get(key, ""))))
             box.blockSignals(False)
-        self._show_base_btn()
+        self._show_color_btns()
         self.opacity_slider.blockSignals(True)
         self.opacity_slider.setValue(int(self._looks.get("trial_opacity", 0) or 0))
         self.opacity_label.setText("Auto" if not self.opacity_slider.value() else f"{self.opacity_slider.value()}%")
         self.opacity_slider.blockSignals(False)
         self._show_gain()
 
-    def _show_base_btn(self) -> None:
-        """Color… for One color / Shades, First… and Last… for From one color to another, each with its swatch."""
-        style = self.page_map.currentText()
-        for btn, key, default, on in (
-                (self.base_btn, "base_color", colors.BASE_COLOR, style in (colors.ONE, colors.SHADES)),
-                (self.first_btn, "first_color", colors.FIRST_COLOR, style == colors.TWO),
-                (self.last_btn, "last_color", colors.LAST_COLOR, style == colors.TWO)):
-            btn.setVisible(on)
-            pix = QtGui.QPixmap(14, 14)
-            pix.fill(QtGui.QColor(self._looks.get(key) or default))
-            btn.setIcon(QtGui.QIcon(pix))
-        self.color_btns.setVisible(style in (colors.ONE, colors.SHADES, colors.TWO))
+    def _show_color_btns(self) -> None:
+        """The buttons for the colors the Groups setting is made from, each with its swatch."""
+        uses = colors.PICKS.get(self.page_map.currentText(), ())
+        for key, (btn, _) in self._pick_btns.items():
+            btn.setVisible(key in uses)
+            btn.setIcon(style.dot_icon(colors.picked(self._looks, key), square=True, size=14))
+        self.color_btns.setVisible(bool(uses))
 
-    def _pick_base_color(self) -> None:
-        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._looks.get("base_color") or colors.BASE_COLOR), self,
-                                            "The groups' color")
-        if c.isValid():
-            self._set_look("base_color", c.name())
-            self._show_base_btn()
-
-    def _pick_end_color(self, key: str) -> None:
-        """First… / Last…: one end of From one color to another."""
-        default = colors.FIRST_COLOR if key == "first_color" else colors.LAST_COLOR
-        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._looks.get(key) or default), self,
-                                            "The first group's color" if key == "first_color"
-                                            else "The last group's color")
+    def _pick_look_color(self, key: str) -> None:
+        c = QtWidgets.QColorDialog.getColor(QtGui.QColor(colors.picked(self._looks, key)), self,
+                                            self._pick_btns[key][1])
         if c.isValid():
             self._set_look(key, c.name())
-            self._show_base_btn()
+            self._show_color_btns()
 
     def _save_looks(self) -> None:
         folder = self._folder()
         if folder is not None:
             d = groupsfile.load(folder)
-            groupsfile.save(folder, {**d, **{k: self._looks.get(k, "") for k in ("colors", "page_map", "trial_map",
-                                                                    "base_color", "first_color", "last_color",
-                                                                    "trial_opacity", "gains",
-                                                                    "stim_fit", "hidden_groups", "hidden_trials",
-                                                                    "shown_trials", "order", "sort", "sorts",
-                                                                    "alike", "color_by", "avg_each")}})
+            groupsfile.save(folder, {**d, **{k: self._looks.get(k, "") for k in groupsfile.LOOKS}})
         self._compute_groups()
         self.main._fill_recorded()                  # the Acquisition Blocks panel shows them too
         self.groups_changed()
@@ -1478,38 +1457,28 @@ class AnalysisPage(QtWidgets.QWidget):
             self.set_page_color(name, c.name())
 
     def group_color(self, g: int, names: list[str] | None = None, looks: dict | None = None) -> str:
-        """Page g's color (of `names`; default the pages here): the one you gave it, else from
-        the color map, else from a palette in a different order from the unit colors, so
+        """Page g's color (of `names`; default the pages here): the one you gave it; else along
+        the Groups setting, by Color groups by's measure or by its place among the pages left
+        showing; else (Palette) from a palette in a different order from the unit colors, so
         they don't look alike."""
         names = [n for n, _ in self.shown] if names is None else names
         looks = self._looks if looks is None else looks
-        given = looks["colors"].get(names[g]) if g < len(names) else None
-        if given:
-            return given
+        name = names[g] if g < len(names) else None
+        if looks["colors"].get(name):
+            return looks["colors"][name]
+        way = looks["page_map"]
         values = self._page_values if looks.get("color_by") else {}
-        if g < len(names) and names[g] in values:      # Color groups by: along a measure
-            left = [n for n in names if n in values and n not in looks["hidden_groups"]] or [names[g]]
+        if name in values:                             # Color groups by: along a measure
+            left = [n for n in names if n in values and n not in looks["hidden_groups"]] or [name]
             lo, hi = min(values[n] for n in left), max(values[n] for n in left)
-            f = (values[names[g]] - lo) / (hi - lo) if hi > lo else 0.5
-            if looks["page_map"] == colors.SHADES:
-                return colors.shade(looks.get("base_color") or colors.BASE_COLOR, f).name()
-            if looks["page_map"] == colors.TWO:
-                return colors.blend(looks.get("first_color"), looks.get("last_color"), f).name()
-            return colors.sample(looks["page_map"] if looks["page_map"] in colors.MAPS else "Viridis", f).name()
-        if looks["page_map"] in (colors.ONE, colors.SHADES):
-            base = looks.get("base_color") or colors.BASE_COLOR
-            if looks["page_map"] == colors.ONE:
-                return base
+            return colors.along(way, (values[name] - lo) / (hi - lo) if hi > lo else 0.5, looks).name()
+        if way == colors.ONE:
+            return colors.picked(looks, "base_color")
+        if way in colors.MAPS or way in (colors.SHADES, colors.TWO):    # first page left showing to last
             left = [n for n in names if n not in looks["hidden_groups"]]
-            place = left.index(names[g]) if g < len(names) and names[g] in left else g
-            return colors.shade(base, place / max(1, len(left) - 1) if len(left) > 1 else 1.0).name()
-        if looks["page_map"] in colors.MAPS or looks["page_map"] == colors.TWO:    # across the pages left showing
-            left = [n for n in names if n not in looks["hidden_groups"]]
-            place = left.index(names[g]) if g < len(names) and names[g] in left else g
-            f = place / max(1, len(left) - 1)
-            if looks["page_map"] == colors.TWO:
-                return colors.blend(looks.get("first_color"), looks.get("last_color"), f).name()
-            return colors.sample(looks["page_map"], f).name()
+            place = left.index(name) if name in left else g
+            f = 1.0 if way == colors.SHADES and len(left) < 2 else place / max(1, len(left) - 1)
+            return colors.along(way, f, looks).name()
         return colors.group_color(g)
 
     def plan(self, chosen: list[int], picked: list[int] | None = None, pages_picked: list[str] | None = None

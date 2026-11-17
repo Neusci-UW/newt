@@ -130,6 +130,10 @@ class StimulusChart(SpikeChart):
         rows = {i: r for r, i in enumerate(traces)}
         averaged, trials = self.plan(list(traces))
         sets = [(QtGui.QColor(self.page.group_color(g)), blocks) for g, _, blocks in averaged]
+        opacity = self.page.trial_opacity()           # the Opacity you set (Auto: solid, as ever)
+        if opacity is not None:
+            for color, _ in sets:
+                color.setAlpha(int(255 * min(1.0, max(0.02, opacity))))
         sets += [(c, [i]) for i, c in self.page.trial_colors(trials).items()]
         for color, blocks in sets:
             item = OverlayCurve()

@@ -385,6 +385,8 @@ class AnalysisPage(QtWidgets.QWidget):
         its start: the average stimulus and response."""
         groups = dict(self.shown)
         idx = [i for i in groups.get(name, []) if 0 <= i < len(self.blocks) and self.blocks[i] is not None]
+        ticked = [i for i in idx if i not in self.hidden_blocks()]
+        idx = ticked if ticked else idx           # the trials unticked are left out (all unticked: all)
         if len(idx) < 2:
             self.blocks_panel.preview.show_trial("", [])
             return
@@ -1551,14 +1553,18 @@ class AnalysisPage(QtWidgets.QWidget):
         return self.picked or None
 
     def _ticked(self) -> tuple[list[int], list[str]]:
-        """(the trials ticked, the groups ticked whole), or ([], []) when everything is: a group
-        ticked whole shows its average, a trial ticked on its own its trace."""
+        """(the trials ticked, the groups shown as averages), or ([], []) when everything is: a
+        group ticked shows its average of the trials still ticked in it (unticking a trial leaves
+        it out of the average, not the average out), as does one whose trials are all ticked; a
+        trial ticked on its own, in a group left unticked, shows its trace."""
         hidden = self.hidden_blocks()
         every = sorted(i for _, blocks in self.shown for i in blocks)
         picked = [i for i in every if i not in hidden]
         if picked == every:
             return [], []
-        return picked, [n for n, blocks in self.shown if blocks and not set(blocks) & hidden]
+        off = set(self._looks["hidden_groups"])
+        return picked, [n for n, blocks in self.shown if blocks and
+                        (not set(blocks) & hidden or (n not in off and set(blocks) - hidden))]
 
     def _blocks_picked(self, picked: list[int]) -> None:
         """Highlighting in the Trials list: just the trial you're looking at (ticks choose what's

@@ -619,14 +619,18 @@ class ReviewMixin:
         return list(self.review_blocks) if self.mode == REVIEW else list(self.blocks)
 
     def analysis_step(self, d: int) -> None:
-        """← / →: Analysis's highlighted block, when Analysis is showing."""
-        if self.tabs.is_visible("analysis"):
+        """← / →: Analysis's highlighted block, when Analysis (or Single Plot) is showing."""
+        if self._analysis_list_showing():
             self.analysis_page.step(d)
+
+    def _analysis_list_showing(self) -> bool:
+        """Analysis's Trials list is on screen: on Analysis, and on Single Plot beside it."""
+        return any(self.tabs.is_visible(pid) for pid in ("analysis", "singleplot"))
 
     def step_block(self, d: int, extend: bool = False) -> None:
         """↑ / ↓ anywhere in the window (Shift: extend): the same as in the Trials list itself,
-        on Analysis or the Record page, Averages included. Not while recording."""
-        if self.tabs.is_visible("analysis"):          # Analysis: the next entry in its Trials list
+        on Analysis (and Single Plot) or the Record page, Averages included. Not while recording."""
+        if self._analysis_list_showing():             # Analysis: the next entry in its Trials list
             self.analysis_page.step_list(d, extend=extend)
             return
         if not self.tabs.is_visible("acq") or self.recorder.recording:

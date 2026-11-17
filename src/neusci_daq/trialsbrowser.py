@@ -157,6 +157,7 @@ class GroupTree(QtWidgets.QTreeWidget):
     stepped = QtCore.Signal(int)                 # Up and Down (-1, 1), when step_keys: always on to another trial
     stepped_extend = QtCore.Signal(int)          # Shift+Up/Down (Record page): add the next trial to the highlight
     delete_pressed = QtCore.Signal()             # Delete or Backspace (Cmd+Backspace too)
+    space_pressed = QtCore.Signal()              # Space: tick (or untick) what's highlighted
     step_keys = False
     own_selection = False   # Shift and Cmd clicks done here (the Record page): see mousePressEvent
     anchor = None           # ("block", i): where a Shift-click's range starts (the trial you're on)
@@ -216,6 +217,9 @@ class GroupTree(QtWidgets.QTreeWidget):
     def keyPressEvent(self, ev):
         if ev.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace) and self.selectedItems():
             self.delete_pressed.emit()
+            return
+        if ev.key() == QtCore.Qt.Key.Key_Space and not ev.modifiers() and self.selectedItems():
+            self.space_pressed.emit()
             return
         if self.step_keys and ev.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
             d = -1 if ev.key() == QtCore.Qt.Key.Key_Up else 1
@@ -418,6 +422,7 @@ class TrialsBrowser(QtWidgets.QWidget):
         self.tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
         self.tree.delete_pressed.connect(self._delete_highlighted)
+        self.tree.space_pressed.connect(self._space)
         self.tree.itemClicked.connect(lambda item, *_: self.later(lambda d=item.data(0, ROLE): self.activated.emit(d)))
         self.tree.itemDoubleClicked.connect(lambda item, *_: self.later(lambda d=item.data(0, ROLE): self._double(d)))
         self.tree.itemSelectionChanged.connect(
@@ -529,13 +534,16 @@ class TrialsBrowser(QtWidgets.QWidget):
                                               "double-click to rename this group; its trials take the new name"))
             tree.addTopLevelItem(head)
             if len(blocks) >= 2:                  # the group's average first
-                avg = QtWidgets.QTreeWidgetItem([f"Average ({len(blocks)})"])
+                n_avg = len(ticked) if self.for_analysis and ticked else len(blocks)
+                avg = QtWidgets.QTreeWidgetItem([f"Average ({n_avg}" + (f" of {len(blocks)})" if n_avg < len(blocks)
+                                                                          else ")")])
                 f = avg.font(0)
                 f.setItalic(True)
                 avg.setFont(0, f)
                 avg.setData(0, ROLE, ("avg", name))
                 avg.setFlags(avg.flags() & ~QtCore.Qt.ItemFlag.ItemIsDragEnabled & ~QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-                avg.setToolTip(0, f"Every channel averaged over the {len(blocks)} trials of {name}, "
+                avg.setToolTip(0, f"Every channel averaged over the {n_avg} trials of {name}"
+                                  + (" ticked" if n_avg < len(blocks) else "") + ", "
                                   "sample by sample from each trial's start: the average stimulus and response")
                 head.addChild(avg)
             for k, i in enumerate(blocks, 1):
@@ -730,6 +738,20 @@ class TrialsBrowser(QtWidgets.QWidget):
                                lambda: self.later(lambda: self.split_page_requested.emit(names[0])))
             menu.addAction(f"Delete {n} trial{'' if n == 1 else 's'}…", self._delete_highlighted)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _space(self) -> None:
+        """Space: tick the highlighted groups and trials; if they're all ticked, untick them."""
+        if not self.for_analysis:
+            return
+        boxes = [it for it in self.tree.selectedItems() if it.flags() & QtCore.Qt.ItemFlag.ItemIsUserCheckable]
+        if not boxes:
+            return
+        if any(it.checkState(0) != QtCore.Qt.CheckState.Checked for it in boxes):
+            blocks, pages = self.selected_blocks(), self._pages_highlighted()
+            self.later(lambda: self.tick_highlighted.emit(blocks, pages, False))
+        else:
+            for data in [it.data(0, ROLE) for it in boxes]:
+                self.later(lambda d=data: self.hide_changed.emit(d, True))
 
     def _delete_highlighted(self) -> None:
         picked = self.selected_blocks()

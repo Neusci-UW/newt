@@ -317,9 +317,7 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     if not plots:
         raise ValueError("this chart has nothing to make a figure of")
     pis = [p.getPlotItem() if hasattr(p, "getPlotItem") else p for p in plots]
-    keys = list(getattr(chart, "_plot_keys", []) or [])
-    spiked = (getattr(chart, "_spike_channel", ""), 0)
-    item = pis[keys.index(spiked)] if spiked in keys else pis[0]   # the channel with the spikes, else the first
+    item = pis[chart.main_plot()] if hasattr(chart, "main_plot") else pis[0]   # the spike channel, else the first
     left = item.getAxis("left")
     bottom = next((p.getAxis("bottom") for p in reversed(pis) if (p.getAxis("bottom").labelText or "").strip()),
                   item.getAxis("bottom"))             # stacked charts label time on the last plot only
@@ -432,6 +430,10 @@ def from_chart(chart, max_points: int = 4000, view: bool = True) -> tuple[dict, 
     spec["grid"] = bool(item.ctrl.xGridCheck.isChecked() or item.ctrl.yGridCheck.isChecked()) \
         if hasattr(item, "ctrl") else False
     spec["lw"] = 1.2
+    look = getattr(chart, "look", None)
+    if look is not None:                                  # its look: the same record the chart draws from
+        from . import chartstyle
+        spec.update(chartstyle.figure_keys(look, kx, ky))
     for ln in lines:                                      # its label, if the chart wrote one (threshold 340 mV)
         for it in item.items:
             if isinstance(it, pg.InfiniteLine) and abs(float(it.value()) * ky - ln["y"]) < 1e-12:

@@ -20,10 +20,9 @@ from .charttext import TextEditor, apply_texts
 from .helpview import add_help
 from .plotzoom import add_buttons
 from .viewkit import View, show_scale_bar, shrink_combos, style_plot, with_slider
+from . import chartstyle as CS
+from .chartstyle import LOOK  # noqa: F401  (its look: one record, read by the chart and its figure)
 
-
-LOOK = {"thick": 1.0, "grid": True, "x": [None, None], "y": [None, None],   # None: that edge is auto
-        "texts": {}}                                      # text you edited or deleted on it: key -> text ("" deleted)
 
 
 class Chart(View):
@@ -46,7 +45,8 @@ class Chart(View):
         self.pin: dict | None = None          # {"stems": blocks, "picked": those of them, "pages": names}
         self.own_units: set[int] | None = None
         self.linked = True
-        self.look = {k: list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v for k, v in LOOK.items()}
+        self.look = CS.new_look()
+        self.look_hooks: list = []            # called after its look is put on (Single Plot's fitted curve)
         self.stale = True
         self.auto_hide = False                # from a built-in layout: gives up its room when empty
         self.collapsed = False                # nothing to show: its dock gives up its room
@@ -177,8 +177,7 @@ class Chart(View):
         self.linked = state.get("linked", True)
         self.auto_hide = state.get("auto_hide", False)
         look = state.get("look", {})
-        self.look = {k: list(look.get(k, v)) if isinstance(v, list) else dict(look.get(k, v)) if isinstance(v, dict)
-                     else look.get(k, v) for k, v in LOOK.items()}
+        self.look = CS.restore(look)
         units = state.get("units")
         self.own_units = None if units is None else set(units)
         for b in (self.units_same, self.units_own):
@@ -412,22 +411,40 @@ class Chart(View):
 
     # -- its look --------------------------------------------------------------------------------
     def set_look(self, key: str, value) -> None:
-        """Change line thickness ("thick"), grid lines ("grid") or an axis range ("x" or "y":
-        [min, max], None for auto)."""
+        """Change one setting of its look (chartstyle.LOOK): thickness, grid, an axis range,
+        fonts, ticks, labels… The chart and its figure both read it from here."""
+        before = self.look.get(key)
         self.look[key] = list(value) if isinstance(value, (list, tuple)) else value
-        if key == "grid" and value:
-            self.refresh()                    # the chart's own grid lines, drawn again
+        if key == "grid" and value or key in ("title", "xlabel", "ylabel") and before and not value \
+                or key in ("x", "y") and not any(v is not None for v in self.look[key]):
+            self.refresh()                    # its own grid, labels or view, drawn again
         self.apply_look()
         self.saved()
 
+    def main_plot(self) -> int:
+        """Which of its plots its look's title, y label and ranges go on, and its figure shows:
+        the channel with the spikes, else the first."""
+        keys = list(getattr(self, "_plot_keys", []) or [])
+        spiked = (getattr(self, "_spike_channel", ""), 0)
+        return keys.index(spiked) if spiked in keys and keys.index(spiked) < len(self.plots()) else 0
+
     def apply_look(self) -> None:
-        """Its line thickness, grid lines and axis ranges, on what's drawn now."""
+        """Its look on what's drawn now: line thickness, grid, ranges, and (once set) fonts, ticks,
+        labels, title, the box, log axes, lines at zero, marker size."""
         plots = self.plots()
-        k = float(self.look["thick"])
-        for pw in plots:
-            pi = pw.getPlotItem()
-            if not self.look["grid"]:
-                pi.showGrid(x=False, y=False)
+        L = self.look
+        k = float(L["thick"])
+        pis = [pw.getPlotItem() if hasattr(pw, "getPlotItem") else pw for pw in plots]
+        lab_pt, tick_pt, title_pt = CS.fonts(L)
+        tf = None
+        if tick_pt:
+            tf = QtGui.QFont()
+            tf.setPointSizeF(tick_pt)
+        mpx = CS.marker_px(L)
+        m = self.main_plot() if pis else 0
+        for n, pi in enumerate(pis):
+            if not L["grid"]:
+                pi.showGrid(x=False, y=False)     # on: the chart draws its own grid
             for item in pi.listDataItems():
                 pen = item.opts.get("pen") if isinstance(item, pg.PlotDataItem) else None
                 if pen is None:
@@ -441,9 +458,47 @@ class Chart(View):
                 pen.setWidthF(base * k)
                 item._set_width = pen.widthF()
                 item.setPen(pen)
+            for side in ("left", "bottom"):
+                ax = pi.getAxis(side)
+                want = {"tickLength": CS.tick_px(L), **({"tickFont": tf} if tf is not None else {})}
+                if any(ax.style.get(a) != b for a, b in want.items()):      # only what changed (no relayout)
+                    ax.setStyle(**want)
+                text, units = ax.labelText, ax.labelUnits
+                if side == "left" and n == m and L.get("ylabel"):
+                    text, units = CS.html_sub(L["ylabel"]), ""
+                if side == "bottom" and n == len(pis) - 1 and L.get("xlabel"):
+                    text, units = CS.html_sub(L["xlabel"]), ""
+                if (text or units) and (lab_pt or text != ax.labelText or units != ax.labelUnits):
+                    ax.setLabel(text, units, **({"font-size": f"{lab_pt}pt"} if lab_pt else {}))
+            for side in ("top", "right"):
+                if L.get("despine", True):
+                    pi.hideAxis(side)
+                else:
+                    pi.showAxis(side)
+                    pi.getAxis(side).setStyle(showValues=False)
+            if bool(L.get("xlog")) != pi.ctrl.logXCheck.isChecked() or bool(L.get("ylog")) != pi.ctrl.logYCheck.isChecked():
+                pi.setLogMode(x=bool(L.get("xlog")), y=bool(L.get("ylog")))
+            zero = getattr(pi, "_look_zero", None)
+            if zero is not None and (not L.get("zero") or zero[0] not in pi.items):
+                for ln in zero:
+                    if ln in pi.items:
+                        pi.removeItem(ln)
+                pi._look_zero = zero = None
+            if L.get("zero") and zero is None:
+                pi._look_zero = [pg.InfiniteLine(0, angle=a, pen=pg.mkPen("#888", width=1)) for a in (0, 90)]
+                for ln in pi._look_zero:
+                    pi.addItem(ln, ignoreBounds=True)
+            if mpx:
+                for it in pi.items:
+                    if isinstance(it, pg.ScatterPlotItem) and len(it.data):
+                        it.setSize(mpx)
+        if pis and L.get("title"):
+            pis[m].setTitle(CS.html_sub(L["title"]), **({"size": f"{title_pt}pt"} if title_pt else {}))
         if plots:
-            self._apply_ranges(plots[0].getPlotItem().vb)
+            self._apply_ranges(pis[m].vb)
         apply_texts(self)
+        for hook in list(self.look_hooks):
+            hook()
 
     def texts_changed(self) -> None:
         self.texts_btn.setVisible(bool(self.look.get("texts")))
@@ -464,6 +519,13 @@ class Chart(View):
             a = lo if lo is not None else (data[0] if data is not None else now[0])
             b = hi if hi is not None else (data[1] if data is not None else now[1])
             if b > a:
+                if hasattr(vb, "_refresh_limits"):       # a range you typed may go past the data
+                    if axis == "y":
+                        vb.y_free = True
+                    else:
+                        d = data or (a, b)
+                        vb.bounds[0] = (min(a, d[0]), max(b, d[1]))
+                    vb._refresh_limits()
                 (vb.setXRange if axis == "x" else vb.setYRange)(a, b, padding=0)
 
     def measure_channel(self, k: int) -> str:

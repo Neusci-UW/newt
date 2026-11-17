@@ -24,6 +24,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
+from . import chartstyle as CS
 from . import figspec as F
 from .viewkit import scroll_column
 
@@ -408,6 +409,7 @@ class SinglePlotPage(QtWidgets.QWidget):
         if self._loading or self.spec is None:
             return
         s = self.spec
+        before = F.clone(s)
         kind = s["kind"] if s.get("kind") in ("curves", "image") else self.kind.currentData()   # a chart stays a chart
         if (self.w_mm.value(), self.h_mm.value()) != (s.get("w_mm"), s.get("h_mm")):
             s["auto_size"] = False                # a size you set: kept (else a chart's comes from its shape)
@@ -420,6 +422,9 @@ class SinglePlotPage(QtWidgets.QWidget):
                  legend=self.legend.currentText(), despine=self.despine.isChecked(),
                  grid=self.grid.isChecked(), zero=self.zero.isChecked(), points=self.points.isChecked(),
                  w_mm=self.w_mm.value(), h_mm=self.h_mm.value())
+        if self._live():
+            self._to_look({k: v for k, v in s.items() if before.get(k) != v})
+            return
         self.draw()
 
     def _live(self) -> bool:
@@ -451,79 +456,59 @@ class SinglePlotPage(QtWidgets.QWidget):
         if self.spec is not None and self.isVisible():
             self._redraw.start()
 
-    # -- the look, on the live chart ---------------------------------------------------------
+    # -- the live chart: its look is chart.look (chartstyle), the same record its figure reads --
+    _LOOK_KEYS = {"title", "xlabel", "ylabel", "xlog", "ylog", "font", "font_ticks", "font_title", "ticks",
+                  "tick_len", "ms", "despine", "grid", "zero", "legend", "fit", "fit_degree", "fit_line", "fit_x"}
+
+    def _to_look(self, changed: dict) -> None:
+        """Settings changed in the Figure or Fit tab, into the chart's look (its one record)."""
+        chart = self.focus_chart
+        if chart is None or not changed:
+            return
+        L = chart.look
+        kx, ky = float(self.data.get("kx", 1.0) or 1.0), float(self.data.get("ky", 1.0) or 1.0)
+        for k, v in changed.items():
+            if k == "lw":
+                L["thick"] = CS.thick_of(v)
+            elif k in ("xlim", "ylim"):
+                lo, hi = (list(v or []) + [None, None])[:2]
+                kk = kx if k == "xlim" else ky
+                L[k[0]] = [lo / kk, hi / kk] if lo is not None and hi is not None and hi > lo else [None, None]
+            elif k in ("w_mm", "h_mm"):
+                L["w_mm"], L["h_mm"] = self.spec["w_mm"], self.spec["h_mm"]
+            elif k in ("font_ticks", "font_title", "ms"):
+                L[k] = v or None
+            elif k in self._LOOK_KEYS:
+                L[k] = list(v) if isinstance(v, list) else v
+        if any(k in changed for k in ("title", "xlabel", "ylabel", "xlim", "ylim", "grid")):
+            chart.refresh()                       # its own labels, view and grid, drawn again under the look
+        chart.apply_look()
+        chart.saved()
+
+    def _live_spec(self, chart) -> dict:
+        """What the Figure tab shows for a live chart: its look, ranges left auto shown blank."""
+        spec, self.data = F.from_chart(chart)
+        L = chart.look
+        kx, ky = float(self.data.get("kx", 1.0) or 1.0), float(self.data.get("ky", 1.0) or 1.0)
+        spec.update(title=L.get("title", ""), xlabel=L.get("xlabel", ""), ylabel=L.get("ylabel", ""))
+        for key, axis, k_ in (("xlim", "x", kx), ("ylim", "y", ky)):
+            lo, hi = (list(L.get(axis) or []) + [None, None])[:2]
+            spec[key] = [lo * k_, hi * k_] if lo is not None and hi is not None else [None, None]
+        return spec
+
     def _apply_live(self) -> None:
-        """Put the Figure and Fit settings on the live chart: title, axis labels, ranges, text
-        sizes, tick marks, grid and the fitted curve. (Size in mm and the legend are for the Canvas.)"""
+        """After the chart put its look on: the lines as drawn now (for fitting), and the fitted curve."""
         chart, s = self.focus_chart, self.spec
         if chart is None or s is None or not chart.plots():
             return
         try:
-            self.data = F.from_chart(chart)[1]   # the lines as drawn now, for fitting
+            self.data = F.from_chart(chart)[1]
         except Exception:
             pass
         kx, ky = float(self.data.get("kx", 1.0) or 1.0), float(self.data.get("ky", 1.0) or 1.0)
         pis = [p.getPlotItem() if hasattr(p, "getPlotItem") else p for p in chart.plots()]
         main = pis[min(int(self.data.get("plot", 0)), len(pis) - 1)]
-        label_pt = float(s.get("font", 9.0))
-        tick_pt = float(s.get("font_ticks") or label_pt * 0.9)
-        title_pt = float(s.get("font_title") or label_pt * 1.1)
-        tick_px = float(s.get("tick_len", 3.5)) * 1.33
-        tick_len = tick_px if s.get("ticks") == "in" else -tick_px
-        tf = QtGui.QFont()
-        tf.setPointSizeF(tick_pt)
-        for k, pi in enumerate(pis):
-            for side in ("left", "bottom"):
-                ax = pi.getAxis(side)
-                ax.setStyle(tickFont=tf, tickLength=int(round(tick_len)))
-                text, units = ax.labelText, ax.labelUnits
-                if side == "left" and pi is main and s.get("ylabel"):
-                    text, units = _html_sub(s["ylabel"]), ""
-                if side == "bottom" and k == len(pis) - 1 and s.get("xlabel"):
-                    text, units = _html_sub(s["xlabel"]), ""
-                if text or units:
-                    ax.setLabel(text, units, **{"font-size": f"{label_pt}pt"})
-            pi.showGrid(x=bool(s.get("grid")), y=bool(s.get("grid")), alpha=0.25)
-        if s.get("title"):
-            pis[0].setTitle(_html_sub(s["title"]), size=f"{title_pt}pt")
-        # line widths and point sizes, scaled from what the chart draws (1.2 pt is its own size)
-        # Lines and Grid are the chart's own line thickness and grid (one setting, not two)
-        want = float(s.get("lw", 1.2)) / 1.2
-        look = getattr(chart, "look", None)
-        if look is not None and (abs(float(look.get("thick", 1.0)) - want) > 1e-6
-                                 or bool(look.get("grid")) != bool(s.get("grid"))):
-            look["thick"], look["grid"] = want, bool(s.get("grid"))
-            chart.set_look("thick", want)             # redraws its pens; this runs again after
-            return
-        marker_px = float(s.get("ms", 4.0)) * 2.25
-        for pi in pis:
-            for it in pi.items:
-                if isinstance(it, pg.ScatterPlotItem) and len(it.data):
-                    it.setSize(marker_px)
-            # an open box (left and bottom axes) or a closed one; log axes; lines at zero
-            for side in ("top", "right"):
-                if s.get("despine", True):
-                    pi.hideAxis(side)
-                else:
-                    pi.showAxis(side)
-                    pi.getAxis(side).setStyle(showValues=False)
-            pi.setLogMode(x=bool(s.get("xlog")), y=bool(s.get("ylog")))
-            zero = getattr(pi, "_sp_zero", None)
-            if s.get("zero") and zero is None:
-                pi._sp_zero = [pg.InfiniteLine(0, angle=a_, pen=pg.mkPen("#888", width=1)) for a_ in (0, 90)]
-                for ln in pi._sp_zero:
-                    pi.addItem(ln, ignoreBounds=True)
-            elif not s.get("zero") and zero is not None:
-                for ln in zero:
-                    pi.removeItem(ln)
-                pi._sp_zero = None
-        x0, x1 = (list(s.get("xlim") or []) + [None, None])[:2]
-        if x0 is not None and x1 is not None and x1 > x0:
-            main.setXRange(x0 / kx, x1 / kx, padding=0)
-        y0, y1 = (list(s.get("ylim") or []) + [None, None])[:2]
-        if y0 is not None and y1 is not None and y1 > y0:
-            main.setYRange(y0 / ky, y1 / ky, padding=0)
-        old = getattr(chart, "_sp_fit_item", None)          # the fitted curve, drawn over the chart
+        old = getattr(chart, "_sp_fit_item", None)
         if old is not None:
             try:
                 old.getViewBox() and old.getViewBox().removeItem(old)
@@ -541,22 +526,8 @@ class SinglePlotPage(QtWidgets.QWidget):
             chart._sp_fit_item = item
 
     def figure_of_chart(self) -> tuple[dict, dict]:
-        """The live chart as a figure, with the look you gave it here (for the Canvas, or to edit)."""
-        chart = self.focus_chart
-        base, data = F.from_chart(chart)
-        look = F.clone(getattr(chart, "fig_spec", None) or {})
-        spec = F.clone(base)
-        for k, v in look.items():
-            if k in ("kind", "series"):
-                continue
-            if k in ("xlim", "ylim") and not any(x is not None for x in (v or [])):
-                continue                          # not set: the chart's own view
-            if k in ("title", "xlabel", "ylabel") and not v:
-                continue
-            if k in ("w_mm", "h_mm") and look.get("auto_size", True):
-                continue                          # the chart's own shape, as it is on screen
-            spec[k] = v
-        return spec, data
+        """The live chart as a figure: what it shows, in its look (the same record it draws from)."""
+        return F.from_chart(self.focus_chart)
 
     def _render(self) -> None:
         """Draw the figure at its size, scaled to fit the area, sharp on high-density screens."""
@@ -652,7 +623,10 @@ class SinglePlotPage(QtWidgets.QWidget):
                          fit_line=max(0, self.fit_line.currentIndex()),
                          fit_x=[_opt_float(self.fit_x0.text()), _opt_float(self.fit_x1.text())])
         self.fit_degree.setEnabled(self.spec["fit"] == "poly")
-        self.draw()
+        if self._live():
+            self._to_look({k: self.spec[k] for k in ("fit", "fit_degree", "fit_line", "fit_x")})
+        else:
+            self.draw()
         self._show_fit()
 
     def _fit_use_view(self) -> None:
@@ -698,29 +672,17 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.page.side.look.hide()                    # thickness, grid, ranges: in the Figure tab instead
         self.focus_side.addWidget(self.right)
         self.right.setCurrentIndex(0)
-        if getattr(chart, "fig_spec", None) is None:
-            try:
-                base = F.from_chart(chart)[0]
-            except Exception:
-                base = F.new_spec(kind="curves")
-            base.update(title="", xlabel="", ylabel="", xlim=[None, None], ylim=[None, None], auto_size=True)
-            look = getattr(chart, "look", {}) or {}
-            base["lw"] = round(1.2 * float(look.get("thick", 1.0)), 2)     # its own line thickness and grid
-            base["grid"] = bool(look.get("grid", True))
-            chart.fig_spec = base
-        orig = chart.apply_look
-
-        def apply_look(*a, _orig=orig, **k):      # the chart redrew: its look from here again
-            _orig(*a, **k)
-            if self.focus_chart is chart:
-                QtCore.QTimer.singleShot(0, self._apply_live)
-        chart.apply_look = apply_look
-        chart._sp_orig_look = orig
+        self._hook = lambda: QtCore.QTimer.singleShot(0, self._apply_live) if self.focus_chart is chart else None
+        chart.look_hooks.append(self._hook)           # it redrew: the fitted curve over it again
         self.focus_title.setText(f"<b>{getattr(chart, 'name', '')}</b> · its settings are on the right")
         self.mode.setCurrentIndex(1)
         self.btn_back.setVisible(getattr(self, "_prev", (None,))[0] is not None)   # a figure to go back to
         self.editing = None
-        self.show_spec(chart.fig_spec, live=True)
+        try:
+            spec = self._live_spec(chart)
+        except Exception:
+            spec = F.new_spec(kind="curves")
+        self.show_spec(spec, live=True)
         self.page.show_sub("singleplot")
         if hasattr(chart, "refresh"):
             chart.refresh()
@@ -786,9 +748,8 @@ class SinglePlotPage(QtWidgets.QWidget):
         chart = self.focus_chart
         if chart is None:
             return
-        if hasattr(chart, "_sp_orig_look"):
-            chart.apply_look = chart._sp_orig_look
-            del chart._sp_orig_look
+        if getattr(self, "_hook", None) in getattr(chart, "look_hooks", []):
+            chart.look_hooks.remove(self._hook)
         self.focus_chart = None
         i = self.right.indexOf(self.page.side_scroll)        # the tabs go back to the figure page
         if i >= 0:
@@ -864,12 +825,6 @@ class SinglePlotPage(QtWidgets.QWidget):
 
     def state(self) -> dict | None:
         return F.clone(self.spec) if self.spec else None
-
-
-def _html_sub(text: str) -> str:
-    """Plain label text with true subscripts for the live chart: V_m → V<sub>m</sub>."""
-    import re
-    return re.sub(r"(?<![\w])([^\W\d_]+)_(\w+)", r"\1<sub>\2</sub>", text or "")
 
 
 def _head(text: str) -> QtWidgets.QLabel:

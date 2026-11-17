@@ -20,6 +20,7 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import breadboard as bb
+from . import lessoncircuit
 from . import style, theme
 from .unitbox import UnitSpinBox
 from .units import best_prefix
@@ -1264,6 +1265,23 @@ class BreadboardPage(QtWidgets.QWidget):
             return
         self.main.settings.setValue("board_folder", str(Path(path).parent))
         self._apply(board, keep_sel=False)
+
+    def load_lesson_circuit(self, spec: dict) -> str:
+        """Replace the board with a lesson's circuit (lessoncircuit.build), its probes on the
+        first free inputs. Returns "" when done, otherwise what went wrong."""
+        try:
+            board, notes = lessoncircuit.build(spec)
+        except (ValueError, KeyError, TypeError) as e:
+            return str(e)
+        inputs = [c.physical for c in self._inputs()]
+        for probe, phys in zip(board.probes(), inputs):
+            probe.input = phys
+        self._apply(board, keep_sel=False)
+        if self.board is not board:
+            return self.message.text() or "the circuit couldn't be solved"
+        title = spec.get("title", "the lesson's circuit")
+        self._show_message(f"Built from {title}. " + ". ".join(notes) + ".")
+        return ""
 
     def _apply(self, board: bb.Board, keep_sel: bool = True) -> None:
         """Check a changed board and, if it can be solved, make it the one recorded."""

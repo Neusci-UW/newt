@@ -55,7 +55,7 @@ from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
 from .simpage import SimPage, with_banner
 from .breadpage import BreadboardPage
-from .membranepage import AP_PAGE, HH_PAGE, RC_PAGE, SUM_PAGE, SYN_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
+from .membranepage import AP_PAGE, HH_PAGE, PLAS_PAGE, RC_PAGE, SPACE_PAGE, SUM_PAGE, SYN_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
@@ -508,14 +508,18 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.membrane_page = MembranePage(self)
         # The membrane as an RC circuit, then the same charging done by ions.
         self.rc_page = MembranePage(self, page=RC_PAGE, what="RC circuit")
-        # Voltage-gated channels: the Hodgkin–Huxley model.
-        self.hh_page = MembranePage(self, page=HH_PAGE, what="Hodgkin–Huxley")
+        # Passive properties: space. The same patches in a row, as a cable: the length constant.
+        self.space_page = MembranePage(self, page=SPACE_PAGE, what="passive properties: space")
         # A spike travelling along an axon, using the lessons above.
         self.ap_page = MembranePage(self, page=AP_PAGE, what="action potential")
+        # Voltage-gated channels: the Hodgkin–Huxley model, the spike taken apart in one patch.
+        self.hh_page = MembranePage(self, page=HH_PAGE, what="Hodgkin–Huxley")
         # The spike crossing to the next cell: Ca²⁺, vesicles, receptors and the synaptic current.
         self.syn_page = MembranePage(self, page=SYN_PAGE, what="synapse")
         # Inputs adding up to a spike: voltage-gated channels and the axon initial segment.
         self.sum_page = MembranePage(self, page=SUM_PAGE, what="summation")
+        # Where a synapse gets stronger or weaker: spines, NMDA receptors, LTP and LTD.
+        self.plas_page = MembranePage(self, page=PLAS_PAGE, what="plasticity")
         placeholder = lambda title, text: self._placeholder(title, text)
         # Record and Stimulus (the stimulator and its protocols) are sub-pages of Acquisition. Either half of
         # a split can show any page, two of Acquisition's included.
@@ -529,15 +533,17 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("sim", "Neural network simulator", with_banner(self, self.sim_page)),
             ("board", "Breadboard simulator", with_banner(self, self.board_page)),
             ("membrane", "Membrane potential", self.membrane_page),
-            ("rc", "RC circuit", self.rc_page),
-            ("hh", "Hodgkin–Huxley", self.hh_page),
+            ("rc", "Passive properties: time", self.rc_page),
+            ("space", "Passive properties: space", self.space_page),
             ("ap", "Action potential", self.ap_page),
             ("syn", "Synapse", self.syn_page),
-            ("sum", "Summation", self.sum_page)], groups=[
+            ("sum", "Summation", self.sum_page),
+            ("plas", "Plasticity", self.plas_page),
+            ("hh", "Hodgkin–Huxley", self.hh_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "simple", "stim"]),
             ("analysis", "Analysis", ["analysis", "singleplot", "plotcanvas"]),
             ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
-            ("lessons", "Lessons", ["membrane", "rc", "hh", "ap", "syn", "sum"]),
+            ("lessons", "Lessons", ["membrane", "rc", "space", "ap", "syn", "sum", "plas", "hh"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.setCentralWidget(self.tabs)
@@ -724,6 +730,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.membrane_page.apply_theme(mode)
         if getattr(self, "rc_page", None):
             self.rc_page.apply_theme(mode)
+        if getattr(self, "space_page", None):
+            self.space_page.apply_theme(mode)
         if getattr(self, "hh_page", None):
             self.hh_page.apply_theme(mode)
         if getattr(self, "ap_page", None):
@@ -732,6 +740,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.syn_page.apply_theme(mode)
         if getattr(self, "sum_page", None):
             self.sum_page.apply_theme(mode)
+        if getattr(self, "plas_page", None):
+            self.plas_page.apply_theme(mode)
         if hasattr(self, "analysis_page"):
             self.analysis_page.apply_theme(mode)
         self._update_theme_button()

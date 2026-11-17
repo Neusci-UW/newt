@@ -26,8 +26,10 @@ from . import style
 # The lesson pages: the Neusci-UW/lessons submodule
 LESSON_PAGES = Path(__file__).with_name("lessons")
 PAGE = LESSON_PAGES / "membrane_potential.html"
-# The RC circuit page: a capacitor charging, then the same thing done by ions
+# Passive properties: time. The RC circuit page: a capacitor charging, then the same thing done by ions
 RC_PAGE = LESSON_PAGES / "rc_membrane.html"
+# Passive properties: space. RC patches in a row (a cable), then joined ion-by-ion patches: λ and τ together
+SPACE_PAGE = LESSON_PAGES / "passive_space.html"
 # The Hodgkin–Huxley page: voltage-gated channels, ion by ion and in the circuit
 HH_PAGE = LESSON_PAGES / "hodgkin_huxley.html"
 # The action potential page: a spike travelling along an axon
@@ -36,6 +38,8 @@ AP_PAGE = LESSON_PAGES / "action_potential.html"
 SYN_PAGE = LESSON_PAGES / "synapse.html"
 # The summation page: inputs adding up, voltage-gated channels, and where the spike starts
 SUM_PAGE = LESSON_PAGES / "summation.html"
+# The plasticity page: spines, NMDA receptors and Ca²⁺, LTP and LTD
+PLAS_PAGE = LESSON_PAGES / "plasticity.html"
 
 # QtWebEngine has to be imported before the QApplication exists. gui.py imports this
 # module at the top, before run() makes the app, so importing it here is early enough.
@@ -57,10 +61,35 @@ _LESSON_NAME = re.compile(r"[a-z0-9_-]{1,64}")
 
 
 class LessonBridge(QtCore.QObject):
-    """What a page's lesson editor can call in Argus (through Qt's web channel): saving a
-    lesson file into the lessons folder, and saying when the editor opens or closes."""
+    """What a page can call in Argus (through Qt's web channel): its lesson editor saving a
+    lesson file into the lessons folder and saying when it opens or closes, and its
+    "Build on breadboard" buttons (lessons/breadboard.js) sending a circuit to the
+    Breadboard simulator."""
 
     editing = QtCore.pyqtSignal(bool)
+
+    def __init__(self, parent=None, main=None):
+        super().__init__(parent)
+        self.main = main
+
+    @QtCore.pyqtSlot(result=bool)
+    def hasBreadboard(self) -> bool:
+        return self.main is not None and hasattr(self.main, "board_page")
+
+    @QtCore.pyqtSlot(str, result=str)
+    def toBreadboard(self, spec: str) -> str:
+        """Build the page's circuit on the Breadboard simulator (lessoncircuit.py) and show it.
+        Returns "" when done, otherwise what went wrong."""
+        if not self.hasBreadboard():
+            return "the Breadboard simulator isn't available"
+        import json
+        try:
+            err = self.main.board_page.load_lesson_circuit(json.loads(spec))
+        except ValueError as e:
+            return str(e)
+        if not err:
+            self.main.tabs.show_tab("board")
+        return err
 
     @QtCore.pyqtSlot(bool)
     def setEditing(self, on: bool) -> None:
@@ -179,7 +208,7 @@ class MembranePage(QtWidgets.QWidget):
         inject.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         inject.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         self.view.page().scripts().insert(inject)
-        self._bridge = LessonBridge(self)
+        self._bridge = LessonBridge(self, self.main)
         self._bridge.editing.connect(self._show_editing)
         self._channel = QWebChannel(self.view.page())
         self._channel.registerObject("argusLessons", self._bridge)

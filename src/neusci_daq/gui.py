@@ -432,6 +432,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             lambda idx: self.delete_trials([p for i, p in enumerate(self._panel_paths()) if i in idx]))
         self.blocks_panel.split_requested.connect(
             lambda idx: self.split_trials([p for i, p in enumerate(self._panel_paths()) if i in idx]))
+        self.blocks_panel.split_rest_requested.connect(
+            lambda idx: self.split_at_rest_dialog([p for i, p in enumerate(self._panel_paths()) if i in idx]))
         self.blocks_panel.stimuli_of = lambda i: (trialfile.stimuli_count(ps[i])
                                                   if 0 <= i < len(ps := self._panel_paths()) else 0)
         self.blocks_panel.reset_requested.connect(self._reset_pages_dialog)

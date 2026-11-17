@@ -257,6 +257,7 @@ class TrialsBrowser(QtWidgets.QWidget):
     organize_picked = QtCore.Signal(str)         # "" by stimulus shape, "time" by start time
     delete_requested = QtCore.Signal(list)       # block indices: the trials highlighted (a group: all of it)
     split_requested = QtCore.Signal(list)        # block indices: make a trial of each stimulus they sent
+    split_rest_requested = QtCore.Signal(list)   # block indices: cut where the stimulus goes back to 0 (asks how)
     stimuli_of = None                            # set by the owner: block index -> how many stimuli it sent
     regroup_requested = QtCore.Signal()          # sort the trials into groups again, from scratch
     label_changed = QtCore.Signal(str)           # the label for trials recorded from now on
@@ -713,6 +714,13 @@ class TrialsBrowser(QtWidgets.QWidget):
             if many:                          # Repeat or Raise sent several: a trial for each
                 menu.addAction("Split into a trial per stimulus",
                                lambda: self.later(lambda: self.split_requested.emit(many)))
+            at_rest = menu.addAction("Split where the stimulus goes back to 0…",
+                                     lambda: self.later(lambda: self.split_rest_requested.emit(picked)))
+            at_rest.setEnabled(bool(self.stim_ch.currentData()))
+            at_rest.setToolTip("Cut each trial where its stimulus channel goes back to 0: works on any trial, "
+                               "even with no stimulus notes" if at_rest.isEnabled()
+                               else "Pick the Stimulus channel first (in Channels)")
+            menu.setToolTipsVisible(True)
             names = self._pages_highlighted() if self.for_analysis else []
             if len(names) >= 2:
                 menu.addAction(f"Combine {len(names)} groups",

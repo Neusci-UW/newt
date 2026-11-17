@@ -94,6 +94,8 @@ class AnalysisPage(QtWidgets.QWidget):
             lambda idx: self.main.delete_trials([p for i, p in enumerate(self._paths) if i in idx]))
         self.blocks_panel.split_requested.connect(
             lambda idx: self.main.split_trials([p for i, p in enumerate(self._paths) if i in idx]))
+        self.blocks_panel.split_rest_requested.connect(
+            lambda idx: self.main.split_at_rest_dialog([p for i, p in enumerate(self._paths) if i in idx]))
         self.blocks_panel.stimuli_of = lambda i: (len(self.blocks[i].get("stimuli") or [])
                                                   if 0 <= i < len(self.blocks) and self.blocks[i] is not None else 0)
         self.blocks_panel.tick_highlighted.connect(self.tick_highlighted)

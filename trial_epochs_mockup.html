@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Split at stimulus mockup</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;--resp:#d0532c}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;--resp:#f07a52}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 "IBM Plex Sans",system-ui,sans-serif;padding:20px 16px 40px}
+.wrap{max-width:1000px;margin:0 auto;display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:780px){.wrap{grid-template-columns:1fr}}
+h1{font-size:20px;margin:0 0 4px;grid-column:1/-1}
+.note{grid-column:1/-1;color:var(--muted);border-left:3px solid var(--accent);padding:6px 10px;margin:0;background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.card h2{font-size:14px;margin:0 0 8px}
+.menu{border:1px solid var(--line);border-radius:8px;padding:4px 0;box-shadow:0 4px 14px rgba(0,0,0,.12);background:var(--surface)}
+.menu div{padding:3px 12px;white-space:nowrap}.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.menu .on{background:var(--accent);color:var(--surface)}
+.new{outline:2px dashed var(--accent);outline-offset:2px;border-radius:6px}
+.row{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap}
+.row label{min-width:250px}
+input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}
+.val{min-width:150px;font-variant-numeric:tabular-nums}
+.cap{color:var(--muted);font-size:12px;margin:0 0 8px}
+button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 10px}
+button.go{background:var(--accent);color:var(--surface);border-color:var(--accent)}
+svg text{fill:var(--ink)}
+table{border-collapse:collapse;width:100%;font-size:12px}
+td,th{text-align:left;padding:2px 8px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500}
+td.n{font-variant-numeric:tabular-nums;color:var(--muted)}
+.list{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+ol{margin:4px 0 0 18px;padding:0}li{margin:3px 0}
+</style></head><body>
+<div class="wrap">
+<h1>Split trials where the stimulus goes back to 0</h1>
+<p class="note">Right-click a trial (or several highlighted) in the Trials list. Unlike <b>Split into a trial per stimulus</b>, which needs the stimulus notes saved while recording, this reads only the Stimulus channel, so it works on any trial recorded before, or one driven by an outside stimulator. Move the sliders to see where the cuts land.</p>
+
+<div>
+  <div class="cap">Trials list, right-click menu</div>
+  <div class="menu">
+    <div>Rename group…</div><div>Move to group ▸</div><hr>
+    <div>Split into a trial per stimulus</div>
+    <div class="on new">Split where the stimulus goes back to 0…</div><hr>
+    <div>Delete trial</div>
+  </div>
+  <p class="cap" style="margin-top:8px">Greyed out, with a tip saying why, when no Stimulus channel is picked.</p>
+</div>
+
+<div class="card new">
+  <h2>Split where the stimulus goes back to 0 <span class="cap">Trial 4 · 10 s · Stimulus channel: ai1</span></h2>
+  <svg id="plot" viewBox="0 0 900 250" style="width:100%;height:auto;display:block"></svg>
+  <div class="row"><label>A stimulus ends when it's back to 0 for</label><input type="range" id="gap" min="2" max="500" value="50"><span class="val" id="gapv"></span></div>
+  <div class="cap">Short: each pulse of a train becomes its own trial. Long: a train stays one trial.</div>
+  <div class="row"><label>Back to 0 means within</label><input type="range" id="thr" min="1" max="30" value="5"><span class="val" id="thrv"></span></div>
+  <div class="row"><label>Start each trial before its stimulus by</label><input type="range" id="bef" min="0" max="500" step="10" value="100"><span class="val" id="befv"></span></div>
+  <div class="cap">Never into the stimulus before it. The new trials sit back to back, so nothing after the first is lost; the last runs to the end.</div>
+  <div class="list"><table><thead><tr><th>New trial</th><th>Stimulus found</th><th>Length</th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="row" style="margin-top:10px">
+    <label style="min-width:0"><input type="radio" name="who" checked> This trial</label>
+    <label style="min-width:0"><input type="radio" name="who"> The 3 highlighted trials</label>
+    <span style="flex:1"></span><button>Cancel</button><button class="go" id="go"></button></div>
+  <div class="cap">The originals are hidden, not deleted (tick one to bring it back). Groups then puts the same stimuli together, as after a Repeat.</div>
+</div>
+
+<div class="card" style="grid-column:1/-1">
+  <h2>To decide</h2>
+  <ol>
+    <li>Also do this by itself when Record stops, for trials with no stimulus notes (an outside stimulator)?</li>
+    <li>Default for "back to 0 for": 50 ms, or worked out from the trial (just longer than the longest gap inside a train)?</li>
+    <li>Fold it into the existing item instead: one <b>Split into a trial per stimulus…</b> that uses the notes when there are some and the channel when not?</li>
+  </ol>
+</div>
+</div>
+<script>
+const FS=2000,T=10,NN=FS*T,W=900,stim=new Float64Array(NN),resp=new Float64Array(NN);
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647,gauss=()=>Math.sqrt(-2*Math.log(rnd()+1e-12))*Math.cos(2*Math.PI*rnd());
+const pulse=(t,v,w)=>{const a=Math.round(t*FS);for(let k=a;k<a+Math.max(1,Math.round(w/1000*FS));k++)stim[k]+=v};
+const train=(t,v,w,n,g)=>{for(let p=0;p<n;p++)pulse(t+p*g/1000,v,w)};
+const sine=(t,v,f,d)=>{const a=Math.round(t*FS);for(let k=0;k<d/1000*FS;k++)stim[a+k]+=v*Math.sin(2*Math.PI*f*k/FS)};
+pulse(.5,2,5);pulse(1.5,2,5);train(2.5,2,2,5,20);pulse(4,4,5);sine(5,1,20,200);train(6.5,4,2,5,20);pulse(8,1,5);pulse(9,1,5);
+let v=0;for(let k=0;k<NN;k++){v+=(stim[k]*8-v)/(.015*FS);resp[k]=-65+v+.25*gauss();stim[k]+=.01*gauss()}
+let big=0;for(const y of stim)big=Math.max(big,Math.abs(y));
+const g=id=>document.getElementById(id),r2=x=>+x.toPrecision(2);
+function epochs(){const thr=+g('thr').value/100*big,gap=+g('gap').value/1000*FS,bef=+g('bef').value/1000*FS;
+ const runs=[];let a=-1;for(let k=0;k<=NN;k++){const on=k<NN&&Math.abs(stim[k])>thr;if(on&&a<0)a=k;if(!on&&a>=0){runs.push([a,k]);a=-1}}
+ const ep=[];for(const r of runs){const l=ep[ep.length-1];if(l&&r[0]-l.e<gap){l.e=r[1];l.runs.push(r)}else ep.push({s:r[0],e:r[1],runs:[r]})}
+ ep.forEach((p,j)=>p.lo=Math.max(0,Math.round(p.s-bef),j?ep[j-1].e:0));
+ ep.forEach((p,j)=>p.hi=j+1<ep.length?ep[j+1].lo:NN);
+ return {ep,thr}}
+function describe(p){let mx=0,mn=0;for(let k=p.s;k<p.e;k++){mx=Math.max(mx,stim[k]);mn=Math.min(mn,stim[k])}
+ const thr=+g('thr').value/100*big,amp=r2(Math.max(mx,-mn)),ms=x=>r2(x/FS*1000);
+ if(mn<-thr)return `Wave, ${amp} V, ${ms(p.e-p.s)} ms`;
+ const pos=p.runs.filter(r=>stim[r[0]]>0),w=ms(pos[0][1]-pos[0][0]);
+ if(pos.length===1)return `Pulse of ${amp} V, ${w} ms`;
+ return `Train of ${pos.length} pulses of ${amp} V, ${w} ms, every ${ms(pos[1][0]-pos[0][0])} ms`}
+function env(y,top,h,lo,hi,col){const sc=h/(hi-lo);let d='';
+ for(let c=0;c<W;c++){const a=Math.floor(c*NN/W),b=Math.floor((c+1)*NN/W);let mn=Infinity,mx=-Infinity;for(let k=a;k<b;k++){mn=Math.min(mn,y[k]);mx=Math.max(mx,y[k])}
+  d+=`M${c+.5},${(top+(hi-mx)*sc).toFixed(1)}L${c+.5},${(top+(hi-mn)*sc+.6).toFixed(1)}`}
+ return `<path d="${d}" stroke="${col}" stroke-width="1" fill="none"/>`}
+const STIM_LANE=env(stim,22,92,-4.6,4.6,'var(--ink)'),RESP_LANE=env(resp,140,86,-68,-30,'var(--resp)');
+function render(){const {ep,thr}=epochs(),px=k=>k/NN*W;let s='';
+ ep.forEach((p,j)=>{s+=`<rect x="${px(p.lo)}" y="14" width="${px(p.hi)-px(p.lo)}" height="214" style="fill:color-mix(in srgb,var(--accent) ${j%2?14:6}%,transparent)"/>`;
+  if(j)s+=`<line x1="${px(p.lo)}" x2="${px(p.lo)}" y1="10" y2="230" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  s+=`<text x="${px(p.lo)+3}" y="11" font-size="10" font-weight="600" style="fill:var(--accent)">${j+1}</text>`});
+ const zy=22+92/2,band=thr*92/9.2;
+ s+=`<rect x="0" y="${zy-band}" width="${W}" height="${2*band}" style="fill:color-mix(in srgb,var(--ink) 10%,transparent)"/>`;
+ s+=STIM_LANE+RESP_LANE;
+ s+=`<text x="4" y="30" font-size="10" style="fill:var(--muted)">Stimulus (ai1)</text><text x="4" y="150" font-size="10" style="fill:var(--muted)">Response (ai0)</text>`;
+ for(let t=0;t<=T;t+=1)s+=`<text x="${Math.min(W-10,t/T*W+(t?0:2))}" y="246" font-size="10" text-anchor="${t?'middle':'start'}" style="fill:var(--muted)">${t} s</text>`;
+ g('plot').innerHTML=s;
+ g('rows').innerHTML=ep.map((p,j)=>`<tr><td class="n">${j+1}</td><td>${describe(p)}</td><td class="n">${((p.hi-p.lo)/FS).toFixed(2)} s</td></tr>`).join('');
+ g('gapv').textContent=g('gap').value+' ms';g('thrv').textContent=`±${r2(thr)} V (${g('thr').value}% of the biggest)`;g('befv').textContent=g('bef').value+' ms';
+ g('go').textContent=`Split into ${ep.length} trials`}
+['gap','thr','bef'].forEach(id=>g(id).oninput=render);render();
+</script>
+</body></html>

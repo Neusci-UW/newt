@@ -188,13 +188,40 @@ class ReviewMixin:
             return
         self.split_in_background(todo)
 
-    def split_in_background(self, paths: list[Path], marks: dict | None = None) -> None:
+    def split_at_rest_dialog(self, paths: list[Path]) -> None:
+        """Right-click › Split where the stimulus goes back to 0…: shows the first trial with
+        the cuts as you set them (SplitAtRestDialog), then splits it, or every one highlighted."""
+        from .splitdialog import SplitAtRestDialog
+        busy = self.recorder.path if self.recorder.recording else None
+        todo = [Path(p) for p in paths if Path(p) != busy and Path(p).exists()]
+        if not todo:
+            return
+        ch = self._split_channel(todo[0])
+        if ch is None:
+            self.statusBar().showMessage("Pick the Stimulus channel first: the cuts are found on it", 8000)
+            return
+        try:
+            rec = trialfile.read_file(todo[0])
+        except Exception as e:
+            self.statusBar().showMessage(f"Couldn't read {todo[0].name}: {e}", 8000)
+            return
+        sp = getattr(self, "simple_page", None)
+        dlg = SplitAtRestDialog(self, rec, ch, len(todo), sp.before.value() if sp is not None else 100.0,
+                                todo[0].stem)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        gap, on, before, every = dlg.settings()
+        self.split_in_background(todo if every else todo[:1], at_rest=(gap, on, before))
+
+    def split_in_background(self, paths: list[Path], marks: dict | None = None,
+                            at_rest: tuple[float, float, float] | None = None) -> None:
         """Make a trial of each stimulus sent during these trials (Repeat, Raise, Complex
         Stimulus's Repeat), back to back from Simple Stimulus's Before (trialsplit), named
         for what was sent by Groups. Worked out on another thread, so acquiring carries on
         smoothly; then the originals are hidden (tick one to bring it back) and the new
         trials listed. marks: {path: where that trial starts on the live history}, to draw
-        each new trial's start and end there."""
+        each new trial's start and end there. at_rest: (back at 0 for, ms; on; Before, ms) to
+        cut where the stimulus channel goes back to 0 instead (trialsplit.split_at_rest)."""
         if not hasattr(self, "_split_relay"):
             self._split_relay = _SplitRelay(self)
             self._split_relay.done.connect(self._split_done)
@@ -207,7 +234,14 @@ class ReviewMixin:
             out = []
             for p, ch in jobs:
                 try:
-                    out.append((p, trialsplit.split(p, ch, before, lambda f=p.parent: session.next_block_path(f)), None))
+                    nxt = lambda f=p.parent: session.next_block_path(f)
+                    if at_rest is not None:
+                        if ch is None:
+                            raise ValueError("no stimulus channel")
+                        gap, on, before_ms = at_rest
+                        out.append((p, trialsplit.split_at_rest(p, ch, before_ms, nxt, gap, on), None))
+                    else:
+                        out.append((p, trialsplit.split(p, ch, before, nxt), None))
                 except Exception as e:             # (said in the status bar)
                     out.append((p, [], e))
             relay.done.emit((out, dict(marks or {})))

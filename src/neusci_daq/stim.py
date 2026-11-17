@@ -582,6 +582,57 @@ def _describe_part(p: dict, units: str, scale: float) -> str:
     return s + (f" ({' and '.join(changes)} change per trial)" if changes else "")
 
 
+def _short_part(p: dict, units: str, scale: float) -> str:
+    lv = lambda v: f"{round(float(v) * scale, 6):g} {units}"
+    hz = lambda f: f"{round(float(f), 6):g} Hz"
+    kind = p.get("kind")
+    if kind == "pulse":
+        name, n = ("Biphasic pulse" if p.get("biphasic") else "Pulse"), int(p.get("count", 1))
+        return f"{name} {lv(p['level'])}" if n <= 1 else f"{n} {name.lower()}s {lv(p['level'])}"
+    if kind == "ramp":
+        start = float(p.get("start", 0.0))
+        return f"Ramp to {lv(p['level'])}" if not start else f"Ramp {lv(start)} to {lv(p['level'])}"
+    if kind in ("sine", "triangle", "square"):
+        return f"{SEG_KINDS[kind]} {hz(p.get('freq', 0))} {lv(abs(float(p['level'])))}"
+    if kind == "chirp":
+        return f"Chirp {hz(p.get('freq', 0))} to {hz(p.get('freq2', 0))}"
+    if kind in ("step", "noise", "exp", "alpha"):
+        return f"{SEG_KINDS[kind]} {lv(abs(float(p['level'])) if kind == 'noise' else p['level'])}"
+    if kind == "file":
+        return f"File {Path(p.get('file', '')).name or '(none)'}"
+    return SEG_KINDS.get(kind, "?")
+
+
+def stimulus_name(s: Stimulus, units: str = "V", scale: float = 1.0, long: bool = False) -> str:
+    """What a stimulus is, to name the group of its trials: "Pulse 5 V", "5 pulses 2 V",
+    "Sine 10 Hz 1 V"; its segments after each other with " + " (baselines left out).
+    long: with widths and durations, to tell apart two that share the short name."""
+    parts = [p for p in to_segments(s).parts if p.get("kind") != "base"]
+    if not parts:
+        return "Baseline only"
+    if len(parts) > 2 and all(p.get("kind") == "ramp" for p in parts):    # a triangle wave, as ramps
+        top = max(abs(float(p["level"])) for p in parts)
+        period = sum(float(p.get("dur", 0.0)) for p in parts[:3])
+        name = (f"Triangle {round(1000.0 / period, 6):g} Hz" if period > 0 else "Triangle") + \
+            f" {round(top * scale, 6):g} {units}"
+        return name + (f", {sum(float(p.get('dur', 0.0)) for p in parts):g} ms" if long else "")
+    names = [_describe_part(p, units, scale) if long else _short_part(p, units, scale) for p in parts]
+    return " + ".join(names if len(names) <= 3 else names[:2] + ["…"])
+
+
+def stimulus_size(s: Stimulus) -> tuple[float, float]:
+    """(frequency Hz, amplitude V) of a stimulus, to sort groups by: its pulses' rate or its
+    wave's frequency (0 for neither), and its biggest level."""
+    parts = [p for p in to_segments(s).parts if p.get("kind") != "base"]
+    amp = max((abs(float(p.get("level", 0.0))) for p in parts), default=0.0)
+    for p in parts:
+        if p.get("kind") == "pulse" and int(p.get("count", 1)) > 1 and float(p.get("interval", 0)) > 0:
+            return 1000.0 / float(p["interval"]), amp
+        if p.get("kind") in ("sine", "triangle", "square", "chirp"):
+            return float(p.get("freq", 0.0)), amp
+    return 0.0, amp
+
+
 def to_segments(s: Stimulus) -> Stimulus:
     """An older shape as segments: a baseline for its delay, then the shape."""
     if s.shape == "segments":

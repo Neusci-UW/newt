@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synapse picture options</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;
+--k:#6b3fb8;--na:#d07a1f;--ca:#b8892a;--nt:#c0287a;--cyto:#edf0f6;--post:#f1e4e8;--bath:#e8f2ef;--mem:#e3d3a8;--memdark:#a8946a;--pos:#e0574a}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;
+--k:#a88cf2;--na:#f0a350;--ca:#e0bb5c;--nt:#f477b7;--cyto:#1b2230;--post:#2a1f25;--bath:#13211d;--mem:#6c6046;--memdark:#a8946a;--pos:#ff7a6b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 48px}
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:24px;font-weight:600;margin:0}h2{font-size:18px;font-weight:600;margin:0 0 2px}
+p{margin:0}.muted{color:var(--muted);font-size:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+canvas{width:100%;height:auto;display:block;border-radius:6px;margin-top:10px}
+.bar{position:sticky;top:0;z-index:2;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px}
+.bar button{font:inherit;padding:3px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--surface);cursor:pointer}
+.bar button.ghost{background:none;color:var(--accent)}
+.bar input{flex:1;min-width:160px;accent-color:var(--accent)}
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin-top:8px;font-size:12px;line-height:1.3}
+.steps div{padding:6px 8px;border-radius:6px;border:1px solid var(--line);color:var(--muted);transition:background .15s,color .15s}
+.steps div b{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.steps div.on{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+@media (max-width:700px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style></head><body><div class="wrap">
+
+<header><h1>Synapse picture: three options</h1>
+<p class="muted">Mockup. One scripted spike on a 5 s loop (not the model) so the three can be compared side by side. Drag the slider to stop at any step.</p></header>
+
+<div class="bar"><button id="play">Pause</button><button class="ghost" id="slow">Slow</button>
+<input id="scrub" type="range" min="0" max="5" step="0.01" value="0"><span id="stageTxt" style="min-width:260px"></span></div>
+
+<section class="card"><h2>A · Anatomical, with a step strip</h2>
+<p class="muted">The terminal drawn as a bulb at the end of the axon and the spine as a mushroom head, so the shapes read as cells. Two-line membranes, filled vesicles, a red wave you can watch run down the axon. The six steps sit under the picture and light up in turn.</p>
+<canvas id="cA"></canvas><div class="steps" id="stepsA"></div></section>
+
+<section class="card"><h2>B · Close-up of one release site</h2>
+<p class="muted">Zoomed in on a single active zone: a lipid bilayer, two Ca²⁺ channels, one vesicle that fuses into an Ω, three receptor channels. Fewer, bigger parts, so each step is unmistakable; an inset shows where this sits in the whole synapse.</p>
+<canvas id="cB"></canvas></section>
+
+<section class="card"><h2>C · Today's layout, with a spotlight</h2>
+<p class="muted">Keeps the current geometry (so the model plugs straight in), but cleans up the drawing and dims everything except the parts doing something right now, with a numbered callout pointing at them.</p>
+<canvas id="cC"></canvas></section>
+</div>
+
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
+let K = {};
+const readK = () => { for (const n of ['bath','cyto','post','mem','memdark','ca','nt','na','k','accent','ink','muted','pos','line','surface']) K[n] = css(n); };
+readK(); matchMedia('(prefers-color-scheme:dark)').addEventListener('change', readK);
+function setup(id, W, H) { const cv = document.getElementById(id), d = devicePixelRatio || 1; cv.width = W * d; cv.height = H * d; const c = cv.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0); return c; }
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ramp = (t, a, b) => clamp((t - a) / (b - a));
+const ease = x => x < .5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2;
+const h = i => { const s = Math.sin(i * 12.9898) * 43758.5453; return s - Math.floor(s); };
+const TAU = Math.PI * 2;
+
+// ---- the shared script of one spike ----
+const STAGES = [[0, 'Spike arrives', 'The spike runs down the axon into the terminal'],
+  [0.55, 'Ca²⁺ in', 'Ca²⁺ channels open and Ca²⁺ rushes in'],
+  [1.0, 'Fusion', 'Docked vesicles fuse and spill transmitter'],
+  [1.35, 'Diffusion', 'Transmitter crosses the cleft'],
+  [1.8, 'Receptors open', 'Receptor channels open: Na⁺ flows in'],
+  [3.2, 'Clear & refill', 'Transmitter is cleared; empty sites refill']];
+const stageOf = t => { let s = 0; STAGES.forEach((x, i) => { if (t >= x[0]) s = i; }); return s; };
+const st = t => ({
+  front: ramp(t, 0, 0.6),
+  pre: t < 0.6 ? 1 : 1 - ramp(t, 0.6, 1.3),
+  ca: clamp(ramp(t, 0.5, 0.7) - ramp(t, 1.1, 1.5)),
+  rec: clamp(ramp(t, 1.5, 1.9) - ramp(t, 2.6, 3.5)),
+  post: clamp(ramp(t, 1.8, 2.3) - ramp(t, 2.9, 4.2)),
+  clear: ramp(t, 2.3, 3.4),
+});
+
+// ---- shared parts ----
+function bilayer(c, path) { c.lineJoin = 'round'; c.lineWidth = 9; c.strokeStyle = K.memdark; path(); c.stroke(); c.lineWidth = 3.5; c.strokeStyle = K.mem; path(); c.stroke(); }
+function dot(c, x, y, col, r) { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
+// a vesicle that sits on the membrane at yMem; f = 0 docked … 1 flattened into the membrane
+function vesicle(c, x, yMem, r, f, alpha = 1, bg) {
+  if (f >= 1) return;
+  c.save(); c.globalAlpha *= alpha;
+  const cy = yMem - (r + 5) * (1 - f) - 2 * f, rr = r * (1 - .45 * f), gap = f * Math.PI * .85;
+  if (f < .25) { c.fillStyle = K.nt; c.globalAlpha *= .16 * (1 - f * 4); c.beginPath(); c.arc(x, cy, rr, 0, TAU); c.fill(); c.globalAlpha = alpha; }
+  if (f > 0 && bg) { c.fillStyle = bg; const gw = rr * Math.sin(gap); c.fillRect(x - gw, yMem - 6, gw * 2, 12); }
+  c.strokeStyle = K.nt; c.lineWidth = Math.max(2, r / 7);
+  c.beginPath(); c.arc(x, cy, rr, Math.PI / 2 + gap, Math.PI / 2 - gap + TAU); c.stroke();
+  if (f < .15) for (let k = 0; k < 5; k++) dot(c, x + rr * .5 * Math.cos(k * 1.3 + 1), cy + rr * .45 * Math.sin(k * 1.3 + 1), K.nt, r / 7);
+  c.restore();
+}
+function caChannel(c, x, y, open, s = 1) { const g = 3.5 * s * open, w = 7 * s, hh = 22 * s; c.fillStyle = K.ca; rr(c, x - w - g, y - hh / 2, w, hh, 2 * s); c.fill(); rr(c, x + g, y - hh / 2, w, hh, 2 * s); c.fill(); }
+function receptor(c, x, y, open, bound, s = 1) {
+  const g = 4 * s * open, w = 6 * s, hh = 24 * s;
+  c.fillStyle = K.accent; rr(c, x - w - g, y - hh / 2, w, hh, 2 * s); c.fill(); rr(c, x + g, y - hh / 2, w, hh, 2 * s); c.fill();
+  if (bound) { dot(c, x - w / 2 - g, y - hh / 2 - 3 * s, K.nt, 2.6 * s); dot(c, x + w / 2 + g, y - hh / 2 - 3 * s, K.nt, 2.6 * s); }
+}
+function rr(c, x, y, w, hh, r) { c.beginPath(); c.roundRect(x, y, w, hh, r); }
+function label(c, txt, x, y, opt = {}) { c.font = `${opt.size || 13}px "IBM Plex Sans",system-ui,sans-serif`; c.fillStyle = opt.col || K.muted; c.textAlign = opt.align || 'left'; c.fillText(txt, x, y); }
+function leader(c, x1, y1, x2, y2) { c.strokeStyle = K.muted; c.lineWidth = 1; c.globalAlpha = .6; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke(); c.globalAlpha = 1; }
+function bathCa(c, W, H, t, n, avoid) { for (let i = 0; i < n; i++) { const x = h(i) * W, y = h(i + 99) * H; if (avoid(x, y)) continue; dot(c, x + 3 * Math.sin(t * 1.3 + i), y + 3 * Math.cos(t * 1.1 + i), K.ca, 3); } }
+
+// a synapse scene (used by A and C): layout L, spotlight function al(group) → alpha
+function scene(c, t, L, al) {
+  const S = st(t);
+  // terminal & spine bodies
+  c.save(); c.globalAlpha = al('pre'); L.pre(); c.fillStyle = K.cyto; c.fill();
+  c.save(); L.pre(); c.clip();
+  const y0 = L.preTop, y1 = L.az, fy = y0 + (y1 - y0) * S.front;
+  const g = c.createLinearGradient(0, fy - 140, 0, fy + 20);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.85, K.pos); g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.globalAlpha = al('pre') * .5 * S.pre; c.fillStyle = g; c.fillRect(0, fy - 140, 2000, 160);
+  if (S.front >= 1) { c.globalAlpha = al('pre') * .28 * S.pre; c.fillStyle = K.pos; c.fillRect(0, 0, 2000, 2000); }
+  c.restore(); c.globalAlpha = al('pre'); bilayer(c, L.pre); c.restore();
+  c.save(); c.globalAlpha = al('post'); L.post(); c.fillStyle = K.post; c.fill();
+  c.save(); L.post(); c.clip(); c.globalAlpha = al('post') * .35 * S.post; c.fillStyle = K.pos; c.fillRect(0, 0, 2000, 2000); c.restore();
+  c.globalAlpha = al('post'); bilayer(c, L.post);
+  c.globalAlpha = al('post') * .35; c.fillStyle = K.memdark; c.fillRect(L.rec[0] - 10, L.ps + 5, L.rec.at(-1) - L.rec[0] + 20, 7); // postsynaptic density
+  c.restore();
+  // reserve vesicles; one drifts down to refill each fused site
+  c.save(); c.globalAlpha = al('ves');
+  L.reserve.forEach(([x, y], i) => vesicle(c, x + 2 * Math.sin(t + i), y + 2 * Math.cos(t * .8 + i), L.vr * .9, 0, .7));
+  L.sites.forEach((x, i) => {
+    const fu = L.fuse.find(f => f[0] === i);
+    if (!fu) return vesicle(c, x, L.az, L.vr, 0);
+    const f = ramp(t, fu[1], fu[1] + .3);
+    if (f < 1) return vesicle(c, x, L.az, L.vr, f, 1, K.bath);
+    const back = ramp(t, 3.4 + i * .1, 4.4 + i * .1);   // refill from the reserve
+    if (back > 0) { const [rx, ry] = L.reserve[i % L.reserve.length], e = ease(back); vesicle(c, rx + (x - rx) * e, ry + (L.az - L.vr - 5 - ry) * e + L.vr + 5, L.vr, 0, back); }
+  });
+  c.restore();
+  // Ca²⁺ channels and the Ca²⁺ coming in
+  c.save(); c.globalAlpha = al('ca');
+  L.ch.forEach((x, j) => {
+    caChannel(c, x, L.az, S.ca > h(j + 50) * .6 + .1 ? 1 : 0);
+    for (let k = 0; k < 7; k++) { const a = t - (.55 + h(j * 7 + k) * .55); if (a < 0 || a > .8) continue; const p = ease(a / .8);
+      c.globalAlpha = al('ca') * (1 - a / .8); dot(c, x + (h(j * 7 + k + 3) - .5) * 60 * p, L.az - 8 - 55 * p, K.ca, 3.2); }
+    c.globalAlpha = al('ca');
+  });
+  c.restore();
+  // transmitter in the cleft
+  c.save(); c.globalAlpha = al('nt') * (1 - S.clear);
+  L.fuse.forEach(([i, tf], v) => { const a = t - tf - .12; if (a < 0) return;
+    for (let k = 0; k < 16; k++) { const p = ease(clamp(a / .7)), q = h(v * 31 + k), q2 = h(v * 31 + k + 9);
+      const x = L.sites[i] + (q - .5) * 150 * p + 3 * Math.sin(t * 6 + k), y = L.az + 6 + (L.ps - L.az - 16) * p * (.35 + .65 * q2) + 2 * Math.cos(t * 5 + k);
+      dot(c, x, Math.min(y, L.ps - 9), K.nt, 2.6); } });
+  c.restore();
+  // receptors and the ions through them
+  c.save(); c.globalAlpha = al('rec');
+  L.rec.forEach((x, i) => { const open = S.rec > h(i + 100) * .7 + .15; receptor(c, x, L.ps, open ? 1 : 0, open);
+    if (open) for (let k = 0; k < 2; k++) { const p = (t * 1.6 + h(i * 3 + k)) % 1; c.globalAlpha = al('rec') * (1 - p); dot(c, x + (h(i + k) - .5) * 4, L.ps - 14 + 55 * p, K.na, 3.2); c.globalAlpha = al('rec'); } });
+  c.restore();
+}
+
+// ---------------- A ----------------
+const cA = setup('cA', 960, 440);
+const LA = {
+  az: 230, ps: 290, preTop: 0, vr: 13,
+  pre() { const c = cA; c.beginPath(); c.moveTo(445, -10); c.lineTo(445, 40); c.bezierCurveTo(445, 95, 250, 80, 250, 170); c.lineTo(250, 190); c.quadraticCurveTo(250, 230, 300, 230); c.lineTo(660, 230); c.quadraticCurveTo(710, 230, 710, 190); c.lineTo(710, 170); c.bezierCurveTo(710, 80, 515, 95, 515, 40); c.lineTo(515, -10); },
+  post() { const c = cA; c.beginPath(); c.moveTo(455, 470); c.lineTo(455, 405); c.bezierCurveTo(455, 365, 290, 385, 290, 335); c.lineTo(290, 320); c.quadraticCurveTo(290, 290, 330, 290); c.lineTo(630, 290); c.quadraticCurveTo(670, 290, 670, 320); c.lineTo(670, 335); c.bezierCurveTo(670, 385, 505, 365, 505, 405); c.lineTo(505, 470); },
+  sites: [335, 385, 435, 485, 535, 585, 635], ch: [360, 410, 460, 510, 560, 610],
+  rec: Array.from({ length: 14 }, (_, i) => 340 + i * 21),
+  reserve: [[360, 150], [395, 128], [430, 155], [470, 130], [505, 160], [545, 135], [585, 158], [610, 185], [340, 185], [455, 105], [520, 100]],
+  fuse: [[1, 1.0], [3, 1.08], [5, 1.17]],
+};
+const stepsA = document.getElementById('stepsA');
+STAGES.forEach((s, i) => { const d = document.createElement('div'); d.innerHTML = `<b>${i + 1} · ${s[1]}</b>${s[2]}`; stepsA.append(d); });
+function drawA(t) {
+  const c = cA; c.fillStyle = K.bath; c.fillRect(0, 0, 960, 440);
+  bathCa(c, 960, 440, t, 40, (x, y) => x > 230 && x < 730 && (y < 245 || y > 280));
+  scene(c, t, LA, () => 1);
+  label(c, 'axon', 530, 28); label(c, 'presynaptic terminal', 728, 150); leader(c, 724, 146, 700, 140);
+  label(c, 'synaptic cleft', 60, 265); leader(c, 150, 260, 290, 260);
+  label(c, 'Ca²⁺ outside', 790, 400, { col: K.ca }); label(c, 'postsynaptic spine', 690, 335); label(c, '(the next cell)', 690, 352);
+  label(c, 'active zone', 120, 228); leader(c, 196, 224, 300, 226);
+  [...stepsA.children].forEach((d, i) => d.classList.toggle('on', i === stageOf(t)));
+}
+
+// ---------------- B ----------------
+const cB = setup('cB', 960, 440);
+const BM = 160, BP = 300;   // membranes
+function lipids(c, y, from, to, skip) {
+  for (let x = from; x < to; x += 9) { if (skip(x)) continue;
+    c.strokeStyle = K.memdark; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x - 1, y - 6); c.lineTo(x - 1, y - 1); c.moveTo(x + 1, y - 6); c.lineTo(x + 1, y - 1); c.moveTo(x - 1, y + 6); c.lineTo(x - 1, y + 1); c.moveTo(x + 1, y + 6); c.lineTo(x + 1, y + 1); c.stroke();
+    dot(c, x, y - 8, K.memdark, 3.4); dot(c, x, y + 8, K.memdark, 3.4); }
+}
+function drawB(t) {
+  const c = cB, S = st(t), s = stageOf(t);
+  c.fillStyle = K.bath; c.fillRect(0, 0, 960, 440);
+  c.fillStyle = K.cyto; c.fillRect(0, 0, 960, BM); c.save(); c.globalAlpha = .3 * S.pre * (S.front >= .9 ? 1 : 0); c.fillStyle = K.pos; c.fillRect(0, 0, 960, BM); c.restore();
+  c.fillStyle = K.post; c.fillRect(0, BP, 960, 140); c.save(); c.globalAlpha = .35 * S.post; c.fillStyle = K.pos; c.fillRect(0, BP, 960, 140); c.restore();
+  // the vesicle opening cuts the membrane
+  const f = ramp(t, 1.0, 1.4), back = ramp(t, 3.4, 4.6), gw = f > 0 && f < 1 ? 44 * (1 - .45 * f) * Math.sin(f * Math.PI * .85) : (f >= 1 && back === 0 ? 0 : 0);
+  lipids(c, BM, 4, 960, x => Math.abs(x - 480) < gw || Math.abs(x - 330) < 18 || Math.abs(x - 630) < 18);
+  lipids(c, BP, 4, 960, x => [340, 480, 620].some(r => Math.abs(x - r) < 22));
+  // reserve vesicles and refill
+  vesicle(c, 250, 80, 34, 0, .75); vesicle(c, 720, 70, 34, 0, .75);
+  if (f < 1) vesicle(c, 480, BM - 8, 44, f);
+  else if (back > 0) { const e = ease(back); vesicle(c, 250 + 230 * e, 80 + 39 + (BM - 8 - 44 - 5 - 80 - 39) * e + 0, 40, 0, back); }
+  // Ca²⁺ channels
+  [330, 630].forEach((x, j) => { caChannel(c, x, BM, S.ca > .2 + j * .2 ? 1 : 0, 2.2);
+    for (let k = 0; k < 8; k++) { const a = t - (.55 + h(j * 8 + k) * .5); if (a < 0 || a > 1) continue; const p = ease(a);
+      c.globalAlpha = 1 - a; dot(c, x + (h(j * 8 + k + 4) - .5) * 120 * p, BM - 20 - 90 * p, K.ca, 5); c.globalAlpha = 1; } });
+  // transmitter
+  if (f > .1) { c.save(); c.globalAlpha = 1 - S.clear; const a = t - 1.12;
+    for (let k = 0; k < 46; k++) { const p = ease(clamp(a / .8)), q = h(k + 300), q2 = h(k + 400);
+      dot(c, 480 + (q - .5) * 420 * p + 3 * Math.sin(t * 5 + k), Math.min(BM + 14 + (BP - BM - 44) * p * (.3 + .7 * q2), BP - 30) + 2 * Math.cos(t * 4 + k), K.nt, 4); }
+    c.restore(); }
+  // receptors
+  [340, 480, 620].forEach((x, i) => { const open = S.rec > .15 + i * .2; receptor(c, x, BP, open ? 1 : 0, open, 2.2);
+    if (open) for (let k = 0; k < 3; k++) { const p = (t * 1.3 + k / 3 + h(i)) % 1; c.globalAlpha = 1 - p * .8; dot(c, x, BP - 40 + 120 * p, K.na, 5); c.globalAlpha = 1; } });
+  // labels
+  label(c, 'presynaptic terminal', 16, 24); label(c, 'synaptic cleft', 16, BM + 40); label(c, 'next cell', 16, BP + 40);
+  label(c, 'Ca²⁺ channel', 630, BM + 44, { align: 'center' }); label(c, 'docked vesicle', 480, 46, { align: 'center' });
+  label(c, 'receptor channel', 620, BP + 52, { align: 'center' });
+  // inset: where this is
+  c.save(); c.translate(800, 14); c.fillStyle = K.surface; c.strokeStyle = K.line; c.lineWidth = 1; rr(c, 0, 0, 144, 104, 6); c.fill(); c.stroke();
+  c.fillStyle = K.cyto; c.strokeStyle = K.memdark; c.lineWidth = 2.5; rr(c, 22, -14, 100, 60, 18); c.fill(); c.stroke();
+  c.fillStyle = K.post; rr(c, 32, 56, 80, 60, 14); c.fill(); c.stroke();
+  c.strokeStyle = K.accent; c.lineWidth = 2; c.strokeRect(58, 36, 28, 30);
+  c.fillStyle = K.surface; c.fillRect(1, 86, 142, 17); label(c, 'you are here', 72, 99, { size: 11, align: 'center' }); c.restore();
+  // caption
+  c.fillStyle = K.surface; c.globalAlpha = .9; rr(c, 16, 396, 520, 32, 16); c.fill(); c.globalAlpha = 1;
+  dot(c, 34, 412, K.accent, 11); label(c, String(s + 1), 34, 417, { col: K.surface, align: 'center', size: 13 });
+  label(c, STAGES[s][2], 54, 417, { col: K.ink, size: 14 });
+}
+
+// ---------------- C ----------------
+const cC = setup('cC', 960, 400);
+const LC = {
+  az: 160, ps: 214, preTop: 0, vr: 12,
+  pre() { cC.beginPath(); cC.roundRect(180, -80, 600, 240, 80); },
+  post() { cC.beginPath(); cC.roundRect(240, 214, 480, 260, 60); },
+  sites: Array.from({ length: 10 }, (_, i) => 290 + i * 380 / 9), ch: Array.from({ length: 9 }, (_, i) => 290 + (i + .5) * 380 / 9),
+  rec: Array.from({ length: 20 }, (_, i) => 300 + (i + .5) * 18),
+  reserve: Array.from({ length: 14 }, (_, i) => [290 + (i * 137) % 380, 40 + (i * 53) % 80]),
+  fuse: [[2, 1.0], [5, 1.08], [7, 1.17]],
+};
+const GROUPS = [['pre'], ['ca', 'pre'], ['ves', 'nt'], ['nt'], ['rec', 'post'], ['nt', 'ves']];
+const CALL = [[480, 60, 600, 40, 'the spike arrives'], [LC.ch[3], 160, 150, 120, 'Ca²⁺ channels open'], [LC.sites[5], 145, 840, 110, 'vesicles fuse'],
+  [700, 187, 840, 187, 'transmitter crosses'], [470, 214, 820, 260, 'receptors open, Na⁺ in'], [470, 90, 840, 60, 'refill and clear']];
+function drawC(t) {
+  const c = cC, s = stageOf(t), act = GROUPS[s];
+  c.fillStyle = K.bath; c.fillRect(0, 0, 960, 400);
+  bathCa(c, 960, 400, t, 30, (x, y) => x > 170 && x < 790);
+  scene(c, t, LC, g => act.includes(g) ? 1 : .22);
+  label(c, 'presynaptic terminal', 200, 22); label(c, 'synaptic cleft', 18, 191); label(c, 'next cell', 262, 388);
+  const [x, y, lx, ly, txt] = CALL[s];
+  c.strokeStyle = K.accent; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, y); c.lineTo(lx - 14, ly); c.stroke(); dot(c, x, y, K.accent, 3);
+  dot(c, lx, ly, K.accent, 13); label(c, String(s + 1), lx, ly + 5, { col: K.surface, align: 'center', size: 14 });
+  label(c, txt, lx + (lx > 700 ? -20 : 20), ly + 5, { col: K.ink, size: 14, align: lx > 700 ? 'right' : 'left' });
+  if (lx > 700) { /* text sits left of the badge, above the line */ }
+}
+
+// ---------------- clock ----------------
+let t = 0, last = performance.now(), playing = true, rate = 1;
+const scrub = document.getElementById('scrub'), stageTxt = document.getElementById('stageTxt');
+document.getElementById('play').onclick = e => { playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play'; };
+document.getElementById('slow').onclick = e => { rate = rate === 1 ? .35 : 1; e.target.textContent = rate === 1 ? 'Slow' : 'Normal speed'; };
+scrub.oninput = () => { t = +scrub.value; playing = false; document.getElementById('play').textContent = 'Play'; };
+function frame(now) {
+  if (playing) { t = (t + (now - last) / 1000 * rate) % 5; scrub.value = t; }
+  last = now;
+  const s = stageOf(t); stageTxt.textContent = `${s + 1} · ${STAGES[s][2]}`;
+  drawA(t); drawB(t); drawC(t);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></body></html>

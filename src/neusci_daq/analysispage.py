@@ -36,7 +36,7 @@ from .padpage import PadView
 from .plotcanvas import PlotCanvasPage
 from .singleplot import SinglePlotPage
 from .sidepanels import GroupColors, Rail, SettingsPanel, drawer
-from .stim import Stimulus
+from .stim import Stimulus, stimulus_name, to_segments
 from .repeatfinder import RepeatFinder
 from .spikefinder import SpikeFinder
 from .viewkit import scroll_column
@@ -977,18 +977,22 @@ class AnalysisPage(QtWidgets.QWidget):
         self.pad_view.trials_changed()
 
     def how(self) -> str:
-        """Where stimuli come from: a channel name, "notes", or "" (nowhere)."""
+        """Where stimuli come from: a channel name, "sent" (what each trial saved it sent), "notes", or "" (nowhere)."""
         ch = self.stim_channel.currentData()
         if ch:
             return ch
-        has_notes = any(b is not None and A.stimulus_notes(b["comments"]) for b in self.blocks)
-        return "notes" if has_notes else ""
+        if any(self._sent_key(b) for b in self.blocks):        # exact, and named for what was sent
+            return "sent"
+        return "notes" if any(b is not None and A.stimulus_notes(b["comments"]) for b in self.blocks) else ""
 
     @staticmethod
-    def _group(blocks: list[dict | None], how: str, sig=None) -> list[tuple[str, list[int]]]:
+    def _group(blocks: list[dict | None], how: str, sig=None, units: str = "V",
+               scale: float = 1.0) -> list[tuple[str, list[int]]]:
         """Blocks with the same stimulus together: [(label, block indices)]. `how` is a
-        stimulus channel's name, "notes", or "" (no groups). sig(i, trace, fs) reads a
-        block's stimulus (default: analysis.stimulus_signature, every time)."""
+        stimulus channel's name, "notes", "sent" (only what each saved it sent), or "" (no
+        groups). sig(i, trace, fs) reads a block's stimulus (default:
+        analysis.stimulus_signature, every time). Trials that saved what they sent are
+        named for it, in the stimulator's `units` (volts × `scale`)."""
         sig = sig or (lambda i, y, fs: A.stimulus_signature(y, fs))
         if not how:
             return []
@@ -1013,8 +1017,8 @@ class AnalysisPage(QtWidgets.QWidget):
             # measured signatures jitter: blocks with the same stimulus share the first one's
             good = [b for b in blocks if b is not None]
             keys = A.cluster_signatures(keys, good[0]["sample_rate"] if good else 1.0)
-            # Trials sent from Complex Stimulus group by exactly what was sent (saved with
-            # each): a measured shape can't tell steps of 1 and 1.5 V apart reliably.
+            # Trials that saved what they sent (Simple or Complex Stimulus) group by exactly
+            # that: a measured shape can't tell steps of 1 and 1.5 V apart reliably.
             for i, b in enumerate(blocks):
                 k = AnalysisPage._sent_key(b)
                 if k is not None and i in keys:
@@ -1022,46 +1026,52 @@ class AnalysisPage(QtWidgets.QWidget):
             unit = next((b["units"][b["channel_names"].index(how)] for b in good if how in b["channel_names"]), "V")
             labels = A.unique_names({k: A.describe_signature(k, unit) for k in dict.fromkeys(keys.values())
                                      if k is not None and not (isinstance(k, tuple) and k[0] == "sent")})
-            complex_names = AnalysisPage._complex_names(blocks, keys, how)
-            labels.update(complex_names)
-            groups = A.group_blocks(keys, labels)
-            # the Complex groups in number order, where the first of them was
-            cx = sorted((g for g in groups if g[0] in complex_names.values()), key=lambda g: int(g[0].split()[-1]))
-            it = iter(cx)
-            return [next(it) if g[0] in complex_names.values() else g for g in groups]
+            labels.update(AnalysisPage._sent_names(keys, units, scale))
         return A.group_blocks(keys, labels)
 
     @staticmethod
     def _sent_key(b: dict | None):
-        """("sent", what was sent) for a trial sent from Complex Stimulus (a segment
-        stimulus, on one output or two), else None."""
+        """("sent", what was sent) for a trial that saved the stimuli it sent (Simple or
+        Complex Stimulus, on one output or two): the different ones, in the order sent, each
+        as segments (so an older Simple Stimulus trial matches a newer one). None if none."""
         if b is None:
             return None
+        what = []
         for sent in b.get("stimuli") or ():
-            st = sent.get("settings") or {}
-            if st.get("shape") == "segments":
-                second = (sent.get("second") or {}).get("settings")
-                return ("sent", json.dumps([st, second], sort_keys=True))
-        return None
+            st = sent.get("settings")
+            if not st:
+                continue
+            try:
+                st = to_segments(Stimulus.from_dict(st)).to_dict()
+            except (ValueError, KeyError, TypeError):
+                continue
+            item = json.dumps([st, (sent.get("second") or {}).get("settings")], sort_keys=True)
+            if item not in what:
+                what.append(item)
+        return ("sent", json.dumps(what)) if what else None
 
     @staticmethod
-    def _complex_names(blocks: list[dict | None], keys: dict, how: str) -> dict:
-        """Groups of trials sent from Complex Stimulus (segment stimuli) are named Complex 1,
-        Complex 2..., numbered by how much the stimulus channel varies (its variance over the
-        trial, averaged over the group's trials), least first."""
-        spread: dict[object, list[float]] = {}
-        for i, k in keys.items():
-            b = blocks[i]
-            if k is None or b is None or how not in b["channel_names"]:
-                continue
-            sent = b.get("stimuli") or ()
-            if not any((s.get("settings") or {}).get("shape") == "segments" for s in sent):
-                continue
-            y = np.asarray(b["data"][b["channel_names"].index(how)], float)
-            if y.size:
-                spread.setdefault(k, []).append(float(np.nanvar(y)))
-        order = sorted(spread, key=lambda k: float(np.mean(spread[k])))
-        return {k: f"Complex {n}" for n, k in enumerate(order, 1)}
+    def _sent_stimuli(k: tuple) -> list[tuple[Stimulus, Stimulus | None]]:
+        """The stimuli (and what went to the other output) a ("sent", ...) key stands for."""
+        out = []
+        for item in json.loads(k[1]):
+            st, second = json.loads(item)
+            out.append((Stimulus.from_dict(st), Stimulus.from_dict(second) if second else None))
+        return out
+
+    @staticmethod
+    def _sent_names(keys: dict, units: str, scale: float) -> dict:
+        """Groups of trials that saved what they sent, named for it: "Pulse 5 V". Two
+        different stimuli with the same short name get the long one (with widths and
+        durations), then (2), (3)..."""
+        def name(k, long: bool) -> str:
+            ns = [stimulus_name(s, units, scale, long) + (f" & {stimulus_name(s2, units, scale, long)}" if s2 else "")
+                  for s, s2 in AnalysisPage._sent_stimuli(k)]
+            return ns[0] if len(ns) == 1 else f"{ns[0]} to {ns[-1]}"     # several: a run not split
+        sent = [k for k in dict.fromkeys(keys.values()) if isinstance(k, tuple) and k[0] == "sent"]
+        short = {k: name(k, False) for k in sent}
+        taken = list(short.values())
+        return A.unique_names({k: name(k, True) if taken.count(short[k]) > 1 else short[k] for k in sent})
 
     def stimulus_groups_of(self, paths: list[Path], where: Path | None) -> list[tuple[str, list[int]]]:
         """The stimulus groups of any session's blocks (for the Acquisition Blocks panel),
@@ -1074,7 +1084,7 @@ class AnalysisPage(QtWidgets.QWidget):
             except Exception:
                 blocks.append(None)
         how = self.stimulus_source(paths, where)
-        return self._group(blocks, how, self._signature_of(list(paths), how))
+        return self._group(blocks, how, self._signature_of(list(paths), how), *self._stim_units())
 
     def stimulus_source(self, paths: list[Path], where: Path | None) -> str:
         """Where any session's stimuli come from (as how): its saved Stimulus channel, else one
@@ -1089,9 +1099,16 @@ class AnalysisPage(QtWidgets.QWidget):
         saved = self.main.settings.value(f"stim_channel/{Path(where).resolve()}") if where else None
         ch = saved if saved is not None else self.main.default_stim_channel(names)
         how = ch if ch in names else ""
+        if not how and any(self._sent_key(b) for b in good):
+            how = "sent"
         if not how and any(A.stimulus_notes(b["comments"]) for b in good):
             how = "notes"
         return how
+
+    def _stim_units(self) -> tuple[str, float]:
+        """The stimulator's units, and how many of them a volt out is."""
+        cfg = self.main.cfg
+        return cfg.stim_units or "V", cfg.stim_scale or 1.0
 
     def _compute_groups(self) -> None:
         """Group the blocks by their stimulus (see Stimulus channel) and list the groups."""
@@ -1100,7 +1117,7 @@ class AnalysisPage(QtWidgets.QWidget):
         self._show_looks(d)                           # the stimulus fit is one of them
         d = {**d, **{k: self._looks.get(k, d[k]) for k in ("sorts", "alike", "color_by", "avg_each")}}
         self.blocks_panel.set_organize(d["organize"], self._folder() is not None)
-        auto = self._group(self.blocks, how, self._fitted_signature_of(self._paths, how))
+        auto = self._group(self.blocks, how, self._fitted_signature_of(self._paths, how), *self._stim_units())
         self._auto = auto
         self._stim_label = {i: label for label, blocks in auto for i in blocks}
         d = self._alike_groups(auto, how, d)          # the stimuli Group alike stimuli joins
@@ -1129,7 +1146,8 @@ class AnalysisPage(QtWidgets.QWidget):
         none = sum(len(b) for name, b in self.groups if name == "No stimulus found")
         self.group_note.setText(
             "No stimulus channel or notes: pick the channel that recorded the stimulus" if not how else
-            f"{n} different stimul{'us' if n == 1 else 'i'}" + (" (from the notes)" if how == "notes" else "")
+            f"{n} different stimul{'us' if n == 1 else 'i'}" + (" (from the notes)" if how == "notes" else
+                                                                 " (as saved when sent)" if how == "sent" else "")
             + (f", and {none} trial{'' if none == 1 else 's'} with none" if none else "")
             + ": tick a group to see just its trials" if n else
             f"No stimulus pulses found on {how}: is it the right channel?" if how != "notes" else
@@ -1595,6 +1613,15 @@ class AnalysisPage(QtWidgets.QWidget):
             return None
         if how == "notes":
             return A.note_times(b["comments"])
+        if how == "sent":                          # as saved: each stimulus's own time 0
+            out = []
+            for sent in b.get("stimuli") or ():
+                try:
+                    st, rate = Stimulus.from_dict(sent["settings"]), float(sent["rate"])
+                    out.append(float(sent.get("t", 0.0)) + st.onset_samples(rate) / rate)
+                except (ValueError, KeyError, TypeError):
+                    continue
+            return np.array(out)
         y = self.trace(i, how)
         if y is None:
             return None

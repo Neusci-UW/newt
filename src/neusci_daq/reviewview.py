@@ -2,6 +2,7 @@
 move, reset), overlaying trials, and showing one trial."""
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import warnings
@@ -16,6 +17,11 @@ from .trialsbrowser import BACK as BACK_ITEM, LIVE as LIVE_ITEM
 from .mainparts import LIVE, REVIEW
 from .units import whole
 
+
+
+class _SplitRelay(QtCore.QObject):
+    """Brings a split worked out on another thread back to the window's thread."""
+    done = QtCore.Signal(object)
 
 class ReviewMixin:
     # -- the Trials browser: groups of trials (trialsbrowser shows them) ----------------------
@@ -171,60 +177,81 @@ class ReviewMixin:
         self.statusBar().showMessage(msg, 10000)
         return len(gone)
 
-    def split_trials(self, paths: list[Path]) -> int:
-        """Make a trial of each stimulus sent during these trials (Repeat, Raise), as Simple
-        Stimulus's "save just around each stimulus" would have, so Groups can put the same
-        stimuli together. The originals are hidden, not changed (tick one to bring it back).
-        Not the one being recorded. Returns how many trials were made."""
+    def split_trials(self, paths: list[Path]) -> None:
+        """Right-click › Split into a trial per stimulus: what Record does by itself when it
+        stops, for trials recorded before (see split_in_background)."""
         busy = self.recorder.path if self.recorder.recording else None
-        counts = {Path(p): trialfile.stimuli_count(p) for p in paths if Path(p) != busy and Path(p).exists()}
-        todo = [p for p, n in counts.items() if n > 1]
+        todo = [Path(p) for p in paths
+                if Path(p) != busy and Path(p).exists() and trialfile.stimuli_count(p) > 1]
         if not todo:
             self.statusBar().showMessage("Nothing to split: each trial highlighted sent one stimulus or none", 8000)
-            return 0
-        got = self._split_dialog(len(todo), sum(counts[p] for p in todo))
-        if got is None:
-            return 0
-        made, failed = [], []
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        try:
-            for p in todo:
+            return
+        self.split_in_background(todo)
+
+    def split_in_background(self, paths: list[Path], marks: dict | None = None) -> None:
+        """Make a trial of each stimulus sent during these trials (Repeat, Raise, Complex
+        Stimulus's Repeat), back to back from Simple Stimulus's Before (trialsplit), named
+        for what was sent by Groups. Worked out on another thread, so acquiring carries on
+        smoothly; then the originals are hidden (tick one to bring it back) and the new
+        trials listed. marks: {path: where that trial starts on the live history}, to draw
+        each new trial's start and end there."""
+        if not hasattr(self, "_split_relay"):
+            self._split_relay = _SplitRelay(self)
+            self._split_relay.done.connect(self._split_done)
+        sp = getattr(self, "simple_page", None)
+        before = sp.before.value() if sp is not None else 100.0
+        jobs = [(Path(p), self._split_channel(Path(p))) for p in paths]
+        relay = self._split_relay
+
+        def work():
+            out = []
+            for p, ch in jobs:
                 try:
-                    new = trialsplit.split(p, self._split_channel(p), *got,
-                                           lambda folder=p.parent: session.next_block_path(folder))
-                except Exception:
-                    failed.append(p.name)
-                    continue
-                if new:
-                    made.append((p, new))
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
+                    out.append((p, trialsplit.split(p, ch, before, lambda f=p.parent: session.next_block_path(f)), None))
+                except Exception as e:             # (said in the status bar)
+                    out.append((p, [], e))
+            relay.done.emit((out, dict(marks or {})))
+        threading.Thread(target=work, name="split trials").start()
+
+    def _split_done(self, got) -> None:
+        results, marks = got
+        made = [(p, new) for p, new, _ in results if new]
+        failed = [p.name for p, _, err in results if err is not None]
         for folder in {p.parent for p, _ in made}:          # the originals: hidden, so nothing counts twice
             stems = [p.stem for p, _ in made if p.parent == folder]
             d = groupsfile.load(folder)
             d["hidden_trials"] = [s for s in d["hidden_trials"] if s not in stems] + stems
             d["shown_trials"] = [s for s in d["shown_trials"] if s not in stems]
             groupsfile.save(folder, d)
-        new = [q for _, qs in made for q in qs]
-        for q in new:
+        for p, new in made:                                 # the channel colors you gave the original
+            colors = trialfile.load_edits(p.parent)["colors"].get(p.stem)
+            if colors:
+                trialfile.recolor_blocks([q for q, _, _ in new], colors)
+        paths = [q for _, new in made for q, _, _ in new]
+        for q in paths:
             if self.session_dir is not None and q.parent == Path(self.session_dir):
                 self.session_block_added(q)
-        if self.mode == REVIEW and self.review_dir is not None and new and \
+        if self.mode == REVIEW and self.review_dir is not None and paths and \
                 (self.session_dir is None or Path(self.review_dir) != Path(self.session_dir)):
             state, shown = self._live_state, self.block_combo.currentIndex()
             self.open_session(self.review_dir, remember=False, keep_acquiring=True)
             self._live_state, self._overlay_sel = state, []
             self._fill_recorded()
             self.block_combo.setCurrentIndex(min(max(0, shown), len(self.review_blocks) - 1))
+        for p, new in made:                                 # each trial's start and end on the live history
+            base = marks.get(p)
+            if base is not None:
+                for _, a, b in new:
+                    self._mark_boundary(base + a, "trial")
+                    self._mark_boundary(base + b, "trial_end")
         self._update_title()
         self._fill_recorded()
         self.analysis_page.source_changed()
-        msg = (f"Split {len(made)} trial{'' if len(made) == 1 else 's'} into {len(new)}, one per stimulus; "
-               f"the original{' is' if len(made) == 1 else 's are'} hidden")
-        if failed:
-            msg += f". Couldn't split {', '.join(failed)}"
-        self.statusBar().showMessage(msg, 10000)
-        return len(new)
+        if made or failed:
+            msg = "; ".join(f"{p.stem}: a trial for each of its {len(new)} stimuli (it's hidden)" for p, new in made)
+            if failed:
+                msg += ("; " if msg else "") + f"couldn't split {', '.join(failed)}"
+            self.statusBar().showMessage(msg, 10000)
 
     def _split_channel(self, path: Path) -> str | None:
         """The channel a split finds the stimuli on: the session's stimulus channel, else the
@@ -233,37 +260,6 @@ class ReviewMixin:
         saved = self.settings.value(f"stim_channel/{path.parent.resolve()}")
         ch = saved if saved is not None else self.default_stim_channel(names)
         return ch if ch in names else None
-
-    def _split_dialog(self, n_trials: int, n_stimuli: int) -> tuple[float, float] | None:
-        """Before and After for a split (ms), or None if cancelled."""
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Split into a trial per stimulus")
-        form = QtWidgets.QFormLayout(dlg)
-        what = "this trial" if n_trials == 1 else f"these {n_trials} trials"
-        note = QtWidgets.QLabel(f"Each of the {n_stimuli} stimuli sent during {what} becomes a trial of its own, "
-                                "as Record's “save just around each stimulus” keeps them, so Groups can put the "
-                                "same stimuli together. The original is hidden, not changed: tick it to bring it back.")
-        note.setWordWrap(True)
-        note.setMinimumWidth(340)
-        form.addRow(note)
-        sp = getattr(self, "simple_page", None)
-        boxes = []
-        for label, tip, value in (("Before", "Kept before each stimulus", sp.before.value() if sp else 5.0),
-                                  ("After", "Kept after each stimulus starts (at least the whole stimulus), "
-                                   "but not into the next one", sp.after.value() if sp else 30.0)):
-            box = QtWidgets.QDoubleSpinBox(decimals=1, minimum=0.0, maximum=600000.0, suffix=" ms", value=value)
-            box.setToolTip(tip)
-            form.addRow(label, box)
-            boxes.append(box)
-        ok, cancel = QtWidgets.QDialogButtonBox.StandardButton.Ok, QtWidgets.QDialogButtonBox.StandardButton.Cancel
-        bb = QtWidgets.QDialogButtonBox(ok | cancel)
-        bb.button(ok).setText("Split")
-        bb.accepted.connect(dlg.accept)
-        bb.rejected.connect(dlg.reject)
-        form.addRow(bb)
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return None
-        return boxes[0].value(), boxes[1].value()
 
     def set_trial_label(self, text: str) -> None:
         """The label saved with trials from now on (Record page), e.g. "Cell 1"; "" for none.

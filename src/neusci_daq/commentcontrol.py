@@ -20,6 +20,8 @@ class CommentsMixin:
             return
         self._log_comment(text)
         self.comment_edit.clear()
+        if self.comment_pop.isVisible():
+            self.comment_pop.hide()
 
     def _log_comment(self, text: str) -> None:
         t = self.recorder.add_comment(text)      # saved to the block straight away
@@ -28,11 +30,17 @@ class CommentsMixin:
 
     def _set_comment_box(self, recording: bool):
         self.comment_edit.setEnabled(recording)
+        if not recording and hasattr(self, "comment_pop"):
+            self.comment_pop.hide()
         self.comment_edit.setPlaceholderText("Press Enter to add comment" if recording
                                              else "Press Record to add comments")
 
     def _focus_comment(self):
+        """C while recording: the comment box, over the top left of the plots."""
         if self.mode == LIVE and self.comment_edit.isEnabled():
+            self.comment_pop.adjustSize()
+            self.comment_pop.move(self.plot_area.mapToGlobal(QtCore.QPoint(16, 8)))
+            self.comment_pop.show()
             self.comment_edit.setFocus()
             self.comment_edit.selectAll()
 

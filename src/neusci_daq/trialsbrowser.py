@@ -711,7 +711,7 @@ class TrialsBrowser(QtWidgets.QWidget):
             menu.addSeparator()
             many = [i for i in picked if self.stimuli_of is not None and self.stimuli_of(i) > 1]
             if many:                          # Repeat or Raise sent several: a trial for each
-                menu.addAction("Split into a trial per stimulus…",
+                menu.addAction("Split into a trial per stimulus",
                                lambda: self.later(lambda: self.split_requested.emit(many)))
             names = self._pages_highlighted() if self.for_analysis else []
             if len(names) >= 2:

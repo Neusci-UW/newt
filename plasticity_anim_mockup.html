@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plasticity animations and calculators</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;--k:#6b3fb8;--na:#d07a1f;--pos:#d1373f;--neg:#2861c8;
+--cyto:#edf0f6;--bath:#e8f2ef;--mem:#cdbd92;--memdark:#a8946a;--ca:#b8892a;--nt:#c0287a}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;--k:#a88cf2;--na:#f0a350;--pos:#f0646b;--neg:#6b9cf2;
+--cyto:#161d27;--bath:#13211d;--mem:#6c6046;--memdark:#8d7d58;--ca:#e0bb5c;--nt:#f477b7}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 48px}
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:24px;font-weight:600;margin:0}h2{font-size:18px;font-weight:600;margin:0 0 4px}h3{font-size:15px;margin:8px 0 2px}
+p{margin:0 0 6px}.muted{color:var(--muted);font-size:14px}ul{margin:4px 0;padding-left:20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}.plan{border-color:var(--accent)}
+canvas{width:100%;height:auto;display:block;border-radius:6px;margin-top:8px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13px}
+button{font:inherit;font-size:13px;padding:4px 12px;border-radius:7px;border:1px solid var(--accent);background:none;color:var(--accent);cursor:pointer}
+button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.calc{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:24px;align-items:start;margin-top:8px}
+@media (max-width:820px){.calc{grid-template-columns:1fr}}
+.gr{display:grid;grid-template-columns:110px minmax(0,1fr) 92px;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin:6px 0}
+.gr input{width:100%;accent-color:var(--accent)}.gr output{font:12.5px "IBM Plex Mono",monospace;color:var(--ink);text-align:right}
+.big{font:500 30px "IBM Plex Mono",monospace}.es{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}.es b{font-family:"IBM Plex Mono",monospace;font-weight:500;color:var(--ink)}
+.formula{font:12.5px "IBM Plex Mono",monospace;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);margin-top:8px;overflow-x:auto;white-space:nowrap}
+.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);margin-left:6px;font-weight:400}
+</style></head><body><div class="wrap">
+<header><h1>Spines and plasticity: animations and calculators</h1>
+<p class="muted">Mockup for plasticity.html. Animations A–C are scripted loops (not the model) so they can be compared; the calculators run the page's model.</p></header>
+
+<section class="card plan"><h2>What to pick</h2><ul>
+<li><b>Animations:</b> A replaces the page's picture in all three parts. B and C are additions, one or both, for Part 3 only. My suggestion: <b>A + C</b>. A puts each step on the picture students already use. C is how growth is actually seen in experiments: the same spine imaged before and after. B is the most detailed, but it is a new, large drawing for one idea.</li>
+<li><b>Calculators</b> (every other lesson ends with one): 1 and 2 are high-yield; 3 is short and optional. They could be tabs of one calculator card, as on the Synapse page.</li>
+</ul></section>
+
+<section class="card"><h2>A · The page's picture, animated <span class="tag">all parts</span></h2>
+<p class="muted">The same soma, dendrite and two spines. New: a spike runs down the axon, a vesicle fuses, glutamate crosses the cleft, the Mg²⁺ plug moves out of the NMDA pore, Ca²⁺ streams in through it and leaks down the neck, and labels show which enzyme is on. For LTP and LTD, AMPA receptors move in from a store inside the head (or back into it) one at a time, the head grows or shrinks, and a dashed outline keeps its starting size.</p>
+<canvas id="cA"></canvas>
+<div class="bar"><button data-a="epsp">One EPSP</button><button data-a="pair">Pairing (Ca²⁺ in)</button><button data-a="ltp" aria-pressed="true">LTP</button><button data-a="ltd">LTD</button></div>
+</section>
+
+<section class="card"><h2>B · Close-up of the spine head <span class="tag">Part 3, beside the charts</span></h2>
+<p class="muted">Zoomed in on one synapse: the presynaptic membrane, the cleft, the postsynaptic density (dark band), and the head below. LTP: Ca²⁺ switches on CaMKII (hexagons), which gather at the density, and vesicles carrying AMPA receptors fuse with the membrane (exocytosis). The density widens and the head swells. LTD: calcineurin (diamonds) switches on, and receptors are pulled into a coated pit and carried away (endocytosis).</p>
+<canvas id="cB"></canvas>
+<div class="bar"><button data-b="ltp" aria-pressed="true">LTP</button><button data-b="ltd">LTD</button></div>
+</section>
+
+<section class="card"><h2>C · Time-lapse of one spine <span class="tag">Part 3, under the EPSP chart</span></h2>
+<p class="muted">Snapshots of spine A at four times, like two-photon imaging of a single spine (Matsuzaki et al. 2004). The head's size and AMPA count are given under each snapshot, with spine B unchanged as the control. In the page they would fill in as the hour plays, in step with the EPSP chart.</p>
+<canvas id="cC"></canvas>
+<div class="bar"><button data-c="ltp" aria-pressed="true">After LTP</button><button data-c="ltd">After LTD</button></div>
+</section>
+
+<section class="card"><h2>Calculator 1 · NMDA receptors and the Mg²⁺ block <span class="tag">high-yield</span></h2>
+<p class="muted">The classic NMDA I–V curve: with Mg²⁺ the current shrinks toward zero at negative voltages, giving the J shape; without Mg²⁺ it is a straight line, like AMPA's. Ca²⁺ entry is drawn too: it peaks between −30 and −10 mV, where the receptors are unplugged but the driving force on Ca²⁺ is still large.</p>
+<div class="calc"><div>
+<div class="gr"><label for="n1V">V</label><input type="range" id="n1V" min="-100" max="40" step="1" value="-70"><output id="n1Vo"></output></div>
+<div class="gr"><label for="n1Mg">[Mg²⁺] outside</label><input type="range" id="n1Mg" min="0" max="2" step="0.1" value="1"><output id="n1Mgo"></output></div>
+<div class="gr"><label for="n1g">g<sub>NMDA</sub></label><input type="range" id="n1g" min="0.1" max="5" step="0.1" value="1"><output id="n1go"></output></div>
+<div class="es" style="margin-top:10px"><span>fraction free of Mg²⁺</span></div><div class="big" id="n1free"></div>
+<div class="es"><span>I<sub>NMDA</sub> <b id="n1I"></b></span><span>Ca²⁺ entry (vs −70 mV, no Mg²⁺) <b id="n1Ca"></b></span></div>
+<div class="formula" id="n1f"></div></div>
+<div><canvas id="n1c"></canvas></div></div>
+</section>
+
+<section class="card"><h2>Calculator 2 · LTP or LTD? The Ca²⁺ rule <span class="tag">high-yield</span></h2>
+<p class="muted">Dudek and Bear's experiment: the same 900 pulses at different frequencies. Low frequencies weaken the synapse (LTD), high ones strengthen it (LTP). <i>Mockup note: in the page's model as it is, the switch comes between 50 and 100 Hz; in Dudek and Bear's slices it was near 10 Hz. Making Post's summation slower (τ 15 → about 50 ms) would bring it closer, at the cost of retuning Part 3.</i> Set a protocol and see its Ca²⁺, the two enzymes, and the predicted change; the chart shows the whole frequency curve with your protocol on it.</p>
+<div class="calc"><div>
+<div class="gr"><label for="n2f">Frequency</label><input type="range" id="n2f" min="-1" max="2.3" step="0.01" value="0"><output id="n2fo"></output></div>
+<div class="gr"><label for="n2n">Pulses</label><input type="range" id="n2n" min="10" max="900" step="10" value="900"><output id="n2no"></output></div>
+<div class="gr"><label for="n2d">Post held at</label><input type="range" id="n2d" min="-75" max="0" step="5" value="-75"><output id="n2do"></output></div>
+<div class="gr"><label for="n2apv">APV</label><input type="checkbox" id="n2apv" style="justify-self:start"><output id="n2apvo"></output></div>
+<div class="es" style="margin-top:10px"><span>predicted EPSP, an hour later</span></div><div class="big" id="n2out"></div>
+<div class="es"><span>peak Ca²⁺ <b id="n2ca"></b></span><span>time above CaMKII level <b id="n2abv"></b></span><span>calcineurin, highest <b id="n2cn"></b></span><span>protocol lasts <b id="n2dur"></b></span></div>
+<div class="formula" id="n2form"></div></div>
+<div><canvas id="n2c"></canvas></div></div>
+</section>
+
+<section class="card"><h2>Calculator 3 · Ohm's law across the neck <span class="tag">optional, low-yield</span></h2>
+<p class="muted">How much higher the head sits than the dendrite while synaptic current flows, and how fast the head charges.</p>
+<div class="calc"><div>
+<div class="gr"><label for="n3I">I<sub>syn</sub></label><input type="range" id="n3I" min="1" max="100" step="1" value="25"><output id="n3Io"></output></div>
+<div class="gr"><label for="n3R">R<sub>neck</sub></label><input type="range" id="n3R" min="10" max="1000" step="10" value="300"><output id="n3Ro"></output></div>
+<div class="gr"><label for="n3C">C<sub>head</sub></label><input type="range" id="n3C" min="0.1" max="2" step="0.1" value="0.5"><output id="n3Co"></output></div>
+</div><div>
+<div class="es"><span>V<sub>head</sub> − V<sub>dend</sub> = I·R</span></div><div class="big" id="n3dv"></div>
+<div class="es"><span>head's τ = R·C <b id="n3tau"></b></span><span>vs an AMPA current lasting ~2 ms</span></div>
+<div class="formula" id="n3f"></div></div></div>
+</section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TAU = Math.PI * 2, dpr = Math.min(devicePixelRatio || 1, 2);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const hash = i => { const s = Math.sin(i * 12.9898) * 43758.5453; return s - Math.floor(s); };
+let C = {};
+const readC = () => { const cs = getComputedStyle(document.documentElement); for (const n of ['bg','surface','ink','muted','line','accent','k','na','pos','neg','cyto','bath','mem','memdark','ca','nt']) C[n] = cs.getPropertyValue('--' + n).trim(); };
+readC(); matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => { readC(); calcs(); });
+function rgb(hex) { const n = parseInt(hex.replace('#', ''), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+const mixc = (a, b, t) => { const p = rgb(a), q = rgb(b); return `rgb(${p.map((v, i) => Math.round(v * t + q[i] * (1 - t))).join(',')})`; };
+const fmtSigned = (v, d = 1, u = ' mV') => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d) + u;
+function setup(id, W, H) { const cv = $(id); cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.W = W; c.H = H; return c; }
+
+const E_L = -70, CH = 0.5, CD = 20, CS = 60, GDS = 2, G1 = 0.05;   // pF; GDS nS (500 MΩ); G1: one receptor's peak nS
+const mgFree = (V, mg) => 1 / (1 + mg / 3.57 * Math.exp(-0.062 * V));   // Jahr & Stevens (1990)
+const peakNorm = (tr, td) => { const tp = tr * td / (td - tr) * Math.log(td / tr); return 1 / (Math.exp(-tp / td) - Math.exp(-tp / tr)); };
+const NORM_A = peakNorm(0.2, 2), NORM_N = peakNorm(3, 60);     // AMPA rise 0.2, decay 2 ms; NMDA rise 3, decay 60 ms
+// o: T (ms), Rn (MΩ), glu (release times), dep ([from, to] spans the soma and dendrite are held at Vdep),
+//    nA, nN (receptor counts), mg (Mg²⁺ present), sample (ms between stored points)
+function simSpine(o) {
+  const dt = 0.025, n = Math.round(o.T / dt), every = Math.max(1, Math.round((o.sample || 0.1) / dt));
+  const gn = 1000 / o.Rn, gLh = CH / 20, gLd = CD / 20, gLs = CS / 20;
+  const tauNeck = 0.1 * o.Rn, kCa = 0.0006, kV = 0.0015;   // Ca²⁺ leaves down the neck in 0.1 ms per MΩ; kV: voltage-gated entry
+  let Vh = E_L, Vb = E_L, Vd = E_L, Vs = E_L, ca = 0, cb = 0, maxFree = 0;
+  const r = { t: [], Vh: [], Vb: [], Vd: [], Vs: [], ca: [], cb: [], dep: [] };
+  for (let i = 0; i <= n; i++) {
+    const t = i * dt;
+    let sA = 0, sN = 0;
+    for (const tg of o.glu) { const s = t - tg; if (s > 0) { sA += NORM_A * (Math.exp(-s / 2) - Math.exp(-s / 0.2)); sN += NORM_N * (Math.exp(-s / 60) - Math.exp(-s / 3)); } }
+    const gA = o.nA * G1 * sA, gN = o.nN * G1 * sN, B = o.mg ? mgFree(Vh, 1) : 1;
+    let gc = 0; for (const [a, b] of o.dep || []) if (t >= a && t < b) gc = 50;   // the electrode holding Post
+    let G = gLh + gn + gA + gN * B, Vi = (gLh * E_L + gn * Vd) / G; Vh = Vi + (Vh - Vi) * Math.exp(-dt * G / CH);
+    G = gLh + gn; Vi = (gLh * E_L + gn * Vd) / G; Vb = Vi + (Vb - Vi) * Math.exp(-dt * G / CH);
+    G = gLd + 2 * gn + GDS + gc; Vi = (gLd * E_L + gn * (Vh + Vb) + GDS * Vs + gc * o.Vdep) / G; Vd = Vi + (Vd - Vi) * Math.exp(-dt * G / CD);
+    G = gLs + GDS + gc; Vi = (gLs * E_L + GDS * Vd + gc * o.Vdep) / G; Vs = Vi + (Vs - Vi) * Math.exp(-dt * G / CS);
+    // Ca²⁺ (µM): in through unplugged NMDA receptors (driving force toward E_Ca ≈ +130 mV) and a little through
+    // voltage-gated channels; out by pumps (30 ms) and down the neck
+    ca += dt * (kCa * gN * B * Math.max(0, 130 - Vh) * 100 + kV * Math.max(0, Vh + 30) - ca / 30 - ca / tauNeck);
+    cb += dt * (kV * Math.max(0, Vb + 30) - cb / 30 - cb / tauNeck);
+    if (gN > 0.01) maxFree = Math.max(maxFree, B);
+    if (i % every === 0) { r.t.push(t); r.Vh.push(Vh); r.Vb.push(Vb); r.Vd.push(Vd); r.Vs.push(Vs); r.ca.push(ca); r.cb.push(cb); r.dep.push(gc > 0); }
+  }
+  r.maxFree = maxFree; r.T = o.T; return r;
+}
+// Induction protocols, at 1 ms steps (15 minutes of 1 Hz is under 20 ms of work). Each pulse adds Ca²⁺ in proportion
+// to the NMDA receptors free of Mg²⁺ at that moment's voltage; Post's voltage sums the pulses (10 mV each, τ 15 ms:
+// a tetanus recruits many fibres) or is held at −10 mV for pairing. CaMKII collects the time Ca²⁺ spends above
+// TH_CAMK; calcineurin follows Ca²⁺/(Ca²⁺ + KD_CN) slowly, and LTD collects the time it spends above TH_CN.
+const TH_CAMK = 3, KD_CN = 0.5, TH_CN = 0.1;
+const PROTOS = { tet: { f: 100, n: 100 }, lfs: { f: 1, n: 900 }, pair: { f: 1, n: 100, dep: true } };
+function induce(proto, apv) {
+  const P = PROTOS[proto], per = 1000 / P.f, Tend = P.n * per + 60000;
+  let V = E_L, ca = 0, camk = 0, cn = 0, D = 0, pulses = 0, above = 0, caPk = 0, cnPk = 0;
+  const win = proto === 'tet' ? 1500 : 5000, ct = [], cy = [];
+  for (let t = 0; t < Tend; t++) {
+    V -= (V - E_L) / 15;
+    if (pulses < P.n && t >= pulses * per) {
+      pulses++;
+      if (!P.dep) V = Math.min(-10, V + 10);
+      const Vp = P.dep ? -10 : V;
+      ca += 0.7 * mgFree(Vp, 1) / mgFree(E_L, 1) * (130 - Vp) / 200 * (apv ? 0.03 : 1);
+    }
+    ca -= ca / 30;
+    if (ca > TH_CAMK) { camk += (ca - TH_CAMK) / 1000; above++; }
+    cn += (ca / (ca + KD_CN) - cn / 10) / 1000;
+    D += Math.max(0, cn - TH_CN) / 1000;
+    caPk = Math.max(caPk, ca); cnPk = Math.max(cnPk, cn);
+    if (t < win && t % 2 === 0) { ct.push(t / 1000); cy.push(ca); }
+  }
+  return { dW: 0.25 * camk - 0.0015 * D, ct, cy, win: win / 1000, dur: P.n * per / 60000, ptp: proto === 'tet' && !apv ? 0.6 : 0, caPk, cnPk, above: above / 1000 };
+}
+
+
+
+// ---------- the picture: soma, dendrite, two spines under their presynaptic terminals ----------
+// s: Rn (MΩ); VhA, VhB, Vd, Vs (mV); caA, caB (µM); caIn (Ca²⁺ flowing into head A, 0–1); nA, nB (AMPA receptors;
+// a fraction while one is moving in or out); headA, headB, neckA (sizes, 1 = the start); ghost (head A's starting
+// size, dashed); glu (transmitter in cleft A, 0–1) and gluP (how far it has crossed, 0–1); spikeU (a spike on A's
+// axon, 0–1, or null); fuse (A's vesicle fusing, 0–1); blocked (A's NMDA receptors plugged by Mg²⁺, 0–1); mg;
+// held (mV, the electrode holding Post); elec (recording sites); badges ([{ text, color, on }] beside head A);
+// caption (top left). Ca²⁺ dots drift with the clock, so the picture is still while nothing is playing.
+const PW = 900, PH = 280;
+const ease = x => x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2;
+// receptor slots fill from the top of the head outwards, so adding or removing one never moves the others:
+// slots 1 and 2 are the NMDA receptors, the rest AMPA
+const slotJ = i => i === 0 ? 0 : i % 2 ? (i + 1) / 2 : -i / 2;
+const ampaSlot = k => k === 0 ? 0 : k + 2;
+function drawSpines(c, s) {
+  const W = PW, H = PH, yD = H - 48, dh = 30, now = performance.now();
+  const vcol = V => mixc(C.pos, C.cyto, clamp((V - E_L) / 40));
+  c.fillStyle = C.bath; c.fillRect(0, 0, W, H);
+  const mem = (path, w = 7) => { c.lineJoin = 'round'; c.lineWidth = w; c.strokeStyle = C.memdark; path(); c.stroke(); c.lineWidth = w * 0.4; c.strokeStyle = C.mem; path(); c.stroke(); };
+  const dend = () => { c.beginPath(); c.roundRect(100, yD - dh / 2, W - 90, dh, dh / 2); };
+  c.fillStyle = vcol(s.Vd); dend(); c.fill(); mem(dend);
+  const soma = () => { c.beginPath(); c.arc(70, yD, 52, 0, TAU); };
+  c.fillStyle = vcol(s.Vs); soma(); c.fill(); mem(soma);
+  c.font = '12px "IBM Plex Sans", sans-serif'; c.fillStyle = C.muted; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('Soma', 70, yD + 4); c.textAlign = 'left'; c.fillText('Dendrite', W - 84, yD + 1);
+  if (s.held) {
+    c.strokeStyle = C.ink; c.lineWidth = 2; c.beginPath(); c.moveTo(20, 96); c.lineTo(58, yD - 20); c.stroke();
+    c.fillStyle = C.ink; c.fillText(`Post held at ${fmtSigned(s.held, 0)}`, 8, 84);
+  }
+  if (s.caption) { c.font = '600 13px "IBM Plex Sans", sans-serif'; c.fillStyle = C.ink; c.fillText(s.caption, 10, 18); c.font = '12px "IBM Plex Sans", sans-serif'; }
+  const nw0 = clamp(15 - s.Rn / 75, 3, 14);
+  const by = yD - dh / 2 - 50 - 22 * 0.4 - 22 - 40;   // the terminals stay put; a growing head reaches up toward its terminal
+  const spines = [
+    { x: W * 0.42, sc: s.headA, nw: nw0 * (s.neckA || 1), V: s.VhA, ca: s.caA, caIn: s.caIn || 0, n: s.nA, lab: 'Spine A', glu: s.glu || 0, gluP: s.gluP ?? 1, spikeU: s.spikeU, fuse: s.fuse || 0, blocked: s.blocked, ghost: s.ghost },
+    { x: W * 0.72, sc: s.headB, nw: nw0, V: s.VhB, ca: s.caB, caIn: 0, n: s.nB, lab: 'Spine B', glu: 0, gluP: 0, spikeU: null, fuse: 0, blocked: s.mg ? 1 - mgFree(s.VhB, 1) : 0 }];
+  spines.forEach((sp, k) => {
+    const rx = 30 * sp.sc, ry = 22 * sp.sc, yh = yD - dh / 2 - 50 - ry * 0.4, top = yh - ry, nw = sp.nw;
+    const a0 = Math.asin(clamp(nw / 2 / rx));
+    const shape = () => { c.beginPath(); c.moveTo(sp.x - nw / 2, yD - dh / 2 + 2); c.lineTo(sp.x - nw / 2, yh + ry * Math.cos(a0));
+      c.ellipse(sp.x, yh, rx, ry, 0, Math.PI / 2 + a0, Math.PI * 2.5 - a0); c.lineTo(sp.x + nw / 2, yD - dh / 2 + 2); };
+    c.fillStyle = vcol(sp.V); shape(); c.fill(); mem(shape, 6);
+    c.fillStyle = vcol(s.Vd); c.fillRect(sp.x - nw / 2 + 2, yD - dh / 2 - 3, nw - 4, 9);   // the neck opens into the dendrite
+    if (sp.ghost) { c.save(); c.setLineDash([4, 4]); c.strokeStyle = C.muted; c.lineWidth = 1.2; c.beginPath(); c.ellipse(sp.x, yD - dh / 2 - 50 - 22 * 0.4, 30, 22, 0, 0, TAU); c.stroke(); c.restore(); }
+    // Ca²⁺ in the head, one dot per 0.15 µM, drifting
+    c.fillStyle = C.ca;
+    const nca = Math.round(clamp(sp.ca / 0.15, 0, 60));
+    for (let i = 0; i < nca; i++) {
+      const a = hash(i + k * 99) * TAU + now * 0.0008 * (hash(i + 3) - 0.5), rr = (0.25 + 0.55 * Math.sqrt(hash(i * 3 + 7 + k))) * (0.9 + 0.1 * Math.sin(now * 0.003 + i));
+      c.beginPath(); c.arc(sp.x + Math.cos(a) * rx * rr, yh + Math.sin(a) * ry * rr, 2, 0, TAU); c.fill();
+    }
+    // Ca²⁺ leaving down the neck
+    const nNeck = Math.round(clamp(sp.ca / 0.8, 0, 6)), neckLen = yD - dh / 2 - (yh + ry * Math.cos(a0));
+    for (let i = 0; i < nNeck; i++) { const u = (now / 900 + i / 6) % 1; c.globalAlpha = 1 - u; c.beginPath(); c.arc(sp.x + (hash(i + 40) - 0.5) * (nw - 5), yh + ry * Math.cos(a0) + u * neckLen, 1.8, 0, TAU); c.fill(); }
+    c.globalAlpha = 1;
+    // receptors: AMPA in their slots; one moving in from (or out to) a store inside the head while the count changes
+    const full = Math.floor(sp.n + 1e-6), frac = sp.n - full, spread = 0.12;
+    const slotXY = i => { const a = -Math.PI / 2 + slotJ(i) * spread; return [sp.x + Math.cos(a) * rx, yh + Math.sin(a) * ry, a]; };
+    const rec = (x, y, a, col, alpha = 1) => { c.save(); c.globalAlpha = alpha; c.translate(x, y); c.rotate(a + Math.PI / 2); c.fillStyle = col; c.fillRect(-2.5, -5, 5, 10); c.restore(); };
+    for (let q = 0; q < full; q++) { const [x, y, a] = slotXY(ampaSlot(q)); rec(x, y, a, C.na); }
+    if (frac > 0.01) {
+      const [x, y, a] = slotXY(ampaSlot(full)), ex = sp.x, ey = yh + ry * 0.35, e = ease(frac);
+      c.strokeStyle = C.na; c.lineWidth = 1.2; c.globalAlpha = 0.5; c.beginPath(); c.arc(ex, ey, 6, 0, TAU); c.stroke(); c.globalAlpha = 1;   // the store (an endosome)
+      rec(ex + (x - ex) * e, ey + (y - ey) * e, a, C.na, 0.35 + 0.65 * frac);
+    }
+    for (const i of [1, 2]) {   // NMDA receptors; the dark Mg²⁺ plug moves out of the pore as it unblocks
+      const [x, y, a] = slotXY(i); rec(x, y, a, C.ca);
+      const out = 6.5 + (1 - sp.blocked) * 9;
+      c.save(); c.translate(x, y); c.rotate(a + Math.PI / 2);
+      if (s.mg !== false || k === 1) { c.globalAlpha = 0.25 + 0.75 * sp.blocked; c.fillStyle = C.ink; c.beginPath(); c.arc(0, -out, 2.4, 0, TAU); c.fill(); }
+      // Ca²⁺ streaming in through an open, unplugged receptor
+      if (sp.caIn > 0.05) { c.fillStyle = C.ca; for (let j = 0; j < 4; j++) { const u = (now / 450 + j / 4 + i * 0.13) % 1; c.globalAlpha = sp.caIn * (1 - u); c.beginPath(); c.arc(0, -4 + u * 22, 2, 0, TAU); c.fill(); } }
+      c.restore();
+    }
+    // the presynaptic terminal, its axon, and a spike running down it
+    const ax0 = [sp.x - 110, 0], axc = [sp.x - 70, by - 30], ax1 = [sp.x - 30, by - 12];
+    c.strokeStyle = C.memdark; c.lineWidth = 7; c.beginPath(); c.moveTo(...ax0); c.quadraticCurveTo(...axc, ...ax1); c.stroke();
+    const bulb = () => { c.beginPath(); c.ellipse(sp.x, by, 44, 22, 0, 0, TAU); };
+    c.fillStyle = sp.spikeU != null && sp.spikeU > 0.9 ? mixc(C.pos, C.cyto, 0.35) : C.cyto; bulb(); c.fill(); mem(bulb, 6);
+    if (sp.spikeU != null) {
+      const u = clamp(sp.spikeU), q = (p, i) => (1 - u) ** 2 * ax0[i] + 2 * (1 - u) * u * axc[i] + u * u * ax1[i];
+      c.fillStyle = C.pos; c.globalAlpha = 0.85; c.beginPath(); c.arc(q(0, 0), q(0, 1), 6, 0, TAU); c.fill(); c.globalAlpha = 1;
+    }
+    c.fillStyle = C.nt;
+    for (let i = 0; i < 6; i++) {
+      let vx = sp.x - 25 + i * 10, vy = by + (i % 2 ? 4 : -4), vr = 4;
+      if (i === 3 && sp.fuse > 0) { vy += sp.fuse * 14; vr = 4 * (1 - sp.fuse); }   // the docked vesicle fuses and empties
+      if (vr < 0.3) continue;
+      c.globalAlpha = 0.6; c.beginPath(); c.arc(vx, vy, vr, 0, TAU); c.fill();
+    }
+    c.globalAlpha = 1;
+    // glutamate crossing the cleft, fading as it is cleared
+    const ng = Math.round(clamp(sp.glu) * 18), gap = Math.max(4, top - by - 24);
+    for (let i = 0; i < ng; i++) {
+      const d = clamp(sp.gluP * (0.5 + hash(i + 50)));
+      c.globalAlpha = 0.4 + 0.6 * clamp(sp.glu); c.beginPath(); c.arc(sp.x - 10 + (hash(i + 5) - 0.5) * (20 + 50 * d), by + 22 + d * gap, 1.8, 0, TAU); c.fill();
+    }
+    c.globalAlpha = 1; c.fillStyle = C.muted; c.textAlign = 'left'; c.font = '12px "IBM Plex Sans", sans-serif';
+    c.fillText(sp.lab, sp.x + rx + 12, yh); if (k === 0) c.fillText('Pre', sp.x + 52, by);
+    c.fillText('neck', sp.x + nw / 2 + 6, yD - dh / 2 - 12);
+    if (k === 0 && s.badges) {   // the enzymes switched on in head A
+      let y = yh - 12;
+      c.font = '600 12px "IBM Plex Sans", sans-serif'; c.textAlign = 'right';
+      for (const b of s.badges) {
+        if (b.on <= 0.02) continue;
+        const tw = c.measureText(b.text).width + 14, x1 = sp.x - rx - 14;
+        c.globalAlpha = b.on; c.fillStyle = b.color; c.beginPath(); c.roundRect(x1 - tw, y - 10, tw, 20, 10); c.fill();
+        c.fillStyle = C.surface; c.fillText(b.text, x1 - 7, y + 0.5); c.globalAlpha = 1; y += 24;
+      }
+      c.textAlign = 'left'; c.font = '12px "IBM Plex Sans", sans-serif';
+    }
+  });
+  if (s.elec) {
+    const tag = (x, y, t, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, 8, 0, TAU); c.fill(); c.fillStyle = C.surface; c.font = '600 10px "IBM Plex Sans", sans-serif'; c.textAlign = 'center'; c.fillText(t, x, y + 0.5); };
+    const yh = yD - dh / 2 - 50 - 22 * s.headA * 0.4;
+    tag(W * 0.42 - 30 * s.headA - 14, yh, 'H', C.pos); tag(W * 0.42 + 26, yD, 'D', C.accent); tag(70, yD - 26, 'S', C.ink);
+  }
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+}
+
+
+
+// ============================== A: the page's picture, scripted ==============================
+const env = (t, a, b, c, d) => clamp((t - a) / (b - a)) * (1 - clamp((t - c) / (d - c)));
+const LOOP = { epsp: 4, pair: 4.5, ltp: 8, ltd: 8 };
+function stateA(mode, t) {
+  const s = { Rn: 300, VhA: E_L, VhB: E_L, Vd: E_L, Vs: E_L, caA: 0, caB: 0, caIn: 0, nA: 10, nB: 10, headA: 1, headB: 1, neckA: 1, mg: true, blocked: 1 - mgFree(E_L, 1), badges: [] };
+  const release = (t0, held) => {   // spike, fusion, glutamate, EPSP, starting at t0 (s)
+    const u = t - t0;
+    if (u > -0.6 && u < 0) s.spikeU = (u + 0.6) / 0.6;
+    s.fuse = clamp(u / 0.3); s.glu = env(u, 0.05, 0.1, 0.9, 1.8); s.gluP = clamp((u - 0.05) / 0.4);
+    const e = env(u, 0.3, 0.45, 0.55, 1.8);
+    s.VhA = (held ?? E_L) + (held ? 3 : 9) * e; s.Vd = (held ?? E_L) + (held ? 1 : 2.4) * e; s.Vs = (held ?? E_L) + (held ? 0 : 0.4) * e;
+    return u;
+  };
+  if (mode === 'epsp') {
+    release(0.6); s.blocked = 1 - mgFree(s.VhA, 1);
+    const u = t - 0.6; s.caIn = 0.15 * env(u, 0.35, 0.5, 0.9, 1.5); s.caA = 0.6 * env(u, 0.4, 0.9, 1.0, 2.6);
+    s.caption = 'One EPSP: the spike arrives, a vesicle fuses, glutamate opens AMPA receptors; Mg²⁺ still plugs most NMDA receptors';
+  } else if (mode === 'pair' || mode === 'ltp') {
+    const held = -10, on = t < 3.2;
+    if (on) { s.held = held; s.VhB = s.Vd = s.Vs = held; release(0.6, held); s.VhA = Math.max(s.VhA, held); }
+    s.blocked = on ? 1 - mgFree(held, 1) : 1 - mgFree(E_L, 1);
+    const u = t - 0.6; s.caIn = env(u, 0.35, 0.5, 1.0, 1.9); s.caA = 6.3 * env(u, 0.4, 1.1, 1.3, 3.0); s.caB = on ? 0.4 : 0;
+    s.badges = [{ text: 'CaMKII on', color: C.accent, on: clamp((s.caA - 2.5) / 1) }];
+    s.caption = 'Pairing: glutamate while Post is held at −10 mV: the plug is out, Ca²⁺ pours in, only into spine A';
+    if (mode === 'ltp') {
+      const pr = clamp((t - 2.6) / 2.4), hd = ease(clamp((t - 3.2) / 3));
+      s.nA = 10 + 6 * pr; s.headA = 1 + 0.28 * hd; s.neckA = 1 + 0.15 * hd; s.ghost = t > 3;
+      if (t > 2.4) s.badges = [{ text: 'CaMKII: adding AMPA receptors', color: C.accent, on: env(t, 2.4, 2.6, 5.6, 6.2) }];
+      if (t > 2.6) s.caption = t < 6.2 ? 'LTP: AMPA receptors move into the synapse, and the head grows' : 'An hour later: 16 AMPA receptors instead of 10, and a bigger head; spine B unchanged';
+    }
+  } else if (mode === 'ltd') {
+    const puffs = [0.3, 0.8, 1.3, 1.8, 2.3]; let last = puffs[0];
+    for (const p of puffs) if (t > p - 0.6) last = p;
+    if (t < 2.9) release(last);
+    s.blocked = 1 - mgFree(s.VhA, 1);
+    for (const p of puffs) { s.caA += 0.7 * env(t - p, 0.3, 0.5, 0.5, 1.0); s.caIn += 0.25 * env(t - p, 0.3, 0.35, 0.45, 0.6); }
+    const pr = clamp((t - 2.9) / 2.4), hd = ease(clamp((t - 3.4) / 3));
+    s.nA = 10 - 3 * pr; s.headA = 1 - 0.19 * hd; s.neckA = 1 - 0.1 * hd; s.ghost = t > 3.2;
+    s.badges = [{ text: t < 2.9 ? 'calcineurin building up' : 'calcineurin: removing AMPA receptors', color: C.k, on: clamp(t / 2.2) * (1 - clamp((t - 5.8) / 0.5)) }];
+    s.caption = t < 2.9 ? '1 Hz: each pulse lets in only a little Ca²⁺, never enough for CaMKII (shown 5 of 900)' : t < 6.2 ? 'LTD: AMPA receptors are pulled back into the cell, and the head shrinks' : 'An hour later: 7 AMPA receptors instead of 10, and a smaller head';
+  }
+  return s;
+}
+
+// ============================== B: close-up of one synapse ==============================
+function drawB(c, mode, t) {
+  const W = c.W, H = c.H, ltp = mode === 'ltp';
+  const p = ease(clamp((t - 1.5) / 3.5));            // how far the change has gone
+  const ca = env(t, 0.2, 0.6, 1.2, 2.2) * (ltp ? 1 : 0.35);
+  c.fillStyle = C.bath; c.fillRect(0, 0, W, H);
+  // presynaptic terminal along the top
+  c.fillStyle = C.cyto; c.fillRect(0, 0, W, 54);
+  c.lineWidth = 9; c.strokeStyle = C.memdark; c.beginPath(); c.moveTo(0, 56); c.lineTo(W, 56); c.stroke(); c.lineWidth = 3.5; c.strokeStyle = C.mem; c.stroke();
+  c.fillStyle = C.nt; c.globalAlpha = 0.55; for (let i = 0; i < 7; i++) { c.beginPath(); c.arc(330 + i * 40, 30, 11, 0, TAU); c.fill(); } c.globalAlpha = 1;
+  // the head: a wide arc whose top is the postsynaptic membrane; it swells (LTP) or shrinks (LTD)
+  const sc = ltp ? 1 + 0.18 * p : 1 - 0.12 * p, rx = 380 * sc, ry = 230 * sc, cx = W / 2, cy = 92 + ry;
+  c.fillStyle = C.cyto; c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, TAU); c.fill();
+  c.lineWidth = 9; c.strokeStyle = C.memdark; c.stroke(); c.lineWidth = 3.5; c.strokeStyle = C.mem; c.stroke();
+  // postsynaptic density: a dark band under the membrane, wider after LTP
+  const psd = (ltp ? 0.42 + 0.14 * p : 0.42 - 0.08 * p);
+  c.strokeStyle = C.ink; c.globalAlpha = 0.35; c.lineWidth = 10; c.beginPath(); c.ellipse(cx, cy, rx - 12, ry - 12, 0, -Math.PI / 2 - psd, -Math.PI / 2 + psd); c.stroke(); c.globalAlpha = 1;
+  const onMem = a => [cx + Math.cos(a) * rx, cy + Math.sin(a) * ry];
+  const rec = (x, y, a, col, alpha = 1, big = 1) => { c.save(); c.globalAlpha = alpha; c.translate(x, y); c.rotate(a + Math.PI / 2); c.fillStyle = col; c.fillRect(-5 * big, -11 * big, 10 * big, 22 * big); c.restore(); };
+  const slots = n => Array.from({ length: n }, (_, i) => -Math.PI / 2 + slotJ(i) * 0.085);
+  const nNow = ltp ? 10 : 10 - 3 * clamp((t - 1.8) / 3);
+  slots(Math.floor(nNow + 2)).forEach((a, i) => { const [x, y] = onMem(a); rec(x, y, a, i === 1 || i === 2 ? C.ca : C.na); });
+  // glutamate in the cleft
+  c.fillStyle = C.nt; for (let i = 0; i < Math.round(20 * env(t, 0.1, 0.2, 0.8, 1.6)); i++) { c.beginPath(); c.arc(cx - 160 + hash(i) * 320, 64 + hash(i + 9) * 22, 2.4, 0, TAU); c.fill(); }
+  // Ca²⁺ inside
+  c.fillStyle = C.ca; for (let i = 0; i < Math.round(60 * ca); i++) { c.beginPath(); c.arc(cx - 260 + hash(i + 3) * 520, 120 + hash(i + 7) * 170, 2.4, 0, TAU); c.fill(); }
+  if (ltp) {
+    // CaMKII gathering at the density
+    for (let i = 0; i < 8; i++) {
+      const x0 = cx - 250 + hash(i + 20) * 500, y0 = 230 + hash(i + 30) * 60, x1 = cx - 150 + i * 42, y1 = 118, g = ease(clamp((t - 0.6 - i * 0.08) / 1.2));
+      const x = x0 + (x1 - x0) * g, y = y0 + (y1 - y0) * g, on = clamp(ca * 3 + (t > 1 ? 1 : 0));
+      c.strokeStyle = C.accent; c.fillStyle = mixc(C.accent, C.cyto, 0.25 + 0.6 * on); c.lineWidth = 1.5; c.beginPath();
+      for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; c[k ? 'lineTo' : 'moveTo'](x + 9 * Math.cos(a), y + 9 * Math.sin(a)); } c.closePath(); c.fill(); c.stroke();
+    }
+    // vesicles carrying AMPA receptors rise and fuse into the membrane beside the density
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + slotJ(12 + i) * 0.085, [mx, my] = onMem(a), g = clamp((t - 1.6 - i * 0.45) / 1.0);
+      if (g <= 0) { c.strokeStyle = C.na; c.lineWidth = 2; c.beginPath(); c.arc(mx + (hash(i) - 0.5) * 60, 290, 16, 0, TAU); c.stroke(); rec(mx + (hash(i) - 0.5) * 60, 290 - 16, -Math.PI / 2, C.na, 0.8, 0.6); continue; }
+      const vx = mx + (hash(i) - 0.5) * 60 * (1 - g), vy = 290 + (my + 18 - 290) * ease(g), r = 16 * (1 - clamp((g - 0.8) / 0.2));
+      if (r > 1) { c.strokeStyle = C.na; c.lineWidth = 2; c.beginPath(); c.arc(vx, vy, r, 0, TAU); c.stroke(); }
+      rec(g < 0.85 ? vx : mx, g < 0.85 ? vy - r : my, a, C.na, 1, g < 0.85 ? 0.6 : 1);
+    }
+    c.fillStyle = C.ink; c.font = '600 13px "IBM Plex Sans",sans-serif';
+    c.fillText(t < 1.5 ? 'Lots of Ca²⁺ switches on CaMKII (hexagons), which gathers at the density' : t < 4.6 ? 'Vesicles carrying AMPA receptors fuse with the membrane (exocytosis)' : 'More receptors, a wider density, a bigger head', 12, H - 14);
+  } else {
+    for (let i = 0; i < 5; i++) {   // calcineurin switching on
+      const x = cx - 220 + i * 110, y = 210 + (i % 2) * 40, on = clamp(t / 1.5);
+      c.fillStyle = mixc(C.k, C.cyto, 0.2 + 0.7 * on); c.strokeStyle = C.k; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(x, y - 10); c.lineTo(x + 10, y); c.lineTo(x, y + 10); c.lineTo(x - 10, y); c.closePath(); c.fill(); c.stroke();
+    }
+    for (let i = 0; i < 3; i++) {   // receptors pulled into a coated pit, which pinches off and sinks
+      const a = -Math.PI / 2 + slotJ(9 - i) * 0.085, [mx, my] = onMem(a), g = clamp((t - 1.8 - i * 0.9) / 1.4);
+      if (g <= 0) continue;
+      const pit = clamp(g / 0.4), sink = clamp((g - 0.4) / 0.6), vx = mx, vy = my + 18 + sink * 150;
+      c.save(); c.setLineDash([3, 3]); c.strokeStyle = C.k; c.lineWidth = 2; c.beginPath(); c.arc(vx, vy, 16 * pit, 0, TAU); c.stroke(); c.restore();
+      rec(vx, vy - 16 * pit * (1 - sink) + 4 * sink, -Math.PI / 2, C.na, 1 - 0.4 * sink, 0.6 + 0.4 * (1 - pit));
+    }
+    c.fillStyle = C.ink; c.font = '600 13px "IBM Plex Sans",sans-serif';
+    c.fillText(t < 1.8 ? 'A little Ca²⁺ for a long time switches on calcineurin (diamonds)' : t < 5 ? 'AMPA receptors are pulled into coated pits and carried away (endocytosis)' : 'Fewer receptors, a narrower density, a smaller head', 12, H - 14);
+  }
+  c.fillStyle = C.muted; c.font = '12px "IBM Plex Sans",sans-serif'; c.fillText('Pre', 12, 30); c.fillText('cleft', 12, 72); c.fillText('postsynaptic density', cx + 190, 118); c.fillText('spine head', 12, 200);
+}
+
+// ============================== C: time-lapse snapshots ==============================
+function miniSpine(c, x, yb, sc, n, col) {
+  const rx = 26 * sc, ry = 20 * sc, yh = yb - 46 - ry * 0.3, nw = 9 * Math.sqrt(sc);
+  c.fillStyle = C.cyto; c.fillRect(x - 70, yb, 140, 22);
+  c.strokeStyle = C.memdark; c.lineWidth = 4; c.beginPath(); c.moveTo(x - 70, yb); c.lineTo(x - nw / 2, yb); c.lineTo(x - nw / 2, yh + ry * 0.9);
+  c.ellipse(x, yh, rx, ry, 0, Math.PI / 2 + 0.3, Math.PI * 2.5 - 0.3); c.lineTo(x + nw / 2, yb); c.lineTo(x + 70, yb); c.stroke();
+  c.fillStyle = C.cyto; c.beginPath(); c.ellipse(x, yh, rx - 2, ry - 2, 0, 0, TAU); c.fill(); c.fillRect(x - nw / 2 + 2, yh, nw - 4, yb - yh + 2);
+  c.fillStyle = col; for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + slotJ(i) * 0.15; c.fillRect(x + Math.cos(a) * rx - 2, yh + Math.sin(a) * ry - 2, 4, 4); }
+}
+function drawC(c, mode) {
+  const W = c.W, H = c.H, ltp = mode === 'ltp';
+  c.fillStyle = C.bath; c.fillRect(0, 0, W, H);
+  const times = ['−10 min', '+1 min', '+10 min', '+60 min'], k = ltp ? [1, 1.05, 1.22, 1.28] : [1, 0.98, 0.88, 0.81], n = ltp ? [10, 12, 15, 16] : [10, 9, 8, 7];
+  c.font = '12px "IBM Plex Sans",sans-serif'; c.textAlign = 'center';
+  times.forEach((tm, i) => {
+    const x = 110 + i * 190;
+    miniSpine(c, x, 120, k[i], n[i], C.na); miniSpine(c, x, 210, 1, 10, C.na);
+    if (i) { c.save(); c.setLineDash([3, 3]); c.strokeStyle = C.muted; c.beginPath(); c.ellipse(x, 120 - 46 - 6, 26, 20, 0, 0, TAU); c.stroke(); c.restore(); }
+    c.fillStyle = C.ink; c.fillText(tm, x, 18); c.fillStyle = C.muted; c.fillText(`head ×${(k[i] ** 3).toFixed(2)} volume · ${n[i]} AMPA`, x, 140);
+  });
+  c.textAlign = 'left'; c.fillStyle = C.muted; c.fillText('Spine A', 8, 80); c.fillText('Spine B', 8, 170);
+  c.fillStyle = ltp ? C.accent : C.k; c.fillRect(185, 30, 3, 190); c.fillText(ltp ? 'tetanus' : '1 Hz, 15 min', 192, 40);
+}
+
+// ============================== the loops (30 frames a second) ==============================
+const cA = setup('cA', PW, PH), cB = setup('cB', 900, 320), cC = setup('cC', 860, 230);
+let modeA = 'ltp', modeB = 'ltp', modeC = 'ltp', t0A = performance.now(), t0B = performance.now(), lastF = 0;
+const pick = (attr, set) => document.querySelectorAll(`[data-${attr}]`).forEach(b => b.onclick = () => { document.querySelectorAll(`[data-${attr}]`).forEach(x => x.setAttribute('aria-pressed', x === b)); set(b.dataset[attr]); });
+pick('a', m => { modeA = m; t0A = performance.now(); }); pick('b', m => { modeB = m; t0B = performance.now(); }); pick('c', m => { modeC = m; drawC(cC, m); });
+function frame(now) {
+  if (now - lastF > 32) {
+    lastF = now;
+    const tA = ((now - t0A) / 1000) % (LOOP[modeA] + 1.5), tB = ((now - t0B) / 1000) % 7.5;
+    drawSpines(cA, stateA(modeA, tA)); drawB(cB, modeB, tB);
+  }
+  requestAnimationFrame(frame);
+}
+drawC(cC, 'ltp'); requestAnimationFrame(frame);
+
+// ============================== calculators ==============================
+function chart(c, o) {
+  const W = c.W, H = c.H, L = 56, R = o.r || 80, T = 12, B = 36, pw = W - L - R, ph = H - T - B;
+  const fx = o.xlog ? Math.log10 : x => x;
+  const sx = x => L + (fx(x) - fx(o.x0)) / (fx(o.x1) - fx(o.x0)) * pw, sy = v => T + (o.y1 - clamp(v, o.y0, o.y1)) / (o.y1 - o.y0) * ph;
+  c.fillStyle = C.surface; c.fillRect(0, 0, W, H);
+  c.font = '11px "IBM Plex Mono",monospace'; c.textBaseline = 'middle'; c.textAlign = 'right';
+  for (const v of o.yt) { const y = sy(v); c.strokeStyle = C.line; c.lineWidth = v === 0 ? 1.4 : 0.8; c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke(); c.fillStyle = C.muted; c.fillText((v < 0 ? '−' : '') + Math.abs(v), L - 5, y); }
+  c.save(); c.translate(12, T + ph / 2); c.rotate(-Math.PI / 2); c.textAlign = 'center'; c.fillText(o.ylabel, 0, 0); c.restore();
+  c.textAlign = 'center'; c.textBaseline = 'top';
+  for (const v of o.xt) { const x = sx(v); c.strokeStyle = C.line; c.lineWidth = v === 0 ? 1.4 : 0.8; c.beginPath(); c.moveTo(x, T); c.lineTo(x, T + ph); c.stroke(); c.fillStyle = C.muted; c.fillText((v < 0 ? '−' : '') + Math.abs(v), x, T + ph + 5); }
+  c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillText(o.xlabel, L, H - 8);
+  for (const s of o.series) {
+    c.strokeStyle = s.color; c.lineWidth = s.width || 2; c.setLineDash(s.dash || []); c.beginPath();
+    s.xs.forEach((x, i) => i ? c.lineTo(sx(x), sy(s.ys[i])) : c.moveTo(sx(x), sy(s.ys[i]))); c.stroke(); c.setLineDash([]);
+    c.font = '600 11px "IBM Plex Sans",sans-serif'; c.fillStyle = s.color; c.fillText(s.label, L + pw + 5, sy(s.ys[s.ys.length - 1]) + (s.dy || 0));
+  }
+  for (const d of o.dots || []) { c.fillStyle = d.color; c.beginPath(); c.arc(sx(d.x), sy(d.y), 5, 0, TAU); c.fill(); }
+  c.strokeStyle = C.line; c.lineWidth = 1; c.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
+}
+// Calculator 2's protocol, event by event: between pulses, once Ca²⁺ has gone, jump ahead analytically
+// (calcineurin decays with τ 10 s, Post with τ 15 ms), so 900 pulses at 0.1 Hz cost no more than at 100 Hz.
+function protocol(f, n, held, apv) {
+  const per = 1000 / f, tauCn = 10000;
+  let V = E_L, ca = 0, camk = 0, cn = 0, D = 0, above = 0, caPk = 0, cnPk = 0;
+  const lose = T => { if (cn > TH_CN) { const Tx = Math.min(T, tauCn * Math.log(cn / TH_CN)); D += (tauCn * cn * (1 - Math.exp(-Tx / tauCn)) - TH_CN * Tx) / 1000; } cn *= Math.exp(-T / tauCn); };
+  for (let p = 0; p <= n; p++) {
+    const span = p < n ? per : 60000;   // after the last pulse, a minute more
+    let t = 0;
+    if (p < n) {
+      if (held == null) V = Math.min(-10, V + 10);
+      const Vp = held ?? V;
+      ca += 0.7 * mgFree(Vp, 1) / mgFree(E_L, 1) * (130 - Vp) / 200 * (apv ? 0.03 : 1);
+    }
+    for (; t < span && (ca > 0.002 || V - E_L > 0.05); t++) {
+      V -= (V - E_L) / 15; ca -= ca / 30;
+      if (ca > TH_CAMK) { camk += (ca - TH_CAMK) / 1000; above++; }
+      cn += (ca / (ca + KD_CN) - cn / 10) / 1000; D += Math.max(0, cn - TH_CN) / 1000;
+      caPk = Math.max(caPk, ca); cnPk = Math.max(cnPk, cn);
+    }
+    if (t < span) { lose(span - t); V = E_L + (V - E_L) * Math.exp(-(span - t) / 15); ca = 0; }
+  }
+  return { w: clamp(1 + 0.25 * camk - 0.0015 * D, 0.4, 2.2), caPk, cnPk, above: above / 1000 };
+}
+const bind = (id, fmt) => { const el = $(id), o = $(id + 'o'); const h = () => { if (o) o.textContent = fmt(+el.value); calcs(); }; el.addEventListener('input', h); };
+const c1 = setup('n1c', 520, 320), c2 = setup('n2c', 520, 320);
+let curve = null, curveKey = '';
+function calcs() {
+  // 1 · NMDA
+  const V = +$('n1V').value, mg = +$('n1Mg').value, g = +$('n1g').value;
+  $('n1Vo').textContent = fmtSigned(V, 0); $('n1Mgo').textContent = mg.toFixed(1) + ' mM'; $('n1go').textContent = g.toFixed(1) + ' nS';
+  const fr = mgFree(V, mg), I = g * fr * V, caRel = fr * Math.max(0, 130 - V) / (130 + 70);
+  $('n1free').textContent = (fr * 100).toFixed(fr < 0.1 ? 1 : 0) + ' %'; $('n1I').textContent = (I < 0 ? '−' : '+') + Math.abs(I).toFixed(1) + ' pA'; $('n1Ca').textContent = (caRel * 100).toFixed(0) + ' %';
+  $('n1f').textContent = `I = g·f_free·(V − 0) = ${g.toFixed(1)} nS × ${fr.toFixed(3)} × ${V} mV = ${I.toFixed(1)} pA`;
+  const vs = Array.from({ length: 141 }, (_, i) => -100 + i);
+  chart(c1, { x0: -100, x1: 40, y0: -120, y1: 50, xt: [-100, -80, -60, -40, -20, 0, 20, 40], yt: [-100, -50, 0, 50], xlabel: 'V (mV)', ylabel: 'I (pA)', r: 96,
+    series: [{ xs: vs, ys: vs.map(v => g * v), color: C.muted, dash: [5, 4], width: 1.5, label: 'no Mg²⁺', dy: -8 },
+             { xs: vs, ys: vs.map(v => g * mgFree(v, mg) * v), color: C.ca, label: `${mg.toFixed(1)} mM Mg²⁺`, dy: 8 },
+             { xs: vs, ys: vs.map(v => -60 * mgFree(v, mg) * Math.max(0, 130 - v) / 200), color: C.pos, width: 1.5, label: 'Ca²⁺ entry' }],
+    dots: [{ x: V, y: I, color: C.ink }] });
+  // 2 · plasticity
+  const f = 10 ** +$('n2f').value, n = +$('n2n').value, hv = +$('n2d').value, held = hv > -75 ? hv : null, apv = $('n2apv').checked;
+  $('n2fo').textContent = (f < 1 ? f.toFixed(2) : f < 10 ? f.toFixed(1) : f.toFixed(0)) + ' Hz'; $('n2no').textContent = n + ''; $('n2do').textContent = held == null ? 'not held' : fmtSigned(hv, 0); $('n2apvo').textContent = apv ? 'on' : 'off';
+  const r = protocol(f, n, held, apv), pct = Math.round(r.w * 100), sec = n / f;
+  $('n2out').textContent = pct + ' %' + (pct > 105 ? '  LTP' : pct < 95 ? '  LTD' : '  no change');
+  $('n2ca').textContent = r.caPk.toFixed(1) + ' µM'; $('n2abv').textContent = r.above.toFixed(2) + ' s'; $('n2cn').textContent = r.cnPk.toFixed(2); $('n2dur').textContent = sec < 60 ? sec.toFixed(1) + ' s' : (sec / 60).toFixed(1) + ' min';
+  $('n2form').textContent = `Δw = 0.25·∫(Ca − 3)₊dt − 0.0015·∫(calcineurin − 0.1)₊dt   →   ${pct} % of the start`;
+  const key = [n, hv, apv].join();
+  if (key !== curveKey) { curveKey = key; const fs = Array.from({ length: 34 }, (_, i) => 10 ** (-1 + i * 0.1)); curve = { fs, ys: fs.map(x => 100 * protocol(x, n, held, apv).w) }; }
+  chart(c2, { x0: 0.1, x1: 200, xlog: true, y0: 0, y1: 250, xt: [0.1, 1, 10, 100], yt: [0, 50, 100, 150, 200, 250], xlabel: 'frequency (Hz), the same pulses each time', ylabel: 'EPSP an hour later (%)', r: 70,
+    series: [{ xs: [0.1, 200], ys: [100, 100], color: C.muted, dash: [2, 3], width: 1, label: '' }, { xs: curve.fs, ys: curve.ys, color: C.accent, label: n + ' pulses' }],
+    dots: [{ x: f, y: pct, color: pct >= 100 ? C.pos : C.k }] });
+  // 3 · neck
+  const Is = +$('n3I').value, Rn = +$('n3R').value, Ch = +$('n3C').value;
+  $('n3Io').textContent = Is + ' pA'; $('n3Ro').textContent = Rn + ' MΩ'; $('n3Co').textContent = Ch.toFixed(1) + ' pF';
+  $('n3dv').textContent = (Is * Rn / 1000).toFixed(1) + ' mV'; $('n3tau').textContent = (Rn * Ch).toFixed(0) + ' µs';
+  $('n3f').textContent = `ΔV = ${Is} pA × ${Rn} MΩ = ${(Is * Rn / 1000).toFixed(1)} mV;  τ = ${Rn} MΩ × ${Ch.toFixed(1)} pF = ${(Rn * Ch / 1000).toFixed(2)} ms`;
+}
+['n1V', 'n1Mg', 'n1g', 'n2f', 'n2n', 'n2d', 'n3I', 'n3R', 'n3C'].forEach(id => bind(id, () => ''));
+$('n2apv').addEventListener('change', calcs);
+calcs();
+</script>
+</body></html>

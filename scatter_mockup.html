@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scatter mockup</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;--u1:#d0532c;--u2:#2a6fc0;--g1:#23845a;--g2:#9a4fb8;--sel:color-mix(in srgb,var(--accent) 16%,transparent)}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;--u1:#f07a52;--u2:#6aa6f0;--g1:#5bc98b;--g2:#c98be6}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 48px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}@media(max-width:850px){.wrap{grid-template-columns:1fr}}
+h1{font-size:22px;margin:0 0 4px;grid-column:1/-1}h2{font-size:16px;margin:0 0 4px}
+.note{grid-column:1/-1;font-size:13px;color:var(--muted);border-left:3px solid var(--accent);padding:6px 10px;margin:0;background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.sub{font-size:12.5px;color:var(--muted);margin:0 0 10px}
+.chart{border:1px solid var(--line);border-radius:6px;padding:8px}
+.chead{display:flex;align-items:center;gap:6px;font-size:12px;flex-wrap:wrap;margin-bottom:6px}
+.chead b{font-size:13px;margin-right:auto}
+select,button{font:inherit;font-size:12px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:2px 6px}
+button.on{background:var(--accent);color:var(--surface);border-color:var(--accent)}
+label{display:inline-flex;align-items:center;gap:3px}
+svg{display:block;width:100%;max-width:380px;margin:0 auto}
+svg text{fill:var(--muted);font-size:11px}
+.legend{display:flex;gap:12px;justify-content:center;font-size:12px;margin-top:4px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.menu{border:1px solid var(--line);border-radius:6px;font-size:12.5px;padding:4px 0;margin:10px 0 0;width:260px;background:var(--surface);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.menu div{padding:2px 14px}.menu .h{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-top:6px}
+.menu .new{background:var(--sel);font-weight:600}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px solid var(--line);padding:3px 7px;text-align:right}
+th{font-weight:600;cursor:pointer;user-select:none}th.pick{background:var(--sel);outline:2px solid var(--accent);outline-offset:-2px}
+th:first-child,td:first-child{text-align:left;color:var(--muted)}
+.fx{display:flex;gap:6px;align-items:center;font-size:12px;margin:0 0 8px;flex-wrap:wrap}
+.fx code{flex:1;min-width:120px;border:1px solid var(--line);border-radius:4px;padding:2px 6px;color:var(--muted)}
+.ctx{border:1px solid var(--line);border-radius:6px;font-size:12.5px;padding:4px 0;width:230px;background:var(--surface);margin-top:10px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.ctx div{padding:2px 14px}.ctx .new{background:var(--sel);font-weight:600}.ctx .sm{padding-left:28px;color:var(--muted)}
+.arrow{text-align:center;color:var(--muted);font-size:12px;margin:8px 0}
+.why{font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:16px}
+</style></head><body>
+<div class="wrap">
+<h1>Scatter plots in Analysis</h1>
+<p class="note">Two ways in. <b>Left:</b> a new quick chart, one point per spike, any two spike measures on X and Y. <b>Right:</b> a DataPad shortcut, one point per row (each trial, segment, pulse…), opening in Single Plot as points to finish as a figure. Both draw a square plot box with axes fitted to the data. The data here is made up.</p>
+
+<div class="card">
+  <h2>1 · Scatter quick chart (whiteboard)</h2>
+  <p class="sub">Quick charts ▾ → Spikes → <b>Scatter</b>. One point per spike in the trials and units ticked.</p>
+  <div class="chart">
+    <div class="chead"><b>Scatter</b>
+      Y <select id="ys"></select> against X <select id="xs"></select>
+    </div>
+    <div class="chead">
+      Color by <select id="col"><option value="unit">Unit</option><option value="group">Group</option><option value="trial">Trial (shade)</option></select>
+      <label><input type="checkbox" id="lx">Log X</label><label><input type="checkbox" id="ly">Log Y</label>
+      <button id="swap" title="Swap X and Y">⇄</button>
+    </div>
+    <svg id="plot" viewBox="0 0 380 340"></svg>
+    <div class="legend" id="leg"></div>
+  </div>
+  <div class="menu">
+    <div class="h">Spikes</div><div>Raster</div><div>Rate</div><div>Spike shape ▸</div><div>Timing ▸</div>
+    <div class="new">Scatter</div>
+  </div>
+  <ul class="why">
+    <li>Measures: size from the baseline, width (trough to peak), fastest rise and fall, interval before and after, time in trial, trial, PC1, PC2.</li>
+    <li>Hover a point: its trial and time. Click it: that trial opens in the preview at that spike.</li>
+    <li>Make a figure (chart focus) sends it to Single Plot like any quick chart.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h2>2 · DataPad shortcut</h2>
+  <p class="sub">Click one header, then ⌘-click a second: the first is X, the second Y. <b>Scatter</b> appears next to Plot….</p>
+  <div class="fx"><code>count(spikes, B)</code><button>+ Column</button><button>Plot…</button><button class="on">Scatter</button><span style="color:var(--muted)">I<sub>B</sub> → count</span></div>
+  <table>
+    <tr><th></th><th class="pick">I<sub>B</sub> (nA)</th><th>Vm (mV)</th><th class="pick">count</th></tr>
+    <tr><td>Trial 1</td><td>0.10</td><td>−64.2</td><td>0</td></tr>
+    <tr><td>Trial 2</td><td>0.20</td><td>−61.0</td><td>1</td></tr>
+    <tr><td>Trial 3</td><td>0.30</td><td>−58.7</td><td>4</td></tr>
+    <tr><td>Trial 4</td><td>0.40</td><td>−57.9</td><td>7</td></tr>
+    <tr><td>Trial 5</td><td>0.50</td><td>−56.4</td><td>9</td></tr>
+  </table>
+  <div class="ctx">
+    <div style="color:var(--muted)">Right-click a header:</div>
+    <div>Edit column…</div><div>Plot…</div>
+    <div class="new">Scatter against ▸</div><div class="sm">I<sub>B</sub> (nA)</div><div class="sm">Vm (mV)</div>
+  </div>
+  <div class="arrow">↓ opens in Single Plot: Y against X, points, square, mean ± SEM off</div>
+  <svg id="pad" viewBox="0 0 380 340"></svg>
+  <ul class="why">
+    <li>Same as Plot… with X, Y and points already picked, so it's one click.</li>
+    <li>It stays linked: change the DataPad and the figure follows.</li>
+  </ul>
+</div>
+</div>
+
+<script>
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;const g=()=>{let s=0;for(let i=0;i<6;i++)s+=rnd();return s-3};
+const M={size:["size from the baseline","mV"],width:["width, trough to peak","ms"],rise:["fastest rise","mV/ms"],fall:["fastest fall","mV/ms"],ibefore:["interval before","ms"],iafter:["interval after","ms"],t:["time in trial","s"],trial:["trial",""],pc1:["PC1",""],pc2:["PC2",""]};
+const spikes=[];
+for(let k=0;k<220;k++){const u=rnd()<.55?0:1,tr=1+Math.floor(rnd()*10),grp=tr<=5?0:1;
+  const size=u?62+g()*5:38+g()*4,width=u?0.42+g()*.03:0.7+g()*.05;
+  spikes.push({u,grp,trial:tr,size,width,rise:size/width*.55+g()*3,fall:-(size/width*.4+g()*2),ibefore:Math.exp(3+g()*.7),iafter:Math.exp(3+g()*.7),t:rnd()*2,pc1:(u?2.2:-1.8)+g()*.6,pc2:g()*.8+(u?.4:-.3)});}
+const xs=document.getElementById('xs'),ys=document.getElementById('ys');
+for(const k in M){xs.add(new Option(M[k][0],k));ys.add(new Option(M[k][0],k));}
+xs.value="width";ys.value="size";
+function nice(a,b,n){const s=Math.pow(10,Math.floor(Math.log10((b-a)/n||1)));const st=[1,2,5,10].map(m=>m*s).find(v=>(b-a)/v<=n)||10*s;const o=[];for(let v=Math.ceil(a/st)*st;v<=b+1e-9;v+=st)o.push(+v.toFixed(10));return o}
+function scatter(svg,pts,xl,yl,logx,logy){
+  const L=52,T=12,S=270;const ink=css('--line'),mut=css('--muted');
+  const fx=v=>logx?Math.log10(Math.max(v,1e-6)):v,fy=v=>logy?Math.log10(Math.max(v,1e-6)):v;
+  let X=pts.map(p=>fx(p.x)),Y=pts.map(p=>fy(p.y));
+  let [x0,x1]=[Math.min(...X),Math.max(...X)],[y0,y1]=[Math.min(...Y),Math.max(...Y)];
+  const px=(x1-x0)*.06||1,py=(y1-y0)*.06||1;x0-=px;x1+=px;y0-=py;y1+=py;
+  const sx=v=>L+(v-x0)/(x1-x0)*S,sy=v=>T+S-(v-y0)/(y1-y0)*S;
+  let h=`<rect x="${L}" y="${T}" width="${S}" height="${S}" fill="none" stroke="${ink}"/>`;
+  for(const v of nice(x0,x1,5))h+=`<line x1="${sx(v)}" x2="${sx(v)}" y1="${T+S}" y2="${T+S+4}" stroke="${mut}"/><text x="${sx(v)}" y="${T+S+16}" text-anchor="middle">${logx?+Math.pow(10,v).toPrecision(2):v}</text>`;
+  for(const v of nice(y0,y1,5))h+=`<line x1="${L-4}" x2="${L}" y1="${sy(v)}" y2="${sy(v)}" stroke="${mut}"/><text x="${L-7}" y="${sy(v)+4}" text-anchor="end">${logy?+Math.pow(10,v).toPrecision(2):v}</text>`;
+  pts.forEach((p,i)=>h+=`<circle cx="${sx(X[i])}" cy="${sy(Y[i])}" r="3" fill="${p.c}" fill-opacity=".75"><title>${p.tip||''}</title></circle>`);
+  h+=`<text x="${L+S/2}" y="${T+S+32}" text-anchor="middle">${xl}</text><text transform="translate(13 ${T+S/2}) rotate(-90)" text-anchor="middle">${yl}</text>`;
+  svg.innerHTML=h;}
+function lab(k){return M[k][1]?`${M[k][0]} (${M[k][1]})`:M[k][0]}
+function draw(){
+  const col=document.getElementById('col').value,lx=document.getElementById('lx').checked,ly=document.getElementById('ly').checked;
+  const cu=[css('--u1'),css('--u2')],cg=[css('--g1'),css('--g2')];
+  const pts=spikes.map(s=>({x:s[xs.value],y:s[ys.value],tip:`trial ${s.trial}, ${s.t.toFixed(3)} s, unit ${s.u+1}`,
+    c:col==="unit"?cu[s.u]:col==="group"?cg[s.grp]:`color-mix(in srgb,${css('--accent')} ${20+s.trial*8}%,${css('--surface')})`}));
+  scatter(document.getElementById('plot'),pts,lab(xs.value),lab(ys.value),lx,ly);
+  document.getElementById('leg').innerHTML=col==="unit"?`<span><i style="background:${cu[0]}"></i>Unit 1</span><span><i style="background:${cu[1]}"></i>Unit 2</span>`:
+    col==="group"?`<span><i style="background:${cg[0]}"></i>Control</span><span><i style="background:${cg[1]}"></i>TTX</span>`:`<span>trial 1 → 10, light → dark</span>`;
+  scatter(document.getElementById('pad'),[[.1,0],[.2,1],[.3,4],[.4,7],[.5,9]].map(([x,y])=>({x,y,c:css('--accent')})),"I<tspan baseline-shift='sub' font-size='8'>B</tspan> (nA)","count",false,false);}
+['xs','ys','col','lx','ly'].forEach(id=>document.getElementById(id).addEventListener('change',draw));
+document.getElementById('swap').onclick=()=>{[xs.value,ys.value]=[ys.value,xs.value];draw()};
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change',draw);draw();
+</script>
+</body></html>

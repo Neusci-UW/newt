@@ -9,6 +9,7 @@ with the current config; trialfile.py reads and writes one trial.
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -43,10 +44,21 @@ def is_session(folder: str | Path) -> bool:
     return bool(list_blocks(folder))
 
 
-def next_block_path(folder: str | Path) -> Path:
-    """Path for the next block. Never reuses a number, even if blocks were deleted."""
-    nums = [_block_number(p) for p in list_blocks(folder)]
-    return Path(folder) / f"block_{(max(nums) if nums else 0) + 1:03d}.h5"
+_claim_lock = threading.Lock()
+_claimed: dict[str, int] = {}          # folder -> the highest block number handed out
+
+
+def next_block_path(folder: str | Path, claim: bool = True) -> Path:
+    """Path for the next block. Never reuses a number, even if blocks were deleted, nor one
+    already handed out (claim) whose file isn't written yet: a trial being split on another
+    thread and a recording starting get different numbers. claim=False only looks."""
+    with _claim_lock:
+        nums = [_block_number(p) for p in list_blocks(folder)]
+        key = str(Path(folder).resolve())
+        n = max([0, _claimed.get(key, 0)] + [k for k in nums if k is not None]) + 1
+        if claim:
+            _claimed[key] = n
+        return Path(folder) / f"block_{n:03d}.h5"
 
 
 def append_check(folder: str | Path, cfg: Config) -> tuple[list[str], list[str]]:

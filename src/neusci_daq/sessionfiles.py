@@ -704,7 +704,7 @@ class SessionFilesMixin:
         self._remember(path)
         self._update_title()
         self.statusBar().showMessage(
-            f"Appending to {path.name}: next trial is {session.next_block_path(path).name}", 10000)
+            f"Appending to {path.name}: next trial is {session.next_block_path(path, claim=False).name}", 10000)
         return path
 
     def export(self, out_path: str | Path | None = None) -> Path | None:

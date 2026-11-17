@@ -1,9 +1,13 @@
-"""A lesson's circuit, rebuilt on the Breadboard simulator with parts you could buy.
+"""A lesson's circuit, rebuilt on the Breadboard simulator.
 
 A lesson page describes its membrane circuit (lessons/breadboard.js) as compartments,
 each a capacitor with branches of a conductance in series with a battery, joined by
 axial conductances, with a current injected into some. Units are F, S, V, A and s, or
-the same per cm² (only C/g as a time, and voltages, matter: the circuit is rescaled):
+the same per cm² (a per-cm² circuit is built as a 1 cm² patch).
+
+By default the parts have the cell's own values: the same mV, µF (or pF), kΩ (or GΩ)
+and ms as the lesson. With `scale: "breadboard"` the circuit is rescaled instead to
+parts you could buy and voltages a DAQ reads easily:
 
 - time: a power of ten, so the slowest time constant lands between 10 and 100 ms
   (easy to see on a scope or the Record page at 10 kHz)
@@ -12,7 +16,7 @@ the same per cm² (only C/g as a time, and voltages, matter: the circuit is resc
   sold (E6 capacitors, E12 resistors). A branch the lesson changes (`vary`) is a
   potentiometer wired as a variable resistor, set to the lesson's value.
 
-An injected current becomes the stimulator's output through a series resistor ten
+In either, an injected current becomes the stimulator's output through a series resistor ten
 times the compartment's own resistance (so it barely loads the membrane), smaller if the
 pulse would otherwise pass 9 V, or a fixed input voltage when the current is steady (`dc`).
 
@@ -33,23 +37,22 @@ import math
 
 from . import breadboard as bb
 
-V_SCALE = 10.0                           # board volts per cell volt (1 mV -> 10 mV)
+V_SCALE = 10.0                           # breadboard scale: board volts per cell volt (1 mV -> 10 mV)
 R_TARGET = 10e3                          # Ω, where the circuit's resistances are centred
 E6 = (1.0, 1.5, 2.2, 3.3, 4.7, 6.8)
 E12 = (1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2)
-POTS = (1e3, 2e3, 5e3, 10e3, 20e3, 50e3, 100e3, 200e3, 500e3, 1e6)
 V_MAX = 10.0                             # V, the most an input or battery should be
 V_PULSE = 9.0                            # V, the most a stimulus pulse is made
 
 
-def snap(x: float, series=E12) -> float:
+def _snap(x: float, series=E12) -> float:
     """The nearest value of an E series (on a log scale)."""
     d = 10 ** math.floor(math.log10(x))
     best = min([m * d for m in series] + [10 * d], key=lambda v: abs(math.log(v / x)))
     return float(f"{best:.3g}")
 
 
-def snap_up(x: float, series=E12) -> float:
+def _snap_up(x: float, series=E12) -> float:
     d = 10 ** math.floor(math.log10(x))
     return float(f"{next(v for v in [m * d for m in series] + [10 * d] if v >= x * 0.999):.3g}")
 
@@ -80,13 +83,24 @@ def build(spec: dict) -> tuple[bb.Board, list[str]]:
     if not all(g > 0 for g in gtot):
         raise ValueError("a compartment has no conductance: its voltage would never settle")
     taus = [c["C"] / g for c, g in zip(comps, gtot)]
-    # Time: a power of ten taking the slowest time constant to 10-100 ms
-    t_scale = 10 ** math.ceil(math.log10(0.01 / max(taus)))
-    # Impedance: centre the resistances on R_TARGET, then snap the first capacitor
-    rs = [1 / b["g"] for c in comps for b in c["channels"]] + [1 / lk["g"] for lk in links]
-    r_scale = R_TARGET / math.exp(sum(math.log(r) for r in rs) / len(rs))     # board Ω per cell Ω
-    c_board0 = snap(comps[0]["C"] * t_scale / r_scale, E6)
-    r_scale = t_scale * comps[0]["C"] / c_board0            # the first τ comes out exactly
+    real = spec.get("scale") != "breadboard"
+    v_scale = 1.0 if real else V_SCALE
+
+    def snap(x, series=E12):           # real values stay as they are (to 3 figures)
+        return float(f"{x:.3g}") if real else _snap(x, series)
+
+    def snap_up(x, series=E12):
+        return float(f"{x:.3g}") if real else _snap_up(x, series)
+    if real:
+        t_scale = r_scale = 1.0
+    else:
+        # Time: a power of ten taking the slowest time constant to 10-100 ms
+        t_scale = 10 ** math.ceil(math.log10(0.01 / max(taus)))
+        # Impedance: centre the resistances on R_TARGET, then snap the first capacitor
+        rs = [1 / b["g"] for c in comps for b in c["channels"]] + [1 / lk["g"] for lk in links]
+        r_scale = R_TARGET / math.exp(sum(math.log(r) for r in rs) / len(rs))     # board Ω per cell Ω
+        c_board0 = snap(comps[0]["C"] * t_scale / r_scale, E6)
+        r_scale = t_scale * comps[0]["C"] / c_board0            # the first τ comes out exactly
 
     def ohms(g):
         return 1 / g * r_scale
@@ -130,7 +144,7 @@ def build(spec: dict) -> tuple[bb.Board, list[str]]:
             r = ohms(b["g"])
             if b.get("vary"):
                 gmin = b.get("gmin") or b["g"] / 4
-                value = next((v for v in POTS if v >= ohms(gmin)), POTS[-1])
+                value = _snap_up(ohms(gmin), (1, 2, 5))       # a pot's usual 1-2-5 values
                 pot = bb.Part("pot", start, end, value)
                 pot.wiper = f"f{m}"           # a variable resistor: node to wiper (wiper to b is shorted)
                 pot.pos = min(1.0, r / value)
@@ -161,7 +175,7 @@ def build(spec: dict) -> tuple[bb.Board, list[str]]:
             if b.get("E") is None:                            # no battery: straight to ground
                 parts.append(bb.Part("wire", f"a{bm}", f"t-{bm}"))
                 continue
-            e = round(b["E"] * V_SCALE, 4)
+            e = round(b["E"] * v_scale, 4)
             if abs(e) > V_MAX:
                 notes.append(f"{b.get('name', 'a battery')}: {e:+.1f} V is beyond ±{V_MAX:g} V")
             # + end at a: a battery always shows a positive voltage, turned round when negative
@@ -171,23 +185,24 @@ def build(spec: dict) -> tuple[bb.Board, list[str]]:
             rin = ohms(sum(b["g"] for b in c["channels"]) or gtot[ci])
             # Ten times the compartment's resistance, so it barely loads it, unless the pulse would then
             # pass V_PULSE: a big current (a spike's stimulus) gets a smaller resistor instead
-            i_board = abs(stim.get("I", 0.0)) / r_scale * V_SCALE        # board volts per board ohm
+            i_board = abs(stim.get("I", 0.0)) / r_scale * v_scale        # board volts per board ohm
             rs_board = snap_up(10 * rin)
             if i_board * rs_board > V_PULSE:
                 rs_board = snap(V_PULSE / i_board)
                 if rs_board < 3 * rin:
                     notes.append(f"{c.get('name', 'The cell')}: the stimulus resistor is only {rs_board / rin:.1f}× the "
                                  "membrane's resistance, so it loads the membrane while the Stimulator is at 0 V")
-            v = round(stim.get("I", 0.0) * rs_board / r_scale * V_SCALE, 3)
+            v = round(stim.get("I", 0.0) * rs_board / r_scale * v_scale, 4)
+            sv = ("+" if v >= 0 else "−") + fmt(abs(v), "V")
             parts.append(bb.Part("resistor", f"j{s}", stim_hole, rs_board))
             if stim.get("dc"):
                 parts.append(bb.Part("vin", f"g{s}", f"b-{s}", v, source="dc"))
-                notes.append(f"{c.get('name', 'The cell')}: the injected current is a fixed {v:+.2f} V "
+                notes.append(f"{c.get('name', 'The cell')}: the injected current is a fixed {sv} "
                              f"through {fmt(rs_board, 'Ω')}")
             else:
                 parts.append(bb.Part("vin", f"g{s}", f"b-{s}", 1.0, source="stim"))
                 long = f", {stim['width'] * t_scale * 1e3:.3g} ms long" if stim.get("width") else ""
-                notes.append(f"{c.get('name', 'The cell')}: inject the current as a {v:+.2f} V pulse{long} "
+                notes.append(f"{c.get('name', 'The cell')}: inject the current as a {sv} pulse{long} "
                              f"on the Stimulator (through {fmt(rs_board, 'Ω')})")
         col += width + 1
     for lk in links:
@@ -198,5 +213,6 @@ def build(spec: dict) -> tuple[bb.Board, list[str]]:
     board = bb.Board(parts)
     bb.validate(board)
     ms = max(taus) * t_scale * 1e3
-    notes.insert(0, f"Scaled: time ×{t_scale:g} (slowest τ ≈ {ms:.0f} ms), 1 mV in the cell = 10 mV on the board")
+    notes.insert(0, f"The cell's own values (slowest τ ≈ {ms:.3g} ms)" if real else
+                 f"Scaled: time ×{t_scale:g} (slowest τ ≈ {ms:.0f} ms), 1 mV in the cell = 10 mV on the board")
     return board, notes

@@ -19,14 +19,14 @@ from .config import Channel, valid_inputs
 from .plotzoom import MultiAxis, TraceCurve, light_grid
 from .stim import Stimulus
 from .ringbuffer import RingBuffer
-from . import colors, theme
+from . import colors, theme, trialfile
 from .mainparts import LIVE, REVIEW, WINDOW_MAX, _SI_BASE, _TraceViewBox
 from .units import whole
 
 KEEP_S = 60.0          # seconds the live display always holds, however far you zoom in
 # Live: a bar where each acquisition starts (Start, or carrying on after a wait) and one
 # where each trial starts (a recorded block, or a saved stimulus window)
-BOUND_COLORS = {"acq": "#1fa39a", "trial": "#e8a33d"}
+BOUND_COLORS = {"acq": "#1fa39a", "trial": "#e8a33d", "trial_end": "#e8a33d"}
 GAP_SHOWN_MIN_S, GAP_SHOWN_FRAC = 0.2, 0.05   # a wait is shown this wide at most: 0.2 s, or 5% of Window
 STIM_TAIL_S = 0.5      # acquiring this long after the last stimulus ends, then stopping (Stimulus not None)
 
@@ -880,7 +880,7 @@ class LiveMixin:
 
     def _mark_boundary(self, t: float, kind: str, gap: tuple | None = None) -> None:
         """A bar on the live history at stream time `t` (as the history holds it): where a
-        run ("acq") or a trial ("trial") starts; or ("gap", with gap = (end, seconds)) a
+        run ("acq") or a trial ("trial") starts, or a trial ends ("trial_end"); or ("gap", with gap = (end, seconds)) a
         shaded band where nothing was acquired. Kept with the history, so it's drawn again
         after Back to Live, and goes when that part of the history does."""
         self._bounds.append((float(t), kind, gap))
@@ -895,6 +895,7 @@ class LiveMixin:
         if length_s is not None:
             self._mark_unsaved(start)
             self._saved_until = start + length_s
+            self._mark_boundary(start + length_s, "trial_end")
 
     def _mark_unsaved(self, upto: float) -> None:
         """A run saving just its trials' windows: shade what was acquired since the last
@@ -942,8 +943,9 @@ class LiveMixin:
                     items.append(lab)
             self._joins.append((t, kind, items, end))
             return
-        pen = pg.mkPen(BOUND_COLORS[kind], width=3)      # thick: easy to see at a glance
-        tip = "A run starts here" if kind == "acq" else "A trial starts here"
+        # thick: easy to see at a glance; a trial's start and end thickest
+        pen = pg.mkPen(BOUND_COLORS[kind], width=3 if kind == "acq" else 5)
+        tip = {"acq": "A run starts here", "trial_end": "A trial ends here"}.get(kind, "A trial starts here")
         for p in self.plots:
             ln = pg.InfiniteLine(t - self._axis_zero, angle=90, pen=pen)
             ln.setToolTip(tip)
@@ -1102,6 +1104,7 @@ class LiveMixin:
 
     def _stop_block(self) -> None:
         empty = self.recorder.samples_written == 0
+        start, end = self.recorder.block_start + self._t_shift, self.recorder.last_t + self._t_shift
         self.recorder.stop()
         path = self.recorder.path
         if empty and path is not None and path in self.blocks:   # no samples came: not a trial
@@ -1114,9 +1117,13 @@ class LiveMixin:
         self._lock_channels(False)
         if not empty:
             self.statusBar().showMessage(f"Saved {self.recorder.path.name}", 10000)
+            self._mark_boundary(end, "trial_end")
         self._set_comment_box(False)
         self.analysis_page.source_changed()          # a new block to analyze
         self._block_changed(started=False)
+        if not empty and path is not None and trialfile.stimuli_count(path) > 1:
+            # Repeat, Raise, Complex Stimulus's Repeat: a trial per stimulus, by itself
+            self.split_in_background([path], {path: start})
 
     def _block_changed(self, started: bool) -> None:
         self._update_menu_state()           # so Cmd+S / Export match without opening File first

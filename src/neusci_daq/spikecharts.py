@@ -91,7 +91,7 @@ class StimulusChart(SpikeChart):
 
     def scale_bars(self) -> list[tuple]:
         how = self.page.how()
-        return [(self.plot, self.page.unit_of(how) if how and how != "notes" else None, None)]
+        return [(self.plot, self.page.unit_of(how) if how and how not in ("notes", "sent") else None, None)]
 
     def draw(self) -> None:
         """The chosen blocks' stimulus channel (or the notes' times)."""
@@ -106,8 +106,8 @@ class StimulusChart(SpikeChart):
                     "Stimulus: no trials chosen", color=self._fg())
         if not how or not chosen:
             return
-        if how == "notes":                        # no trace to show: just when each one was noted
-            sp.setLabel("left", "Stimulus (notes)")
+        if how in ("notes", "sent"):              # no trace to show: just when each one was noted (or sent)
+            sp.setLabel("left", "Stimulus (notes)" if how == "notes" else "Stimulus (as sent)")
             ons = [on for on in map(self.page.onsets, chosen) if on is not None and len(on)]
             if ons:
                 x = np.concatenate(ons)

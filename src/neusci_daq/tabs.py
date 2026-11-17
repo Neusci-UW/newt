@@ -238,7 +238,27 @@ class TabArea(QtWidgets.QWidget):
         if self.split:
             total = max(2, sum(self.splitter.sizes()) or 2)
             self.splitter.setSizes([total // 2, total - total // 2])
+        self._place_corner()
         self.changed.emit()
+
+    def set_corner(self, w: QtWidgets.QWidget) -> None:
+        """A widget at the right end of the tab row (the light/dark toggle, the logo): on the
+        right-hand half's row when side by side, else the top one's."""
+        self._corner = w
+        self._place_corner()
+
+    def _place_corner(self) -> None:
+        w = getattr(self, "_corner", None)
+        if w is None:
+            return
+        head = self.panes[1 if self.layout_mode == SIDE else 0].head_layout
+        if w.parentWidget() is head.parentWidget():
+            return
+        old = w.parentWidget().layout() if w.parentWidget() is not None else None
+        if old is not None:
+            old.removeWidget(w)
+        head.addWidget(w)
+        w.show()
 
 
 def layout_icon(mode: str, ink: str, size: int = 16) -> QtGui.QIcon:

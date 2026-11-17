@@ -172,7 +172,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
     # UI construction
     # ======================================================================
     def _build_ui(self):
-        tb = self.addToolBar("Controls")
+        # No toolbar row: what it held sits at the right end of the tab row (tab_corner).
+        tb = QtWidgets.QToolBar("Controls")
         tb.setMovable(False)
         self.btn_run = QtWidgets.QPushButton("Start", checkable=True)
         self.btn_run.setObjectName("start")
@@ -199,9 +200,17 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.comment_edit = _CommentEdit()
         self.comment_edit.setAccessibleName("Comment")
         self.comment_edit.setToolTip("Shortcut: press C to jump here")
-        self.comment_edit.setMinimumWidth(90)
+        self.comment_edit.setMinimumWidth(260)
         self.comment_edit.returnPressed.connect(self._add_comment)
         self._set_comment_box(False)
+        # Typed while recording: C opens it in a small box over the plots; Enter saves it there and then.
+        self.comment_pop = QtWidgets.QFrame(self, QtCore.Qt.WindowType.Popup)
+        self.comment_pop.setObjectName("commentPopup")
+        cpl = QtWidgets.QVBoxLayout(self.comment_pop)
+        cpl.setContentsMargins(10, 8, 10, 10)
+        cpl.setSpacing(6)
+        cpl.addWidget(QtWidgets.QLabel("New comment, saved when you press Enter"))
+        cpl.addWidget(self.comment_edit)
         self.block_combo = QtWidgets.QComboBox()
         self.block_combo.setMinimumContentsLength(18)
         self.block_combo.currentIndexChanged.connect(self._show_review_block)
@@ -212,7 +221,6 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_comments.toggled.connect(self._toggle_comments)
 
         # Toolbar groups: shown per mode (live/review) and per visible tab.
-        A = lambda w: tb.addWidget(w)
         self.toolbar = tb
         self.lbl_rate, self.lbl_window = QtWidgets.QLabel("Sampling rate"), QtWidgets.QLabel("Window")
         self.rate_box.setToolTip("Sampling rate: samples per second, per channel")
@@ -223,11 +231,8 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # The block shown is picked in the Blocks panel (↑ ↓); block_combo just holds which.
         self._tb_review = []
         self._tb_acq = []
-        self._tb_acq_live = [A(self.comment_edit)]
-        self._tb_review.append(A(self.btn_live))
-        spacer = QtWidgets.QWidget()            # fills the space when the comment box is hidden
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
-        self._tb_spacer = A(spacer)
+        self._tb_acq_live = []
+        self._tb_review.append(self.btn_live)
         # Shown on every tab while a stimulus is going, so it can always be stopped.
         self.stim_chip = QtWidgets.QWidget()
         self.stim_chip.setObjectName("stimChip")
@@ -243,23 +248,25 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         self.btn_chip_stop.setToolTip("Stop the stimulus and set the output to 0 V (Esc)")
         self.btn_chip_stop.clicked.connect(self.stop_stimulus)
         cl.addWidget(dot); cl.addWidget(self.stim_chip_text); cl.addWidget(self.btn_chip_stop)
-        self._tb_chip = A(self.stim_chip)
+        self._tb_chip = self.stim_chip
+        self.stim_chip.hide()
         self.btn_theme = QtWidgets.QToolButton()
         self.btn_theme.setAutoRaise(True)
         self.btn_theme.setIconSize(QtCore.QSize(20, 20))
         self.btn_theme.clicked.connect(self.toggle_plot_theme)
-        # The light/dark toggle sits at the right end of the toolbar,
-        # on the same row as Start and Record, and shows on every tab.
+        # Back to Live (in review), the stimulus chip (while stimulating), the light/dark
+        # toggle and the logo sit at the right end of the tab row, on every tab.
         self.tab_corner = QtWidgets.QWidget()
         cl2 = QtWidgets.QHBoxLayout(self.tab_corner)
-        cl2.setContentsMargins(0, 0, 0, 0)
+        cl2.setContentsMargins(0, 2, 0, 2)
         cl2.setSpacing(6)
+        cl2.addWidget(self.btn_live)
+        cl2.addWidget(self.stim_chip)
         cl2.addWidget(self.btn_theme)
         self.logo = QtWidgets.QLabel()
         self.logo.setPixmap(app_icon().pixmap(QtCore.QSize(26, 26)))
         self.logo.setToolTip("NEWT")
         cl2.addWidget(self.logo)
-        self._tb_corner = A(self.tab_corner)
         self._update_theme_button()
         sc = QtGui.QShortcut(QtGui.QKeySequence("C"), self)
         sc.activated.connect(self._focus_comment)
@@ -536,6 +543,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("lessons", "Lessons", ["membrane", "rc", "space", "ap", "syn", "sum", "plas", "hh"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
+        self.tabs.set_corner(self.tab_corner)
         self.setCentralWidget(self.tabs)
 
         self.status = QtWidgets.QLabel()
@@ -789,7 +797,6 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             a.setVisible(live and acq)
         if hasattr(self, "run_bar"):
             self.run_bar.setVisible(live)
-        self._tb_spacer.setVisible(not (live and acq))
         self._update_stim_chip()
         self._fit_toolbar()
 
@@ -867,7 +874,7 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             self.stim_chip_text.setText("Stimulating")      # the interval is in the tooltip
             self.stim_chip.setToolTip(f"Repeating every {self.stim_repeat_s:g} s" if self.repeating
                                       else "A stimulus is being sent")
-        if self._tb_chip.isVisible() != on:
+        if self._tb_chip.isHidden() == on:
             self._tb_chip.setVisible(on)
             self._fit_toolbar()
 

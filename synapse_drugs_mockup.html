@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synapse drugs mockup</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;--ca:#b8892a;--nt:#c0287a;--cl:#23845a}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;--ca:#e0bb5c;--nt:#f477b7;--cl:#5bc98b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 48px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}@media(max-width:850px){.wrap{grid-template-columns:1fr}}
+h1{font-size:22px;margin:0 0 6px;grid-column:1/-1}.note{grid-column:1/-1;font-size:13px;color:var(--muted);border-left:3px solid var(--accent);padding:6px 10px;margin:0;background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.st{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:10px 0 6px}
+.seg{display:flex;flex-wrap:wrap;gap:4px}.seg span{padding:2px 9px;border:1px solid var(--line);border-radius:12px;font-size:12px}.seg .on{background:var(--accent);color:var(--surface);border-color:var(--accent)}.seg .new{border-style:dashed;border-color:var(--accent);color:var(--accent)}
+.drug{display:grid;grid-template-columns:20px 1fr;gap:2px 8px;align-items:start;font-size:13.5px;margin:6px 0}
+.drug i{width:16px;height:16px;border:1.5px solid var(--muted);border-radius:4px;margin-top:2px}.drug i.on{background:var(--accent);border-color:var(--accent)}
+.drug small{grid-column:2;color:var(--muted);font-size:12px;line-height:1.35}
+.drug .na{opacity:.4}
+ul{margin:6px 0 0;padding-left:18px;font-size:14px}li{margin:4px 0}
+.chip{display:inline-block;padding:1px 9px;border:1px solid var(--accent);color:var(--accent);border-radius:12px;font-size:13px;margin-right:6px}
+.pic{height:150px;border-radius:8px;background:linear-gradient(var(--bg),var(--surface));border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;text-align:center;padding:10px}
+</style></head><body><div class="wrap">
+<h1>Synapse Part 1: drugs, toxins and diseases (mockup)</h1>
+<p class="note">Mockup, layout only. A new group in Part 1's settings, one tick box each, grouped by where they act: Pre, Cleft and Post. Each acts on a part of the model that already exists, so the picture and charts show the effect with no new drawing. Items that don't fit the chosen receptor are greyed out with the reason. Adding a <b>Nicotinic (NMJ)</b> receptor makes the clinical classics work.</p>
+
+<section class="card">
+ <div class="pic">The synapse picture as now. Each drug that is on gets a small tag where it acts, e.g. "botulinum" on the docked vesicles, "curare" on the receptors, "neostigmine" in the cleft.</div>
+ <p class="st">How to start: new chips</p>
+ <ul>
+  <li><span class="chip">Botulinum toxin</span> The spike arrives and Ca²⁺ comes in, but no vesicle fuses: flaccid paralysis.</li>
+  <li><span class="chip">Myasthenia gravis</span> Antibodies have removed most nicotinic receptors: the EPSP is small and fails along a train of spikes.</li>
+  <li><span class="chip">…then neostigmine</span> ACh lingers in the cleft, so the few receptors left open again and again: the EPSP grows back.</li>
+  <li><span class="chip">Curare</span> ACh is released but can't bind: nothing opens.</li>
+  <li><span class="chip">Lambert–Eaton</span> Antibodies against the Ca²⁺ channels: little release at first, more along a fast train as Ca²⁺ builds up.</li>
+  <li><span class="chip">A benzodiazepine</span> With GABA<sub>A</sub>: the same GABA opens more channels, a bigger IPSP.</li>
+ </ul>
+ <p class="st">Theory: one new tab, "Drugs and disease"</p>
+ <p style="font-size:14px;margin:0;color:var(--muted)">Plain words first: every drug acts on one step of the chain you already know (spike → Ca²⁺ → fusion → cleft → receptor), and the step it hits tells you what it does. A short table: drug or disease, the step, what changes, a clinical use or sign.</p>
+</section>
+
+<aside class="card">
+ <p class="st" style="margin-top:0">Post: receptors</p>
+ <div class="seg"><span class="new">Nicotinic (NMJ)</span><span class="on">AMPA</span><span>NMDA</span><span>GABA<sub>A</sub></span><span>Glycine</span></div>
+
+ <p class="st">Drugs, toxins and diseases</p>
+ <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase">Pre: terminal</div>
+ <div class="drug"><i></i><span>Tetrodotoxin (TTX)</span><small>blocks Na⁺ channels: the spike never reaches the terminal</small></div>
+ <div class="drug"><i></i><span>Lambert–Eaton antibodies</span><small>remove most of the Ca²⁺ channels: less Ca²⁺ comes in</small></div>
+ <div class="drug"><i class="on"></i><span>Botulinum toxin</span><small>cuts the proteins that fuse vesicles: no release</small></div>
+
+ <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-top:8px">Cleft</div>
+ <div class="drug"><i></i><span>Uptake blocker</span><small>names itself for the transmitter: neostigmine (blocks acetylcholinesterase), TBOA (glutamate transporters), tiagabine (GABA transporter, an antiepileptic). Clearing is 10× slower.</small></div>
+
+ <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-top:8px">Post: receptors</div>
+ <div class="drug"><i></i><span>Competitive blocker</span><small>names itself for the receptor: curare, CNQX, APV, bicuculline, strychnine (today's tick box, moved here)</small></div>
+ <div class="drug"><i></i><span>Myasthenia gravis</span><small>antibodies remove ~70% of the receptors</small></div>
+ <div class="drug"><i></i><span class="na">Benzodiazepine</span><small>GABA<sub>A</sub> only: GABA binds more readily, more channels open</small></div>
+ <div class="drug"><i></i><span class="na">Barbiturate</span><small>GABA<sub>A</sub> only: each channel stays open longer</small></div>
+ <div class="drug"><i></i><span class="na">Ketamine</span><small>NMDA only: plugs open channels, like Mg²⁺ but voltage won't push it out</small></div>
+</aside>
+</div></body></html>

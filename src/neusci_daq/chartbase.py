@@ -286,13 +286,14 @@ class Chart(View):
         return self.page.blocks
 
     def blocks(self) -> list[int]:
-        """The blocks it shows: those it's pinned to, or those chosen; in the Trials browser's
-        order, so any chart that stacks trials stacks them as the browser lists them."""
+        """The blocks it shows: those it's pinned to (ticked or not: a pin stays put whatever
+        is ticked), or those chosen; in the Trials browser's order, so any chart that stacks
+        trials stacks them as the browser lists them."""
         if self.pin is None:
             chosen = self.finder.chosen_or_none()
         else:
             where = {p.stem: i for i, p in enumerate(self.page._paths)}
-            chosen = self.finder.usable([where[s] for s in self.pin["stems"] if s in where], self.pin.get("own", False))
+            chosen = self.finder.usable([where[s] for s in self.pin["stems"] if s in where], True)
         order = getattr(self.page, "in_browser_order", None)
         return order(chosen) if order is not None else chosen
 

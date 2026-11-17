@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spines and plasticity mockup</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;
+--k:#6b3fb8;--na:#d07a1f;--ca:#b8892a;--nt:#c0287a;--cyto:#edf0f6;--post:#f1e4e8;--bath:#e8f2ef;--mem:#e3d3a8;--memdark:#a8946a;--pos:#e0574a}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;
+--k:#a88cf2;--na:#f0a350;--ca:#e0bb5c;--nt:#f477b7;--cyto:#1b2230;--post:#2a1f25;--bath:#13211d;--mem:#6c6046;--memdark:#a8946a;--pos:#ff7a6b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 48px}
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:24px;font-weight:600;margin:0}h2{font-size:18px;font-weight:600;margin:0 0 4px}h3{font-size:15px;margin:10px 0 2px}
+p{margin:0 0 6px}.muted{color:var(--muted);font-size:14px}ul{margin:4px 0;padding-left:20px}li{margin:2px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.plan{border-color:var(--accent)}
+canvas{width:100%;height:auto;display:block;border-radius:6px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.charts.three{grid-template-columns:1fr 1fr 1fr}
+@media (max-width:760px){.charts,.charts.three{grid-template-columns:1fr}}
+.sect-title{font-size:13px;font-weight:600;margin:0 0 2px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 0;font-size:13px}
+.bar button{font:inherit;padding:3px 12px;border-radius:6px;border:1px solid var(--accent);background:none;color:var(--accent);cursor:pointer}
+.bar button.primary,.bar button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.bar input[type=range]{width:180px;accent-color:var(--accent)}
+.read{font:13px "IBM Plex Mono",monospace;color:var(--muted);margin-top:6px}
+.look{font-size:14px;margin-top:8px}
+details{border-top:1px solid var(--line);padding:6px 0}summary{cursor:pointer;font-weight:600}
+.tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);margin-left:6px}
+</style></head><body><div class="wrap">
+
+<header><h1>Spines and plasticity: mockup</h1>
+<p class="muted">Mockup of a new lesson page. The three parts run on a small working model (written for this mockup), so the numbers move, but the styling, floating bar, zoom arrows and tabs come from the lesson code when it is built.</p></header>
+
+<section class="card plan"><h2>Plan</h2>
+<h3>Where it lives: a new page, <code>plasticity.html</code>, lesson 7 after Summation</h3>
+<ul>
+<li>synapse.html is already 1,550 lines with two full parts, and you may split it in two. If it splits, the natural halves are "picture" and "circuit"; plasticity is a third topic, so adding it as a second half would mean splitting again later.</li>
+<li>It needs both earlier lessons: the receptor model and Mg²⁺ block from Synapse, the dendrite falling off from Summation. Coming after both, it can point back to each instead of re-teaching them.</li>
+<li>Code reuse is the same either way: copy <code>mgFree</code>, <code>fillSub</code>, <code>drawChart</code>, the floating bar and chartzoom.js as the other pages do.</li>
+</ul>
+<h3>Learning goals <span class="tag">high-yield first</span></h3>
+<ul>
+<li><b>NMDA receptors are coincidence detectors:</b> they pass Ca²⁺ only when glutamate is bound <i>and</i> Post is depolarized enough to push Mg²⁺ out of the pore.</li>
+<li><b>LTP vs LTD come down to Ca²⁺:</b> a lot of Ca²⁺ fast (100 Hz tetanus, or pairing) turns on CaMKII and adds AMPA receptors (LTP). A little Ca²⁺ for a long time (1 Hz for 15 min) turns on calcineurin, a phosphatase, which takes AMPA receptors out (LTD).</li>
+<li><b>Input specificity:</b> only the stimulated spine changes; its neighbour on the same dendrite does not, because Ca²⁺ stays inside the spine head.</li>
+<li><b>Blocking NMDA receptors (APV) prevents LTP and LTD</b> but does not change the ordinary EPSP, which runs through AMPA receptors.</li>
+<li>Lower-yield, kept short: the EPSP is biggest at the spine head and is smaller and slower at the soma (the RC low-pass from lesson 2). How much the neck itself adds is still argued about; the page says so.</li>
+</ul>
+<h3>Model (one model behind all three parts)</h3>
+<ul>
+<li><b>Four compartments, each an RC like lesson 2:</b> spine head A (stimulated), spine head B (neighbour), a dendrite segment, the soma. Each neck is a resistor from its head to the dendrite (slider, 50 to 1000 MΩ), the dendrite has a resistor to the soma. Units mV, ms, nS, pA, pF; exponential Euler at 25 µs, so it is stable at every neck setting and cheap (a 150 ms run is 6,000 steps).</li>
+<li><b>Receptors in head A</b> use the Synapse page's count model: AMPA (rise 0.2, decay 2 ms) and NMDA (rise 3, decay 60 ms) times <code>mgFree(V)</code>. LTP and LTD change the AMPA count; LTP also enlarges the head (drawn; capacitance kept the same).</li>
+<li><b>Ca²⁺ in each head:</b> in through NMDA receptors (and a little through voltage-gated channels), out by pumps and out through the neck into the dendrite. A thinner neck keeps it in longer.</li>
+<li><b>Plasticity rule (two enzymes, pre-med words):</b> CaMKII grows with the time Ca²⁺ spends above a high level; calcineurin is half-on at a low level but slow, so it builds up only over many pulses. Change in AMPA count = CaMKII part − calcineurin part, capped at 40–220 %. Part 3 runs the protocols at 1 ms steps off-screen (15 min of 1 Hz is under 20 ms of work), then plays the result.</li>
+</ul>
+<h3>Page structure</h3>
+<ul>
+<li><b>1 · Spine and dendrite: where the EPSP is biggest</b> (short). Picture + Fire + neck slider; voltage at head, dendrite and soma; the same three scaled to their peaks to show slowing. Points to Summation for summation.</li>
+<li><b>2 · Ca²⁺ in the spine: NMDA receptors need two things at once.</b> Glutamate / Depolarize / Both, Mg²⁺ on or off; voltage chart and Ca²⁺ chart for both spines with the two enzyme levels drawn on it.</li>
+<li><b>3 · LTP and LTD: the test pulse before and after.</b> Tetanus / Low-frequency / Pairing, APV on or off; the classic EPSP-vs-minutes plot for both spines, the Ca²⁺ during induction, and the test EPSP before and after. Weights carry over, so LTP then LTD shows depotentiation; Reset returns to 100 %.</li>
+<li><b>Theory</b> (toggles as on the other pages): the spine as an RC with a resistor in front; the Mg²⁺ block curve; CaMKII vs calcineurin; early (receptor insertion) vs late LTP (protein synthesis, bigger spine), in one paragraph; where the ideas come from (Bliss & Lømo 1973, Malenka & Bear, Lisman, Shouval et al. 2002 for the Ca²⁺ rule, Matsuzaki 2004 for spine growth).</li>
+</ul>
+<h3>Not in the mockup yet</h3>
+<ul><li>"How to read" / "What to look for" tabs, the floating bar, zoom arrows on the charts, the rolling (live) charts; this mockup draws each run once.</li>
+<li>Questions for you are at the bottom.</li></ul>
+</section>
+
+<!-- ============================== PART 1 ============================== -->
+<section class="card"><h2>1 · Spine and dendrite: where the EPSP is biggest</h2>
+<p class="muted">The Synapse page treats Post as one point. Here the synapse sits on a spine head, joined to the dendrite by a thin neck. Each part charges like the RC circuit of lesson 2, and the resistors between them filter the EPSP on its way to the soma.</p>
+<canvas id="p1pic"></canvas>
+<div class="bar"><button class="primary" id="p1fire">Fire synapse A</button>
+<label for="p1neck">Neck resistance</label><input type="range" id="p1neck" min="50" max="1000" step="10" value="300"><output id="p1necko"></output></div>
+<div class="charts">
+<div><p class="sect-title">Post: voltage at three places</p><canvas id="p1v"></canvas></div>
+<div><p class="sect-title">The same EPSPs, each scaled to its own peak</p><canvas id="p1n"></canvas></div></div>
+<div class="read" id="p1read"></div>
+<div class="look"><b>What to look for:</b> the EPSP in the spine head is several times bigger than at the soma, and the soma's EPSP peaks later and lasts longer (a low-pass filter). A thinner neck makes the head's EPSP bigger but barely changes the soma's. <i>How spatial and temporal summation work at the soma is in the Summation lesson.</i></div>
+</section>
+
+<!-- ============================== PART 2 ============================== -->
+<section class="card"><h2>2 · Ca²⁺ in the spine: NMDA receptors need two things at once</h2>
+<p class="muted">NMDA receptors open when glutamate binds, but at rest Mg²⁺ sits in the pore and blocks it. Depolarizing Post pushes the Mg²⁺ out. Only with both does much Ca²⁺ flow in, and the narrow neck keeps that Ca²⁺ in its own spine.</p>
+<canvas id="p2pic"></canvas>
+<div class="bar"><button data-p2="glu">Glutamate only</button><button data-p2="dep">Depolarize Post only</button><button data-p2="both" aria-pressed="true">Both together</button>
+<label><input type="checkbox" id="p2mg" checked> Mg²⁺ in the bath</label></div>
+<div class="charts">
+<div><p class="sect-title">Post: voltage in head A and the dendrite</p><canvas id="p2v"></canvas></div>
+<div><p class="sect-title">Ca²⁺ in each spine head</p><canvas id="p2c"></canvas></div></div>
+<div class="read" id="p2read"></div>
+<div class="look"><b>What to look for:</b> glutamate alone gives a small Ca²⁺ rise; depolarizing alone gives almost none; together they give many times more than the two added up. Spine B, on the same dendrite and depolarized just as much, gets almost no Ca²⁺. Take the Mg²⁺ out and glutamate alone is enough.</div>
+</section>
+
+<!-- ============================== PART 3 ============================== -->
+<section class="card"><h2>3 · LTP and LTD: the test pulse before and after</h2>
+<p class="muted">A small test pulse every 30 s measures the EPSP. Then one induction protocol, then the test pulses again for an hour. Spine B gets the test pulses but not the protocol, so it is the control.</p>
+<canvas id="p3pic"></canvas>
+<div class="bar"><button data-p3="tet" aria-pressed="true">Tetanus: 100 Hz for 1 s</button><button data-p3="lfs">Low-frequency: 1 Hz for 15 min</button><button data-p3="pair">Pairing: 1 Hz + depolarize, 100 pulses</button>
+<label><input type="checkbox" id="p3apv"> Block NMDA receptors (APV)</label>
+<button class="primary" id="p3run">Run</button><button id="p3reset">Reset</button></div>
+<div class="charts three">
+<div><p class="sect-title">Ca²⁺ in head A during induction</p><canvas id="p3c"></canvas></div>
+<div><p class="sect-title">Post: EPSP size, % of the start</p><canvas id="p3t"></canvas></div>
+<div><p class="sect-title">Post: test EPSP at the soma, before and after</p><canvas id="p3e"></canvas></div></div>
+<div class="read" id="p3read"></div>
+<div class="look"><b>What to look for:</b> the tetanus drives Ca²⁺ above the CaMKII level and the EPSP stays bigger for the whole hour (the first few minutes are extra big: post-tetanic potentiation, a presynaptic effect that fades). 1 Hz never gets Ca²⁺ that high, but 900 small rises let calcineurin build up, and the EPSP shrinks. Spine B does not change. With APV nothing changes, yet the test EPSP itself is the same size: it runs through AMPA receptors.</div>
+</section>
+
+<section class="card"><h2>Theory section (outline; each a toggle as on the other pages)</h2>
+<details><summary>The spine as an RC circuit with a resistor in front</summary><p class="muted">Lesson 2's membrane, three times over, joined by resistors. Current from the synapse charges the tiny head first (small C, so a big ΔV), then leaks through the neck into the dendrite and on to the soma, each step smoothing it. Note that the neck's real resistance is debated: estimates run from tens to hundreds of MΩ.</p></details>
+<details><summary>The Mg²⁺ block: a voltage-dependent plug</summary><p class="muted">The curve <code>mgFree(V)</code> from the Synapse page, drawn: about 4 % free at −70 mV, half free near −20 mV. Why this makes the receptor a coincidence detector.</p></details>
+<details><summary>Two enzymes read the Ca²⁺: CaMKII and calcineurin</summary><p class="muted">CaMKII needs a lot of Ca²⁺ and then adds AMPA receptors to the synapse. Calcineurin (a phosphatase) is switched on by a little Ca²⁺ and removes them. Why the same ion gives opposite results.</p></details>
+<details><summary>Early and late LTP</summary><p class="muted">The first hour: existing receptors moved in. Hours later: new protein, a bigger spine head (one paragraph; not modelled).</p></details>
+<details><summary>Where these ideas come from</summary><p class="muted">Bliss & Lømo (1973); Mg²⁺ block (Nowak et al., Mayer et al. 1984); Ca²⁺-level rule (Lisman 1989; Shouval, Bear & Cooper 2002); spine growth with LTP (Matsuzaki et al. 2004).</p></details>
+</section>
+
+<section class="card plan"><h2>Questions for you</h2><ul>
+<li>New page <code>plasticity.html</code> (recommended), or the second half of synapse.html?</li>
+<li>Part 1: keep it as a full part with its own picture and charts, or fold it into Part 2 as one slider (neck resistance) and a dendrite trace?</li>
+<li>Part 3's time axis: minutes (the classic figure, shown here) or a compressed "test pulse number"?</li>
+<li>Pairing as a third protocol, or leave it to Part 2 and keep Part 3 to tetanus vs 1 Hz?</li>
+</ul></section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
+let K = {};
+const readK = () => { for (const n of ['bath','cyto','post','mem','memdark','ca','nt','na','k','accent','ink','muted','pos','line','surface']) K[n] = css(n); };
+readK();
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const TAU = Math.PI * 2, dpr = devicePixelRatio || 1;
+function setup(cv, W, H) { cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.W = W; c.H = H; return c; }
+const hex = s => { s = s.replace('#', ''); return [0, 2, 4].map(i => parseInt(s.slice(i, i + 2), 16)); };
+const mix = (a, b, f) => { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * f)).join(',')})`; };
+const rnd = i => { const s = Math.sin(i * 12.9898) * 43758.5453; return s - Math.floor(s); };
+
+// ============================== MODEL START ==============================
+const E_L = -70, CH = 0.5, CD = 20, CS = 60, GDS = 2, G1 = 0.05;   // pF, nS; G1 = one receptor's peak conductance
+const mgFree = (V, mg) => 1 / (1 + mg / 3.57 * Math.exp(-0.062 * V));   // Jahr & Stevens (1990)
+const peakNorm = (tr, td) => { const tp = tr * td / (td - tr) * Math.log(td / tr); return 1 / (Math.exp(-tp / td) - Math.exp(-tp / tr)); };
+const NA = peakNorm(0.2, 2), NN = peakNorm(3, 60);
+// o: T, Rn (MΩ), glu [ms], dep [[from, to]], Vdep, nA, nN, mg, apv, sample (ms)
+function simSpine(o) {
+  const dt = 0.025, n = Math.round(o.T / dt), every = Math.round((o.sample || 0.1) / dt);
+  const gn = 1000 / o.Rn, gLh = CH / 20, gLd = CD / 20, gLs = CS / 20, tauNeck = 0.1 * o.Rn, kCa = 0.0006, kV = 0.0015;
+  let Vh = E_L, Vb = E_L, Vd = E_L, Vs = E_L, ca = 0, cb = 0, maxB = 0;
+  const r = { t: [], Vh: [], Vb: [], Vd: [], Vs: [], ca: [], cb: [] };
+  for (let i = 0; i <= n; i++) {
+    const t = i * dt;
+    let sA = 0, sN = 0;
+    for (const tg of o.glu) { const s = t - tg; if (s > 0) { sA += NA * (Math.exp(-s / 2) - Math.exp(-s / 0.2)); sN += NN * (Math.exp(-s / 60) - Math.exp(-s / 3)); } }
+    const gA = o.nA * G1 * sA, gN = o.apv ? 0 : o.nN * G1 * sN, B = o.mg ? mgFree(Vh, 1) : 1;
+    let gc = 0; for (const [a, b] of o.dep || []) if (t >= a && t < b) gc = 50;   // depolarize: hold the dendrite and soma near Vdep
+    let G = gLh + gn + gA + gN * B, Vi = (gLh * E_L + gn * Vd) / G; Vh = Vi + (Vh - Vi) * Math.exp(-dt * G / CH);
+    G = gLh + gn; Vi = (gLh * E_L + gn * Vd) / G; Vb = Vi + (Vb - Vi) * Math.exp(-dt * G / CH);
+    G = gLd + 2 * gn + GDS + gc; Vi = (gLd * E_L + gn * (Vh + Vb) + GDS * Vs + gc * o.Vdep) / G; Vd = Vi + (Vd - Vi) * Math.exp(-dt * G / CD);
+    G = gLs + GDS + gc; Vi = (gLs * E_L + GDS * Vd + gc * o.Vdep) / G; Vs = Vi + (Vs - Vi) * Math.exp(-dt * G / CS);
+    ca += dt * (kCa * gN * B * Math.max(0, 130 - Vh) * 100 + kV * Math.max(0, Vh + 30) - ca / 30 - ca / tauNeck);
+    cb += dt * (kV * Math.max(0, Vb + 30) - cb / 30 - cb / tauNeck);
+    if (gN > 0.01) maxB = Math.max(maxB, B);
+    if (i % every === 0) { r.t.push(t); r.Vh.push(Vh); r.Vb.push(Vb); r.Vd.push(Vd); r.Vs.push(Vs); r.ca.push(ca); r.cb.push(cb); }
+  }
+  r.maxB = maxB; return r;
+}
+// Part 3: induction protocols at 1 ms steps. Ca²⁺ per glutamate pulse depends on how far Post is depolarized (Mg²⁺ block).
+const TH_P = 3, KD_HALF = 0.5, P_TH = 0.1;   // CaMKII level, calcineurin half-on, calcineurin level that starts LTD
+function induce(proto, apv) {
+  const P = { tet: { f: 100, n: 100 }, lfs: { f: 1, n: 900 }, pair: { f: 1, n: 100, dep: true } }[proto];
+  const dt = 1, per = 1000 / P.f, Tend = P.n * per + 60000;
+  let V = E_L, ca = 0, cam = 0, cn = 0, D = 0, pulses = 0;
+  const win = proto === 'tet' ? 1500 : 5000, ct = [], cy = [];
+  for (let t = 0; t < Tend; t += dt) {
+    const onPulse = pulses < P.n && t >= pulses * per;
+    V += dt * (-(V - E_L) / 15);
+    if (onPulse) {
+      pulses++;
+      if (!P.dep) V = Math.min(-10, V + 10);
+      const Vp = P.dep ? -10 : V;
+      const a = 0.7 * mgFree(Vp, 1) / mgFree(E_L, 1) * (130 - Vp) / 200 * (apv ? 0.03 : 1);
+      ca += a;
+    }
+    ca -= dt * ca / 30;
+    cam += dt / 1000 * Math.max(0, ca - TH_P);
+    cn += dt / 1000 * (ca / (ca + KD_HALF) - cn / 10);
+    D += dt / 1000 * Math.max(0, cn - P_TH);
+    if (t < win && t % 5 === 0) { ct.push(t / 1000); cy.push(ca); }
+  }
+  return { dW: 0.25 * cam - 0.0015 * D, ct, cy, win: win / 1000, dur: P.n * per / 60000, ptp: proto === 'tet' && !apv ? 0.6 : 0 };
+}
+// ============================== MODEL END ==============================
+
+// ---------- the picture: soma, dendrite, two spines with their presynaptic bulbs ----------
+function drawSpines(c, s) {
+  const W = c.W, H = c.H, yD = H - 48, dh = 30;
+  const vcol = V => mix(K.cyto, K.pos, clamp((V + 70) / 40));
+  c.fillStyle = K.bath; c.fillRect(0, 0, W, H);
+  const mem = (path, w = 7) => { c.lineJoin = 'round'; c.lineWidth = w; c.strokeStyle = K.memdark; path(); c.stroke(); c.lineWidth = w * 0.4; c.strokeStyle = K.mem; path(); c.stroke(); };
+  // dendrite and soma
+  const dend = () => { c.beginPath(); c.roundRect(100, yD - dh / 2, W - 90, dh, dh / 2); };
+  c.fillStyle = vcol(s.Vd); dend(); c.fill(); mem(dend);
+  const soma = () => { c.beginPath(); c.arc(70, yD, 52, 0, TAU); };
+  c.fillStyle = vcol(s.Vs); soma(); c.fill(); mem(soma);
+  c.fillStyle = K.muted; c.font = '12px "IBM Plex Sans",sans-serif'; c.textAlign = 'center';
+  c.fillText('Soma', 70, yD + 4); c.textAlign = 'left'; c.fillText('Dendrite', W - 90, yD + 4);
+  const nw = clamp(15 - s.Rn / 75, 3, 14);
+  const spines = [{ x: W * 0.42, sc: s.headA, V: s.VhA, ca: s.caA, n: s.nA, lab: 'Spine A (stimulated)', glu: s.glu, mg: s.mgBlock },
+                  { x: W * 0.72, sc: s.headB, V: s.VhB, ca: s.caB, n: s.nB, lab: 'Spine B (neighbour)', glu: 0, mg: 1 }];
+  spines.forEach((sp, k) => {
+    const rx = 30 * sp.sc, ry = 22 * sp.sc, yh = yD - dh / 2 - 46 - ry * 0.4, top = yh - ry;
+    // neck + head as one outline
+    const shape = () => { c.beginPath(); c.moveTo(sp.x - nw / 2, yD - dh / 2 + 2); c.lineTo(sp.x - nw / 2, yh + ry * 0.7);
+      c.ellipse(sp.x, yh, rx, ry, 0, Math.PI * 0.5 + Math.asin(clamp(nw / 2 / rx)), Math.PI * 2.5 - Math.asin(clamp(nw / 2 / rx)));
+      c.lineTo(sp.x + nw / 2, yD - dh / 2 + 2); };
+    c.fillStyle = vcol(sp.V); shape(); c.fill(); mem(shape, 6);
+    c.fillStyle = vcol(s.Vd); c.fillRect(sp.x - nw / 2 + 2, yD - dh / 2 - 2, nw - 4, 8);   // open into the dendrite
+    // Ca²⁺ dots in the head
+    const nca = Math.round(clamp(sp.ca * 7, 0, 45));
+    c.fillStyle = K.ca;
+    for (let i = 0; i < nca; i++) { const a = rnd(i + k * 99) * TAU, rr = Math.sqrt(rnd(i * 3 + 7 + k)) * 0.75; c.beginPath(); c.arc(sp.x + Math.cos(a) * rx * rr, yh + Math.sin(a) * ry * rr, 2, 0, TAU); c.fill(); }
+    // receptors on the top of the head: AMPA (orange), two NMDA (gold, with a dark Mg²⁺ plug)
+    const nr = sp.n + 2;
+    for (let i = 0; i < nr; i++) {
+      const a = -Math.PI / 2 + (i - (nr - 1) / 2) * Math.min(0.16, 2.2 / nr), x = sp.x + Math.cos(a) * rx, y = yh + Math.sin(a) * ry;
+      const nm = i === 1 || i === nr - 2;
+      c.save(); c.translate(x, y); c.rotate(a + Math.PI / 2); c.fillStyle = nm ? K.ca : K.na; c.fillRect(-2.5, -5, 5, 10);
+      if (nm && Math.random() < sp.mg) { c.fillStyle = K.ink; c.beginPath(); c.arc(0, -6, 2.2, 0, TAU); c.fill(); }
+      c.restore();
+    }
+    // presynaptic bulb above
+    const by = top - 34;
+    const bulb = () => { c.beginPath(); c.ellipse(sp.x, by, 44, 22, 0, 0, TAU); };
+    c.strokeStyle = K.memdark; c.lineWidth = 7; c.beginPath(); c.moveTo(sp.x - 30, by - 12); c.quadraticCurveTo(sp.x - 70, by - 30, sp.x - 110, 0); c.stroke();
+    c.fillStyle = K.cyto; bulb(); c.fill(); mem(bulb, 6);
+    c.fillStyle = K.nt; for (let i = 0; i < 6; i++) { c.globalAlpha = 0.6; c.beginPath(); c.arc(sp.x - 25 + i * 10, by + (i % 2 ? 4 : -4), 4, 0, TAU); c.fill(); }
+    c.globalAlpha = 1;
+    for (let i = 0; i < Math.round(sp.glu * 14); i++) { c.beginPath(); c.arc(sp.x - 28 + rnd(i + 5) * 56, by + 24 + rnd(i + 50) * (top - by - 26), 1.8, 0, TAU); c.fill(); }
+    c.fillStyle = K.muted; c.textAlign = 'left'; c.fillText(sp.lab, sp.x + rx + 10, yh);
+    if (k === 0) c.fillText('Pre', sp.x + 50, by + 4);
+  });
+  // electrodes (Part 1)
+  if (s.elec) {
+    const tag = (x, y, t, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, 7, 0, TAU); c.fill(); c.fillStyle = K.surface; c.font = '600 10px "IBM Plex Sans",sans-serif'; c.textAlign = 'center'; c.fillText(t, x, y + 3.5); };
+    const yh = yD - dh / 2 - 46 - 22 * s.headA * 0.4;
+    tag(W * 0.42 - 30 * s.headA - 12, yh, 'H', K.pos); tag(W * 0.42 + 22, yD, 'D', K.na); tag(70, yD - 22, 'S', K.ink);
+  }
+  c.textAlign = 'left';
+}
+
+// ---------- a chart with fixed axes and tick values (the lessons' drawChart, trimmed) ----------
+function niceStep(span) { const p = Math.pow(10, Math.floor(Math.log10(span))), f = span / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+function chart(c, o) {
+  const W = c.W, H = c.H, L = 50, R = o.r || 78, T = 10, B = 34, pw = W - L - R, ph = H - T - B;
+  const sx = x => L + (x - o.x0) / (o.x1 - o.x0) * pw, sy = v => T + (o.y1 - clamp(v, o.y0, o.y1)) / (o.y1 - o.y0) * ph;
+  c.fillStyle = K.surface; c.fillRect(0, 0, W, H);
+  for (const [a, b] of o.shade || []) { c.fillStyle = K.na; c.globalAlpha = 0.12; c.fillRect(sx(a), T, Math.max(3, sx(b) - sx(a)), ph); c.globalAlpha = 1; }
+  c.font = '11px "IBM Plex Mono",monospace'; c.textBaseline = 'middle'; c.textAlign = 'right';
+  const st = niceStep((o.y1 - o.y0) / 5);
+  for (let v = Math.ceil(o.y0 / st) * st; v <= o.y1 + 1e-9; v += st) { const y = sy(v); c.strokeStyle = K.line; c.lineWidth = 0.8; c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke(); c.fillStyle = K.muted; c.fillText(+v.toPrecision(4) + '', L - 5, y); }
+  c.save(); c.translate(12, T + ph / 2); c.rotate(-Math.PI / 2); c.textAlign = 'center'; c.fillText(o.ylabel, 0, 0); c.restore();
+  const xs = niceStep((o.x1 - o.x0) / 6); c.textAlign = 'center'; c.textBaseline = 'top';
+  for (let v = Math.ceil(o.x0 / xs) * xs; v <= o.x1 + 1e-9; v += xs) { const x = sx(v); c.strokeStyle = K.line; c.beginPath(); c.moveTo(x, T + ph); c.lineTo(x, T + ph + 4); c.stroke(); c.fillText((v < 0 ? '−' : '') + Math.abs(+v.toPrecision(4)), x, T + ph + 6); }
+  c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillText(o.xlabel, L, H - 8);
+  const labels = [];
+  for (const r of o.refs || []) { const y = sy(r.v); c.strokeStyle = r.color; c.lineWidth = 1.2; c.setLineDash([6, 4]); c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke(); c.setLineDash([]); labels.push({ y, t: r.label, c: r.color }); }
+  c.save(); c.beginPath(); c.rect(L, T, pw, ph); c.clip();
+  for (const s of o.series) {
+    const n = s.n ?? s.xs.length; if (n < 1) continue;
+    c.strokeStyle = c.fillStyle = s.color; c.lineWidth = s.width || 2; c.setLineDash(s.dash || []);
+    if (s.dots) { for (let i = 0; i < n; i++) { c.beginPath(); c.arc(sx(s.xs[i]), sy(s.ys[i]), 2.6, 0, TAU); c.fill(); } }
+    else { c.beginPath(); for (let i = 0; i < n; i++) i ? c.lineTo(sx(s.xs[i]), sy(s.ys[i])) : c.moveTo(sx(s.xs[i]), sy(s.ys[i])); c.stroke(); }
+    c.setLineDash([]);
+    if (s.label) labels.push({ y: sy(s.ys[n - 1]), t: s.label, c: s.color });
+  }
+  c.restore();
+  labels.sort((a, b) => a.y - b.y); for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
+  c.font = '600 11px "IBM Plex Sans",sans-serif'; labels.forEach(l => { c.fillStyle = l.c; c.fillText(l.t, L + pw + 5, clamp(l.y, T + 4, H - 6)); });
+  c.strokeStyle = K.line; c.lineWidth = 1; c.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1); c.textBaseline = 'alphabetic';
+}
+
+// ============================== PART 1 ==============================
+const p1 = { pic: setup($('p1pic'), 900, 250), v: setup($('p1v'), 440, 230), n: setup($('p1n'), 440, 230), Rn: 300, r: null, t: -1 };
+function p1run() { p1.r = simSpine({ T: 40, Rn: p1.Rn, glu: [2], nA: 10, nN: 2, mg: true, Vdep: E_L }); p1.t = 0; p1anim(); }
+function p1anim() {
+  const r = p1.r, n = Math.min(r.t.length, Math.round(p1.t / 0.1) + 1), i = n - 1;
+  drawSpines(p1.pic, { Rn: p1.Rn, VhA: r.Vh[i], VhB: r.Vb[i], Vd: r.Vd[i], Vs: r.Vs[i], caA: 0, caB: 0, nA: 10, nB: 10, headA: 1, headB: 1, glu: clamp(1 - r.t[i] / 6) * (r.t[i] > 2), mgBlock: 1, elec: true });
+  const S = [['Vh', K.pos, 'Head'], ['Vd', K.na, 'Dendrite'], ['Vs', K.ink, 'Soma']];
+  chart(p1.v, { x0: 0, x1: 40, y0: -72, y1: -40, xlabel: 'ms', ylabel: 'mV', series: S.map(([k, col, lab]) => ({ xs: r.t, ys: r[k], n, color: col, label: lab })) });
+  const pk = S.map(([k]) => { let m = 0, at = 0; r[k].forEach((v, j) => { if (v - E_L > m) { m = v - E_L; at = r.t[j]; } }); return [m, at]; });
+  chart(p1.n, { x0: 0, x1: 40, y0: -0.1, y1: 1.1, xlabel: 'ms', ylabel: 'fraction of peak', series: S.map(([k, col, lab], j) => ({ xs: r.t, ys: r[k].map(v => (v - E_L) / pk[j][0]), n, color: col, label: lab })) });
+  if (n === r.t.length) $('p1read').textContent = S.map(([, , lab], j) => `${lab}: +${pk[j][0].toFixed(1)} mV, peak at ${(pk[j][1] - 2).toFixed(1)} ms`).join('   ·   ');
+  if (n < r.t.length) { p1.t += 0.35; requestAnimationFrame(p1anim); }
+}
+$('p1neck').addEventListener('input', e => { p1.Rn = +e.target.value; $('p1necko').textContent = p1.Rn + ' MΩ'; p1run(); });
+$('p1necko').textContent = p1.Rn + ' MΩ'; $('p1fire').onclick = p1run;
+
+// ============================== PART 2 ==============================
+const p2 = { pic: setup($('p2pic'), 900, 250), v: setup($('p2v'), 440, 230), c: setup($('p2c'), 440, 230), mode: 'both', t: 0 };
+function p2run() {
+  const m = p2.mode, mg = $('p2mg').checked;
+  p2.r = simSpine({ T: 150, Rn: 300, glu: m === 'dep' ? [] : [10], dep: m === 'glu' ? [] : [[5, 85]], Vdep: -10, nA: 10, nN: 2, mg, sample: 0.5 });
+  p2.t = 0; p2anim();
+}
+function p2anim() {
+  const r = p2.r, n = Math.min(r.t.length, Math.round(p2.t / 0.5) + 1), i = n - 1;
+  const mgB = $('p2mg').checked ? 1 - mgFree(r.Vh[i], 1) : 0;
+  drawSpines(p2.pic, { Rn: 300, VhA: r.Vh[i], VhB: r.Vb[i], Vd: r.Vd[i], Vs: r.Vs[i], caA: r.ca[i], caB: r.cb[i], nA: 10, nB: 10, headA: 1, headB: 1, glu: p2.mode === 'dep' ? 0 : clamp(1 - (r.t[i] - 10) / 30) * (r.t[i] > 10), mgBlock: mgB });
+  chart(p2.v, { x0: 0, x1: 150, y0: -75, y1: 10, xlabel: 'ms', ylabel: 'mV', series: [{ xs: r.t, ys: r.Vh, n, color: K.pos, label: 'Head A' }, { xs: r.t, ys: r.Vd, n, color: K.na, label: 'Dendrite', dash: [5, 4], width: 1.6 }] });
+  chart(p2.c, { x0: 0, x1: 150, y0: 0, y1: 14, xlabel: 'ms', ylabel: 'Ca²⁺ (µM, rough)', r: 96,
+    refs: [{ v: TH_P, color: K.accent, label: 'CaMKII level' }, { v: KD_HALF, color: K.k, label: 'calcineurin' }],
+    series: [{ xs: r.t, ys: r.ca, n, color: K.ca, label: 'Spine A' }, { xs: r.t, ys: r.cb, n, color: K.k, label: 'Spine B', dash: [5, 4] }] });
+  if (n === r.t.length) $('p2read').textContent = `Peak Ca²⁺: spine A ${Math.max(...r.ca).toFixed(2)}, spine B ${Math.max(...r.cb).toFixed(2)} µM   ·   NMDA receptors at most ${Math.round(r.maxB * 100)}% free of Mg²⁺`;
+  if (n < r.t.length) { p2.t += 2; requestAnimationFrame(p2anim); }
+}
+document.querySelectorAll('[data-p2]').forEach(b => b.onclick = () => { document.querySelectorAll('[data-p2]').forEach(x => x.setAttribute('aria-pressed', x === b)); p2.mode = b.dataset.p2; p2run(); });
+$('p2mg').onchange = p2run;
+
+// ============================== PART 3 ==============================
+const p3 = { pic: setup($('p3pic'), 900, 250), c: setup($('p3c'), 300, 230), t: setup($('p3t'), 300, 230), e: setup($('p3e'), 300, 230), proto: 'tet', w0: 1, w: 1, res: null, f: 1 };
+const testEPSP = w => simSpine({ T: 40, Rn: 300, glu: [2], nA: Math.round(10 * w), nN: 2, mg: true, Vdep: E_L, sample: 0.2 });
+function p3draw() {
+  const R = p3.res, f = p3.f, w = R ? p3.w0 + (p3.w - p3.w0) * clamp((f - 0.15) / 0.3) : p3.w;
+  drawSpines(p3.pic, { Rn: 300, VhA: E_L, VhB: E_L, Vd: E_L, Vs: E_L, caA: R && f < 0.15 ? 6 * (R.dW > 0 ? 1 : 0.15) : 0, caB: 0, nA: Math.round(10 * w), nB: 10, headA: Math.sqrt(clamp(w, 0.6, 2)) * (w > 1 ? 1 : 1), headB: 1, glu: R && f < 0.15 ? 0.6 : 0, mgBlock: 1 });
+  // Ca²⁺ during induction
+  if (R) { const n = Math.round(R.ct.length * clamp(f / 0.15));
+    chart(p3.c, { x0: 0, x1: R.win, y0: 0, y1: 12, xlabel: 's from the start of induction', ylabel: 'Ca²⁺ (µM)', r: 70,
+      refs: [{ v: TH_P, color: K.accent, label: 'CaMKII' }, { v: KD_HALF, color: K.k, label: 'calcineurin' }], series: [{ xs: R.ct, ys: R.cy, n, color: K.ca, width: 1.4 }] }); }
+  else chart(p3.c, { x0: 0, x1: 1.5, y0: 0, y1: 12, xlabel: 's from the start of induction', ylabel: 'Ca²⁺ (µM)', r: 70, refs: [{ v: TH_P, color: K.accent, label: 'CaMKII' }, { v: KD_HALF, color: K.k, label: 'calcineurin' }], series: [] });
+  // EPSP size over an hour: a test pulse every 30 s, none during induction
+  const xs = [], ya = [], yb = [], dur = R ? Math.max(R.dur, 0.02) : 0;
+  for (let t = -10; t <= 60; t += 0.5) {
+    if (t >= 0 && t < dur) continue;
+    const after = t >= dur && R, ptp = after ? R.ptp * Math.exp(-(t - dur) / 3) : 0;
+    xs.push(t); ya.push(100 * (after ? p3.w * (1 + ptp) : p3.w0) * (1 + 0.04 * (rnd(t * 7) - 0.5))); yb.push(100 * (1 + 0.04 * (rnd(t * 11) - 0.5)));
+  }
+  const nt = R ? Math.round(xs.length * clamp((f - 0.1) / 0.9)) : xs.findIndex(x => x > 0);
+  chart(p3.t, { x0: -10, x1: 60, y0: 0, y1: 250, xlabel: 'min', ylabel: '% of start', r: 64, shade: R ? [[0, dur]] : [], refs: [{ v: 100, color: K.line, label: '' }],
+    series: [{ xs, ys: yb, n: nt, color: K.k, dots: true, label: 'Spine B' }, { xs, ys: ya, n: nt, color: K.pos, dots: true, label: 'Spine A' }] });
+  // test EPSP before and after (at the soma)
+  const b = p3.before, a = R && f > 0.5 ? p3.after : null;
+  chart(p3.e, { x0: 0, x1: 40, y0: -70.5, y1: -68, xlabel: 'ms', ylabel: 'mV', r: 56,
+    series: [{ xs: b.t, ys: b.Vs, color: K.muted, label: 'before', width: 1.6 }].concat(a ? [{ xs: a.t, ys: a.Vs, color: K.pos, label: 'after' }] : []) });
+  if (R && f >= 1) $('p3read').textContent = `AMPA receptors in spine A: ${Math.round(10 * p3.w0)} → ${Math.round(10 * p3.w)}   ·   EPSP 1 h later: ${Math.round(100 * p3.w)}% of the start (spine B: 100%)`;
+}
+function p3run() {
+  p3.w0 = p3.w; p3.res = induce(p3.proto, $('p3apv').checked);
+  p3.w = clamp(p3.w0 + p3.res.dW, 0.4, 2.2); p3.before = testEPSP(p3.w0); p3.after = testEPSP(p3.w); p3.f = 0;
+  const t0 = performance.now(), step = now => { p3.f = clamp((now - t0) / 3500); p3draw(); if (p3.f < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+document.querySelectorAll('[data-p3]').forEach(b => b.onclick = () => { document.querySelectorAll('[data-p3]').forEach(x => x.setAttribute('aria-pressed', x === b)); p3.proto = b.dataset.p3; });
+$('p3run').onclick = p3run;
+$('p3reset').onclick = () => { p3.w = p3.w0 = 1; p3.res = null; p3.before = testEPSP(1); $('p3read').textContent = ''; p3draw(); };
+
+p1run(); p2run(); p3.before = testEPSP(1); p3draw();
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => { readK(); p1run(); p2run(); p3draw(); });
+</script>
+</body></html>

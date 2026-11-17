@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conduction velocity calculator (mockup)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --ink:#1c2220; --muted:#5b6662; --line:#d6dcd8; --accent:#0d6b7c;
+  --k:#6b3fb8; --na:#d07a1f; --cl:#2e8b57; --pos:#d1373f; --neg:#2861c8;
+  --font-body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif; --font-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+  --k:#a88cf2; --na:#f0a350; --cl:#5fc98d; --pos:#f0646b; --neg:#6b9cf2; color-scheme:dark;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--font-body);padding:24px 16px 48px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.note{border:1px dashed var(--accent);border-radius:10px;padding:10px 14px;font-size:13.5px;background:var(--surface)}
+.note b{color:var(--accent)}
+.note ul{margin:4px 0 0;padding-left:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.sect-title{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.caption{font-size:13.5px;color:var(--muted);margin:0}
+.calc-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:24px;align-items:start}
+@media (max-width:900px){.calc-body{grid-template-columns:1fr}}
+.gion{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.gion:first-child{border-top:0;padding-top:0}
+.gh{font-weight:600;font-size:14px}
+.gr{display:grid;grid-template-columns:70px minmax(0,1fr) 110px;align-items:center;gap:10px;font-size:14px}
+.gr output{font-family:var(--font-mono);font-size:13px;text-align:right}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 13px var(--font-body);padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.chip[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.out{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.big{font-family:var(--font-mono);font-size:40px;font-weight:500;letter-spacing:-.02em}
+.es{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--muted)}
+.es b{font-family:var(--font-mono);font-weight:500;color:var(--ink)}
+.gformula{font-family:var(--font-mono);font-size:13px;line-height:1.7;padding:8px 12px;border-radius:8px;background:var(--bg)}
+.gformula .res{color:var(--accent);font-weight:500}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
+.tabs button{border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);font:500 14px var(--font-body);padding:8px 14px;margin-bottom:-1px;cursor:pointer}
+.tabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+[role=tabpanel][hidden]{display:none}
+canvas{display:block;width:100%;height:auto;border-radius:6px}
+#cvD{max-width:560px;margin:0 auto}
+.help ul{margin:0;padding-left:18px;font-size:13.5px}
+.help li{margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note"><b>Mockup:</b> a conduction-velocity calculator to replace the Cable calculator on the action potential page.
+    <ul>
+      <li>The headline is the speed. λ and τ stay, but as the reasons, in the small print.</li>
+      <li><b>Speed against diameter</b> (square, log–log): the bare axon's √d line against the myelinated axon's straight-d line, with real fibre types as boxes. The dotted line shows how wide a bare axon would have to be to keep up.</li>
+      <li><b>The trip:</b> how long the spike takes to travel a distance you set. For example, stub your toe and the sharp pain arrives about a second before the burning one.</li>
+      <li>The constants here are fitted to the page's own simulation: 12 µm gives 80 m/s myelinated and 7 m/s bare, and 1 µm bare gives 2 m/s. The real version would take them from the model. The effect of the number of myelin wraps is a placeholder.</li>
+    </ul>
+  </div>
+
+  <section class="card" id="cv-calc">
+    <span class="sect-title">Conduction velocity calculator</span>
+    <p class="caption">How fast a spike travels along an axon, and why: wider axons and myelin both let current spread farther ahead of the spike, so the next patch reaches threshold sooner.</p>
+    <div class="calc-body">
+      <div>
+        <div class="gion">
+          <div class="gh">The axon</div>
+          <div class="gr"><label for="cD">Diameter</label><input type="range" id="cD" min="-1" max="3" step="0.01" value="1.08"><output id="cDo"></output></div>
+          <div class="gr"><label for="cW">Myelin</label><input type="range" id="cW" min="0" max="200" step="1" value="100"><output id="cWo"></output></div>
+          <span class="caption">0 wraps: a bare axon. The spike then moves continuously instead of jumping from node to node.</span>
+        </div>
+        <div class="gion">
+          <div class="gh">The trip</div>
+          <div class="gr"><label for="cL">Distance</label><input type="range" id="cL" min="-2" max="0.3" step="0.01" value="0"><output id="cLo"></output></div>
+          <span class="caption">1 m is about spinal cord to foot; 10 cm, elbow to fingertip.</span>
+        </div>
+        <div class="gion">
+          <div class="gh">Real fibres</div>
+          <div class="chips" role="group" aria-label="Real fibres">
+            <button class="chip" data-p="12,100" aria-pressed="true">Motor axon (Aα)</button>
+            <button class="chip" data-p="9,80" aria-pressed="false">Touch (Aβ)</button>
+            <button class="chip" data-p="3,40" aria-pressed="false">Sharp pain (Aδ)</button>
+            <button class="chip" data-p="1,0" aria-pressed="false">Burning pain (C)</button>
+            <button class="chip" data-p="476,0" aria-pressed="false">Squid giant axon</button>
+          </div>
+          <div class="chips"><button class="chip" id="cSim">Copy from the simulation</button></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="out"><span class="big" id="cV">—</span><span class="caption">conduction velocity</span></div>
+        <div class="es"><span>the trip takes <b id="cT">—</b></span><span>a bare axon this fast would be <b id="cEq">—</b> wide</span><span>λ <b id="cLam">—</b></span><span>τ <b id="cTau">—</b></span></div>
+        <div class="gformula" id="cF"></div>
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="d">Speed against diameter</button>
+          <button role="tab" aria-selected="false" data-tab="t">The trip</button>
+          <button role="tab" aria-selected="false" data-tab="h">How to read</button>
+        </div>
+        <div role="tabpanel" id="pane-d"><canvas id="cvD"></canvas></div>
+        <div role="tabpanel" id="pane-t" hidden><canvas id="cvT"></canvas></div>
+        <div role="tabpanel" id="pane-h" class="help" hidden>
+          <ul>
+            <li><b>Speed against diameter:</b> both axes go up in factors of 10. The dashed line is a bare axon: its speed grows with the square root of the diameter, so four times wider is only twice as fast. The solid line is a myelinated axon: twice as wide is twice as fast. The boxes are real fibre types, with their range of diameters and speeds. The dot is the axon you set.</li>
+            <li><b>The dotted line</b> runs from your axon across to the bare line. Where it lands is how wide a bare axon would need to be to go as fast. For a 12 µm myelinated motor axon that is over a millimetre: that is why vertebrates myelinate, and why the squid made one giant axon instead.</li>
+            <li><b>The trip:</b> how long each kind of fibre takes to carry a spike over the distance set.</li>
+          </ul>
+        </div>
+        <p class="caption" id="cCap"></p>
+      </div>
+    </div>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const col = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+const setup = (cv, w, h) => { cv.width = w * dpr; cv.height = h * dpr; const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); return c; };
+// fitted to the page's simulation: bare 12 µm → 7 m/s and 1 µm → 2 m/s (v ∝ √d); myelinated 12 µm, 100 wraps → 80 m/s (v ∝ d)
+const KB = 2.02, KM = 6.7;
+const wrapF = w => (w / (w + 15)) * (115 / 100);   // placeholder: thinner myelin, a little slower; 1 at 100 wraps
+const vBare = d => KB * Math.sqrt(d), vMy = (d, w) => KM * d * wrapF(w);
+const speed = (d, w) => w > 0 ? Math.max(vBare(d), vMy(d, w)) : vBare(d);
+const REF = [   // real fibres: diameter range (µm), speed range (m/s), myelinated, a typical speed
+  { name: 'C', what: 'burning pain', d: [0.4, 1.2], v: [0.5, 2], my: false, mid: 1 },
+  { name: 'Aδ', what: 'sharp pain', d: [2, 5], v: [5, 30], my: true, mid: 15 },
+  { name: 'Aβ', what: 'touch', d: [6, 12], v: [35, 75], my: true, mid: 55 },
+  { name: 'Aα', what: 'muscle', d: [12, 20], v: [70, 120], my: true, mid: 95 },
+  { name: 'squid', what: 'giant axon, 18 °C', d: [400, 600], v: [18, 25], my: false, mid: 21 },
+];
+const fmtD = d => d >= 1000 ? (d / 1000).toFixed(1) + ' mm' : d >= 10 ? d.toFixed(0) + ' µm' : d.toFixed(1) + ' µm';
+const fmtV = v => v >= 10 ? v.toFixed(0) + ' m/s' : v.toFixed(1) + ' m/s';
+const fmtT = t => t >= 1000 ? (t / 1000).toFixed(2) + ' s' : t >= 10 ? t.toFixed(0) + ' ms' : t.toFixed(1) + ' ms';
+const fmtL = m => m >= 1 ? m.toFixed(2) + ' m' : (m * 100).toFixed(m >= 0.1 ? 0 : 1) + ' cm';
+
+// ---------- speed against diameter: log–log, a square plot ----------
+const DW = 560, ML = 62, MR = 120, MT = 14, MB = 42, DH = DW - ML - MR + MT + MB, PS = DW - ML - MR;
+const dc = setup($('cvD'), DW, DH);
+const X0 = -1, X1 = 3, Y0 = -1, Y1 = Math.log10(300);
+const sx = d => ML + (Math.log10(d) - X0) / (X1 - X0) * PS, sy = v => MT + (Y1 - Math.log10(v)) / (Y1 - Y0) * PS;
+function drawD(d, w, v) {
+  const c = dc; c.fillStyle = col('surface'); c.fillRect(0, 0, DW, DH);
+  c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle';
+  for (let e = X0; e <= X1; e++) { const x = sx(10 ** e); c.strokeStyle = col('line'); c.lineWidth = 0.8; c.beginPath(); c.moveTo(x, MT); c.lineTo(x, MT + PS); c.stroke();
+    c.fillStyle = col('muted'); c.textAlign = 'center'; c.fillText(String(10 ** e), x, MT + PS + 12); }
+  for (const v0 of [0.1, 1, 10, 100]) { const y = sy(v0); c.strokeStyle = col('line'); c.beginPath(); c.moveTo(ML, y); c.lineTo(ML + PS, y); c.stroke();
+    c.fillStyle = col('muted'); c.textAlign = 'right'; c.fillText(String(v0), ML - 6, y); }
+  c.textAlign = 'left'; c.fillText('diameter (µm)', ML, DH - 9);
+  c.save(); c.translate(14, MT + PS / 2); c.rotate(-Math.PI / 2); c.textAlign = 'center'; c.fillText('conduction velocity (m/s)', 0, 0); c.restore();
+  c.save(); c.beginPath(); c.rect(ML, MT, PS, PS); c.clip();
+  // real fibres
+  c.font = '600 11px "IBM Plex Sans", sans-serif';
+  for (const r of REF) {
+    const x0 = sx(r.d[0]), x1 = sx(r.d[1]), y0 = sy(r.v[1]), y1 = sy(r.v[0]);
+    c.fillStyle = r.my ? col('accent') : col('na'); c.globalAlpha = 0.14; c.fillRect(x0, y0, x1 - x0, y1 - y0); c.globalAlpha = 1;
+    c.strokeStyle = r.my ? col('accent') : col('na'); c.lineWidth = 1; c.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, y1 - y0 - 1);
+    c.fillStyle = r.my ? col('accent') : col('na'); c.textAlign = r.name === 'squid' ? 'right' : 'left';
+    c.fillText(r.name, r.name === 'squid' ? x0 - 4 : x1 + 4, (y0 + y1) / 2);
+  }
+  // the two laws
+  const line = (f, color, dash, width) => { c.strokeStyle = color; c.lineWidth = width; c.setLineDash(dash); c.beginPath();
+    for (let k = 0; k <= 200; k++) { const dd = 10 ** (X0 + (X1 - X0) * k / 200), x = sx(dd), y = sy(f(dd)); k ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); c.setLineDash([]); };
+  line(vBare, col('muted'), [6, 4], 2);
+  line(dd => vMy(dd, w > 0 ? w : 100), col('ink'), w > 0 ? [] : [2, 3], 2.4);
+  // how wide a bare axon would need to be to keep up
+  const dEq = (v / KB) ** 2;
+  if (w > 0 && dEq > d * 1.05) { c.strokeStyle = col('pos'); c.lineWidth = 1.4; c.setLineDash([2, 3]); c.beginPath(); c.moveTo(sx(d), sy(v)); c.lineTo(sx(Math.min(dEq, 10 ** X1)), sy(v)); c.stroke(); c.setLineDash([]);
+    if (dEq < 10 ** X1) { c.fillStyle = col('pos'); c.beginPath(); c.arc(sx(dEq), sy(v), 3.5, 0, 6.283); c.fill(); } }
+  // this axon
+  c.fillStyle = col('ink'); c.beginPath(); c.arc(sx(d), sy(v), 5, 0, 6.283); c.fill();
+  c.strokeStyle = col('surface'); c.lineWidth = 2; c.stroke();
+  c.restore();
+  c.strokeStyle = col('line'); c.lineWidth = 1; c.strokeRect(ML + 0.5, MT + 0.5, PS - 1, PS - 1);
+  // the lines' names, beside them
+  c.font = '600 11.5px "IBM Plex Sans", sans-serif'; c.textAlign = 'right';
+  c.fillStyle = col('ink'); c.fillText('myelinated: v ∝ d', sx(25) - 6, sy(vMy(25, w > 0 ? w : 100)) - 4);
+  c.textAlign = 'left'; c.fillStyle = col('muted'); c.fillText('bare: v ∝ √d', sx(60), sy(vBare(60)) + 14);
+  // where the dotted line lands, in the margin
+  c.fillStyle = col('pos'); if (w > 0 && dEq > d * 1.05) { c.fillText('bare,', ML + PS + 6, sy(v) - 7); c.fillText('as fast', ML + PS + 6, sy(v) + 7); }
+}
+
+// ---------- the trip: how long each fibre takes ----------
+const TW = 560, TH = 250, tc = setup($('cvT'), TW, TH);
+function drawT(v, L) {
+  const c = tc, rows = [{ name: 'your axon', v, me: true }, ...REF.filter(r => r.name !== 'squid').reverse().map(r => ({ name: `${r.name} (${r.what})`, v: r.mid }))];
+  const tMax = Math.max(...rows.map(r => L / r.v * 1000)) * 1.18, LL = 150, RR = 20, T = 12, B = 34, pw = TW - LL - RR, rh = (TH - T - B) / rows.length;
+  c.fillStyle = col('surface'); c.fillRect(0, 0, TW, TH);
+  c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle';
+  const step = (s => { const p = 10 ** Math.floor(Math.log10(s)), f = s / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; })(tMax / 5);
+  for (let t = 0; t <= tMax; t += step) { const x = LL + t / tMax * pw; c.strokeStyle = col('line'); c.lineWidth = 0.8; c.beginPath(); c.moveTo(x, T); c.lineTo(x, TH - B); c.stroke();
+    c.fillStyle = col('muted'); c.textAlign = 'center'; c.fillText(fmtT(t), x, TH - B + 12); }
+  c.textAlign = 'left'; c.fillText(`time to travel ${fmtL(L)}`, LL, TH - 8);
+  rows.forEach((r, k) => {
+    const t = L / r.v * 1000, y = T + k * rh + rh / 2, x1 = LL + t / tMax * pw;
+    c.font = (r.me ? '600 ' : '500 ') + '12.5px "IBM Plex Sans", sans-serif'; c.fillStyle = r.me ? col('accent') : col('ink'); c.textAlign = 'right'; c.fillText(r.name, LL - 8, y);
+    c.fillStyle = r.me ? col('accent') : col('muted'); c.globalAlpha = r.me ? 1 : 0.55; c.fillRect(LL, y - rh * 0.28, Math.max(2, x1 - LL), rh * 0.56); c.globalAlpha = 1;
+    c.font = '11px "IBM Plex Mono", monospace'; c.fillStyle = col('ink'); c.textAlign = 'left'; c.fillText(fmtT(t), Math.min(x1 + 5, TW - 52), y);
+  });
+}
+
+// ---------- the numbers ----------
+function update() {
+  const d = 10 ** +$('cD').value, w = +$('cW').value, L = 10 ** +$('cL').value, v = speed(d, w), t = L / v * 1000, dEq = (v / KB) ** 2;
+  $('cDo').textContent = fmtD(d); $('cWo').textContent = w ? w + ' wraps' : 'none'; $('cLo').textContent = fmtL(L);
+  $('cV').textContent = fmtV(v); $('cT').textContent = fmtT(t);
+  $('cEq').textContent = w > 0 ? fmtD(dEq) : '—';
+  // λ and τ, as in the current calculator (R_i 35 Ω·cm, g_m 0.4 mS/cm², C_m 1 µF/cm²; myelin divides g_m and C_m by 2 × wraps)
+  const cut = w > 0 ? 1 / (2 * w) : 1, g = 0.4 * cut, lam = Math.sqrt(d * 1e-4 / (4 * 35 * g * 1e-3)) * 10;
+  $('cLam').textContent = lam >= 1 ? lam.toFixed(1) + ' mm' : (lam * 1000).toFixed(0) + ' µm'; $('cTau').textContent = (1 / 0.4).toFixed(1) + ' ms';
+  $('cF').innerHTML = (w > 0
+    ? `myelinated: v ≈ ${KM} m/s × d / 1 µm = ${KM} × ${d.toPrecision(3)} = <span class="res">${fmtV(v)}</span><br>`
+    : `bare: v ≈ ${KB} m/s × √(d / 1 µm) = ${KB} × √${d.toPrecision(3)} = <span class="res">${fmtV(v)}</span><br>`) +
+    `time = distance / v = ${fmtL(L)} / ${fmtV(v)} = <span class="res">${fmtT(t)}</span>`;
+  $('cCap').innerHTML = w > 0
+    ? `Myelin makes this ${fmtD(d)} axon ${(v / vBare(d)).toFixed(0)} times faster than it would be bare. To go as fast without myelin, an axon would have to be ${fmtD(dEq)} wide.`
+    : `A bare axon: four times wider is only twice as fast. Wrapped in myelin, the same ${fmtD(d)} axon would carry the spike at about ${fmtV(vMy(d, 100))}.`;
+  drawD(d, w, v); drawT(v, L);
+}
+['cD', 'cW', 'cL'].forEach(id => $(id).addEventListener('input', () => { document.querySelectorAll('[data-p]').forEach(b => b.setAttribute('aria-pressed', 'false')); update(); }));
+document.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', () => {
+  const [d, w] = b.dataset.p.split(',').map(Number); $('cD').value = Math.log10(d); $('cW').value = w; update();
+  document.querySelectorAll('[data-p]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
+$('cSim').addEventListener('click', () => document.querySelector('[data-p="12,100"]').click());
+document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-tab]').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+  ['d', 't', 'h'].forEach(k => $('pane-' + k).hidden = k !== b.dataset.tab);
+}));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', update);
+update();
+</script>
+</body>
+</html>

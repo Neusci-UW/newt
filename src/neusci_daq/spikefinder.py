@@ -37,6 +37,10 @@ class SpikeFinder(View):
 
         box = QtWidgets.QGroupBox("Find action potentials")
         v = QtWidgets.QVBoxLayout(box)
+        self.identify = QtWidgets.QCheckBox("Identify Spikes")
+        self.identify.setToolTip("Find action potentials in every ticked trial, and again as you change a "
+                                 "setting. Unticked, none are found")
+        v.addWidget(self.identify)
         self.btn_find = QtWidgets.QPushButton("Find again")
         self.btn_find.setObjectName("start")
         self.btn_find.setToolTip("Action potentials are found by themselves in every ticked trial, as you tick "
@@ -141,6 +145,7 @@ class SpikeFinder(View):
         left.addLayout(exports)
 
         self.channel.currentIndexChanged.connect(lambda *_: self.settings_changed())
+        self.identify.toggled.connect(self._identify_toggled)
         self.btn_find.clicked.connect(self._find_pressed)
         self.btn_clear.clicked.connect(self.clear)
         self.btn_export.clicked.connect(self._export_dialog)
@@ -156,7 +161,7 @@ class SpikeFinder(View):
         for w in (self.dead, self.pre, self.post, self.bip_frac, self.bip_ms):
             w.valueChanged.connect(lambda *_: self._detection_changed())
         self.biphasic.toggled.connect(lambda *_: self._detection_changed())
-        self._paused = False                      # Clear stops searching again until the next Find
+        self._paused = True                       # no searching until Identify Spikes is ticked (or Find again)
         self._memo: dict = {}                     # each trial's noise and events, kept between searches
         self._last: A.Events | None = None        # the last spikes found, to keep their units' numbers
         self._done: set[int] = set()              # the trials the spikes found are from
@@ -169,6 +174,7 @@ class SpikeFinder(View):
                 "biphasic": self.biphasic.isChecked(), "bip_frac": self.bip_frac.value(), "bip_ms": self.bip_ms.value(),
                 "dead": self.dead.value(), "pre": self.pre.value(), "post": self.post.value(),
                 "units": self.units.currentIndex(), "unticked": sorted(self._unticked),
+                "identify": self.identify.isChecked(),
                 "colors": {str(u): c for u, c in self.unit_colors.items()},
                 "opacity": {str(u): o for u, o in self.unit_opacity.items()}}
 
@@ -190,6 +196,7 @@ class SpikeFinder(View):
             w.setValue(state[key])
         for w in widgets:
             w.blockSignals(False)
+        self._set_identify(state.get("identify", events is not None))
         self._unticked = set(state["unticked"])
         self.unit_colors = {int(u): c for u, c in state["colors"].items()}
         self.unit_opacity = {int(u): o for u, o in state["opacity"].items()}
@@ -408,10 +415,29 @@ class SpikeFinder(View):
             self._find_timer.start()
 
     # -- finding -----------------------------------------------------------------------------
+    def _set_identify(self, on: bool) -> None:
+        """Tick or untick Identify Spikes without searching: searching follows it."""
+        self._paused = not on
+        self.identify.blockSignals(True)
+        self.identify.setChecked(on)
+        self.identify.blockSignals(False)
+
+    def _identify_toggled(self, on: bool) -> None:
+        if on:
+            self._paused = False
+            self._find_pressed()
+            return
+        self._find_timer.stop()
+        self._paused = True
+        self.events = None
+        self._show_results()
+        self.page.events_changed()
+        self._show_message("")
+
     def clear(self) -> None:
         """Forget the action potentials, and don't search again until Find again is pressed."""
         self._find_timer.stop()
-        self._paused = True
+        self._set_identify(False)
         self.events = self._last = None
         self._unticked = set()
         self._show_results()
@@ -469,7 +495,7 @@ class SpikeFinder(View):
             ev.unit = A.match_units(before, ev)   # the same unit keeps its number, so its color
         self.events = self._last = ev
         self._done = set(chosen)
-        self._paused = False
+        self._set_identify(True)
         self._show_results()
         self.page.events_changed()
         return ev

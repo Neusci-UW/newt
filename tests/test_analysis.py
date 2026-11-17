@@ -252,6 +252,13 @@ def test_arrow_keys_and_slider_step_the_analysis_block(app, win):
     assert win.block_combo.currentIndex() == 1
 
 
+def quiet_start(win):
+    """Start sends nothing (the run bar's Stimulus on None): the tests' own Repeat does. And
+    each trial stays whole, as recorded, rather than split into a trial per stimulus."""
+    win.set_record_stim("none")
+    win.split_in_background = lambda *a, **k: None
+
+
 def stim_session(app, win, n=3):
     """A simulated recording: Ch2 (ai1) records cell 1 extracellularly, and a Stim
     channel (ai2) records a 1 V pulse every 0.25 s."""
@@ -261,6 +268,7 @@ def stim_session(app, win, n=3):
     net.cells[0].stimulus = 40                                       # each pulse makes cell 1 fire
     win.cfg.sim_network = net
     win.apply_setup(sample_rate=20000)
+    quiet_start(win)
     assert win.set_stim_monitor("ai2")                               # adds a channel named Stim
     win.set_stimulus(Stimulus(shape="pulse", amplitude_v=1, width_ms=1))
     win.stim_repeat_s = 0.25
@@ -499,6 +507,7 @@ def two_stimulus_session(app, win):
     net.cells[0].stimulus = 40
     win.cfg.sim_network = net
     win.apply_setup(sample_rate=20000)
+    quiet_start(win)
     assert win.set_stim_monitor("ai2")
     win.stim_repeat_s = 0.25
     win.btn_run.setChecked(True)
@@ -522,15 +531,13 @@ def test_blocks_are_grouped_by_their_stimulus(app, win):
     ap = win.analysis_page
     raw = ap.raw
     assert ap.stim_channel.currentData() == "Stim"                  # a stimulus channel: exact times
-    ap.stim_channel.setCurrentIndex(0)                               # None: the notes
-    assert [(label, blocks) for label, blocks in ap.groups] == \
-        [("Pulse 1 V, 1 ms", [0, 1]), ("Pulse 2 V, 1 ms", [2, 3])]
+    ap.stim_channel.setCurrentIndex(0)                               # None: what each trial saved it sent
+    assert [(label, blocks) for label, blocks in ap.groups] == [("Pulse 1 V", [0, 1]), ("Pulse 2 V", [2, 3])]
     ap.stim_channel.setCurrentIndex(ap.stim_channel.findData("Stim"))    # the same from the stimulus wire
-    assert [blocks for _, blocks in ap.groups] == [[0, 1], [2, 3]]
-    assert ap.groups[1][0].startswith("Pulse of 2 V")
+    assert [(label, blocks) for label, blocks in ap.groups] == [("Pulse 1 V", [0, 1]), ("Pulse 2 V", [2, 3])]
     ap.select_blocks([2, 3])                                         # just the 2 V blocks
     assert raw.chosen_or_none() == [2, 3]
-    assert trials_shown(raw) == 2
+    assert len(means(R(raw))) == 1 and trials_shown(raw) == 0         # a group ticked whole: its average
     ap.select_blocks([])                                             # all blocks, then compare groups
     raw.channel.setCurrentText("Ch2")
     raw.find()
@@ -552,8 +559,8 @@ def test_stimulus_channel_is_set_after_recording_and_remembered(app, win, tmp_pa
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    ap.stim_channel.setCurrentIndex(0)                               # None: the notes still group
-    assert len(ap.groups) == 2 and "notes" in ap.group_note.text()
+    ap.stim_channel.setCurrentIndex(0)                               # None: what each trial saved it sent still groups
+    assert len(ap.groups) == 2 and "as saved when sent" in ap.group_note.text()
     ap.stim_channel.setCurrentIndex(ap.stim_channel.findData("Stim"))
     put(ap, "Response")
     assert ap.chart("Stimulus-triggered rate").trigger.currentData() == "Stim"                 # Response follows it
@@ -573,9 +580,9 @@ def test_raw_view_shows_the_stimulus_groups(app, win):
     pump(app, 0.2)
     ap = win.analysis_page
     assert "2 different stimuli" in ap.group_note.text()
-    assert len(means(R(ap.raw))) == 2 and len(C(ap.raw, "Raster").group_marks.data) == 4   # an average each; row marks
-    ap.select_blocks([2, 3])                                         # one group: just its blocks
-    assert ap.raw.chosen_or_none() == [2, 3] and means(R(ap.raw)) == []
+    assert len(means(R(ap.raw))) == 2 and len(C(ap.raw, "Raster").group_marks.opts["x0"]) == 4   # an average each; row marks
+    ap.select_blocks([2, 3])                                         # one group ticked whole: its average
+    assert ap.raw.chosen_or_none() == [2, 3] and len(means(R(ap.raw))) == 1
 
 
 def test_isi_histogram():
@@ -589,13 +596,13 @@ def test_isi_histogram():
 
 def test_analysis_groups_are_the_named_pages(app, win):
     two_stimulus_session(app, win)
-    win.rename_page("Pulse of 1 V, 0.9 ms", "Weak")
+    win.rename_page("Pulse 1 V", "Weak")
     win.move_block(3, "Odd one")
     win.show()
     win.tabs.pick(0, "analysis")
     pump(app, 0.2)
     ap = win.analysis_page
-    assert [(n, b) for n, b in ap.groups] == [("Weak", [0, 1]), ("Pulse of 2 V, 0.9 ms", [2]), ("Odd one", [3])]
+    assert [(n, b) for n, b in ap.groups] == [("Weak", [0, 1]), ("Pulse 2 V", [2]), ("Odd one", [3])]
     assert ap.blocks_panel.tree.topLevelItem(0).text(0) == "⠿ Weak  (2)"
 
 
@@ -893,9 +900,9 @@ def test_spike_sorting_shows_the_stimulus_and_leaves_it_out_of_the_channels(app,
     y = y[0]
     assert len(y) and np.nanmax(y) == pytest.approx(1, abs=0.05)     # the 1 V pulses of block 1
     assert len(C(raw, "Stimulus").stim_onsets.data) == 0            # the trace is enough: no triangles on it
-    ap.stim_channel.setCurrentIndex(0)                               # None: the notes
+    ap.stim_channel.setCurrentIndex(0)                               # None: what each trial saved it sent
     assert "Stim" in [raw.channel.itemText(i) for i in range(raw.channel.count())]
-    assert "notes" in C(raw, "Stimulus").plot.getPlotItem().getAxis("left").labelText
+    assert "as sent" in C(raw, "Stimulus").plot.getPlotItem().getAxis("left").labelText
 
 
 def test_ticking_units_chooses_what_the_charts_show(app, win):
@@ -1004,7 +1011,9 @@ def bands(chart):
 
 
 def C(raw, kind):
-    """The first chart of this kind on the board, put there first if it isn't yet."""
+    """The first chart of this kind on the board, put there first if it isn't yet. The
+    board's quick charts are shown: a chart draws only while it can be seen."""
+    raw.page.set_quick(True)
     chart = raw.page.chart(kind)
     if chart is None:
         chart = raw.page.canvas.add(kind)
@@ -1022,7 +1031,9 @@ SETS = {
 
 
 def put(ap, name):
-    """Put these charts on the board (those not on it yet), as a student would."""
+    """Put these charts on the board (those not on it yet), as a student would; the board's
+    quick charts shown, so they draw."""
+    ap.set_quick(True)
     for kind in SETS[name]:
         if ap.canvas.first(kind) is None:
             ap.canvas.add(kind)
@@ -1174,7 +1185,8 @@ def test_new_charts_go_where_there_is_room_and_the_block_bar_picks_the_trial(app
 def test_rate_bins_are_in_the_rate_charts_settings(app, win):
     ap, raw = _spike_sorting(app, win)
     chart = C(raw, "Rate")
-    ap.canvas.open_settings(chart)
+    ap.single_plot.focus(chart)                                      # its settings: beside it, in Single Plot
+    ap.show_sub("singleplot")
     pump(app, 0.05)
     assert chart.rate_bin.isVisible() and ap.canvas.options.currentWidget() is chart.options_panel
     raw.find()

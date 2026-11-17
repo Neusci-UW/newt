@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plasticity settings box</title>
+<style>
+:root{--bg:#f3f4f1;--surface:#fff;--ink:#1c2220;--muted:#5b6662;--line:#d6dcd8;--accent:#0d6b7c;--k:#6b3fb8;--na:#d07a1f;--pos:#d1373f;--ca:#b8892a;--cyto:#edf0f6;--bath:#e8f2ef}
+@media (prefers-color-scheme:dark){:root{--bg:#111614;--surface:#191f1d;--ink:#e4eae7;--muted:#97a39e;--line:#2b3431;--accent:#4cb2c4;--k:#a88cf2;--na:#f0a350;--pos:#f0646b;--ca:#e0bb5c;--cyto:#161d27;--bath:#13211d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:24px 20px 48px}
+h1{font-size:24px;font-weight:600;margin:0 0 4px}.muted{color:var(--muted);font-size:14px;margin:0 0 8px;max-width:95ch}
+.switch{display:flex;gap:8px;margin:10px 0 18px}
+button{font:inherit;font-size:13px;cursor:pointer;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:6px 12px}
+button.primary,.switch button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.chip{font-size:12.5px;padding:4px 10px;border-radius:999px}.chip[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.part{font-size:17px;font-weight:600;margin:14px 0 6px}
+.pic{height:150px;border-radius:6px;background:var(--bath);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.charts{display:grid;grid-template-columns:repeat(var(--n,2),minmax(0,1fr));gap:10px;margin-top:10px}
+.chart{height:110px;border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px}
+.runbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:13px}
+.reads{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:8px;font-size:13px;color:var(--muted)}.reads b{font:500 13px "IBM Plex Mono",monospace;color:var(--ink)}
+/* the settings box */
+.set{display:flex;flex-direction:column;gap:12px}
+.set h2{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.grp{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--line)}
+.grp:first-of-type{border-top:0;padding-top:0}
+.gt{font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline}.gt span{font-weight:400;font-size:11.5px;color:var(--muted)}
+.row{display:grid;grid-template-columns:118px minmax(0,1fr) 72px;gap:8px;align-items:center;font-size:13px}
+.row input[type=range]{width:100%;accent-color:var(--accent)}.row output{font:12px "IBM Plex Mono",monospace;text-align:right}
+.check{display:flex;gap:8px;align-items:center;font-size:13px}.check input{accent-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.hint{font-size:11.5px;color:var(--muted);margin:-2px 0 0}
+.uses{font-size:11px;color:var(--muted)}
+.grp.here{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}
+/* layout A: a sticky column beside all three parts */
+.A{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
+.A .set{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto}
+@media (max-width:900px){.A{grid-template-columns:1fr}.A .set{position:static;max-height:none}}
+/* layout B: one box above the parts, groups side by side */
+.B .set{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px 28px}
+.B .set h2{grid-column:1/-1}.B .grp{border-top:0;padding-top:0}
+[hidden]{display:none!important}
+</style></head><body>
+<h1>Plasticity page: one box for all the settings</h1>
+<p class="muted">Mockup (no simulation). Today each part has its own side box with its sliders and readouts. Here every setting moves into one box, grouped by what it changes, and each part keeps only its run buttons and a line of readouts under its charts. Settings the parts share are merged: one neck-resistance slider now sets the spine for all three parts (Part 3 used a fixed 300 MΩ), and one speed slider replaces Part 1's and Part 2's. Each group says which part it affects, and the group for the part in the middle of the screen is outlined.</p>
+<div class="switch"><button data-lay="A" aria-pressed="true">A · A sticky column beside the parts</button><button data-lay="B" aria-pressed="false">B · One box above the parts</button></div>
+
+<div id="page" class="A">
+  <section class="card set" id="settings" aria-label="Settings">
+    <h2>Settings</h2>
+    <div class="grp" data-part="1">
+      <div class="gt">The spine <span>all parts</span></div>
+      <div class="row"><label for="rn">Neck resistance</label><input type="range" id="rn" min="50" max="1000" step="10" value="300"><output>300 MΩ</output></div>
+      <p class="hint">thin, long necks have more; real values are argued about</p>
+      <div class="row"><label for="na">AMPA receptors</label><input type="range" id="na" min="2" max="30" value="10"><output>10</output></div>
+      <p class="hint">at the start; Part 3 changes this with LTP and LTD</p>
+    </div>
+    <div class="grp" data-part="2">
+      <div class="gt">NMDA receptors and Ca²⁺ <span>Parts 2 and 3</span></div>
+      <label class="check"><input type="checkbox" checked> Mg²⁺ in the bath (1 mM)</label>
+      <label class="check"><input type="checkbox"> Block NMDA receptors (APV)</label>
+      <div class="row"><label for="vd">Depolarize Post to</label><input type="range" id="vd" min="-70" max="10" value="-10"><output>−10 mV</output></div>
+      <p class="hint">for Part 2's Depolarize button and Part 3's pairing</p>
+    </div>
+    <div class="grp" data-part="3">
+      <div class="gt">Induction protocol <span>Part 3</span></div>
+      <div class="chips"><button class="chip" aria-pressed="true">Tetanus: 100 Hz, 1 s</button><button class="chip">1 Hz for 15 min</button><button class="chip">Pairing: 100 at 1 Hz</button></div>
+    </div>
+    <div class="grp">
+      <div class="gt">Playback <span>all parts</span></div>
+      <div class="row"><label for="sp">Speed</label><input type="range" id="sp" min="0" max="100" value="60"><output>20 ms per s</output></div>
+      <button>Reset everything</button>
+    </div>
+  </section>
+
+  <div class="parts">
+    <h3 class="part">1 · Spine and dendrite: where the EPSP is biggest</h3>
+    <section class="card" data-sec="1">
+      <div class="pic">picture: soma, dendrite, spines A and B</div>
+      <div class="runbar"><button class="primary">Fire synapse A</button><button class="primary">Pause</button></div>
+      <div class="charts"><div class="chart">Post: voltage at three places</div><div class="chart">scaled to each peak</div></div>
+      <div class="reads"><span>head A <b>+9.3 mV</b></span><span>dendrite <b>+2.4 mV</b></span><span>soma <b>+0.4 mV</b></span><span>soma ÷ head <b>5 %</b></span></div>
+    </section>
+    <h3 class="part">2 · Ca²⁺ in the spine: NMDA receptors need two things at once</h3>
+    <section class="card" data-sec="2">
+      <div class="pic">picture</div>
+      <div class="runbar"><button>Glutamate only</button><button>Depolarize Post only</button><button class="primary">Both together</button><button class="primary">Pause</button></div>
+      <div class="charts"><div class="chart">voltage in head A and dendrite</div><div class="chart">Ca²⁺ in each head</div></div>
+      <div class="reads"><span>peak Ca²⁺ A <b>6.32 µM</b></span><span>B <b>0.41 µM</b></span><span>free of Mg²⁺ <b>65 %</b></span><span>together ÷ apart <b>×6.1</b></span></div>
+    </section>
+    <h3 class="part">3 · LTP and LTD: the test pulse before and after</h3>
+    <section class="card" data-sec="3">
+      <div class="pic">picture</div>
+      <div class="runbar"><button class="primary">Run the experiment</button><button class="primary">Pause</button><button>Reset to 100%</button></div>
+      <div class="charts" style="--n:3"><div class="chart">Ca²⁺ during induction</div><div class="chart">EPSP, % of start</div><div class="chart">test EPSP before / after</div></div>
+      <div class="chart" style="margin-top:10px;height:80px">time-lapse strip</div>
+      <div class="reads"><span>AMPA receptors <b>10 → 16</b></span><span>EPSP after 1 h <b>163 %</b></span><span>spine B <b>100 %</b></span><span>peak Ca²⁺ <b>6.6 µM</b></span><span>above CaMKII <b>0.99 s</b></span><span>calcineurin <b>0.92</b></span></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const page = document.getElementById('page'), set = document.getElementById('settings'), parts = page.querySelector('.parts');
+document.querySelectorAll('[data-lay]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-lay]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  page.className = b.dataset.lay;
+  if (b.dataset.lay === 'B') page.insertBefore(set, parts); else page.insertBefore(set, parts);
+});
+document.querySelectorAll('.chip').forEach(b => b.onclick = () => document.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', x === b)));
+document.querySelectorAll('.row input').forEach(el => el.addEventListener('input', () => {
+  const o = el.nextElementSibling, v = +el.value;
+  o.textContent = el.id === 'rn' ? v + ' MΩ' : el.id === 'vd' ? (v < 0 ? '−' : '+') + Math.abs(v) + ' mV' : el.id === 'sp' ? (0.5 * 400 ** (v / 100)).toFixed(v < 30 ? 1 : 0) + ' ms per s' : v;
+}));
+// outline the group for the part nearest the middle of the screen
+const mark = () => {
+  let pick = '1';
+  document.querySelectorAll('[data-sec]').forEach(s => { if (s.getBoundingClientRect().top < innerHeight / 2) pick = s.dataset.sec; });
+  document.querySelectorAll('.grp[data-part]').forEach(g => g.classList.toggle('here', g.dataset.part === pick));
+};
+addEventListener('scroll', mark, { passive: true }); mark();
+</script>
+</body></html>

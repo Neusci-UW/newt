@@ -1350,6 +1350,13 @@ class AnalysisPage(QtWidgets.QWidget):
         else:
             self.show_all()
 
+    def show_trial(self, i: int) -> None:
+        """Look at block i, highlighted in the Trials list, as Up and Down do (a chart's dot clicked)."""
+        here = ("avg", self._avg_shown) if self._avg_shown else ("block", self.index())
+        self._show_entry(("block", i))
+        self._highlighted = ([i], [])
+        self.blocks_panel.reveal(("block", i), here if here != ("block", i) else None)
+
     def select_pages(self, names: list[str]) -> None:
         """Show these pages' averages, ticking only them."""
         self.tick_highlighted([], list(names), True)

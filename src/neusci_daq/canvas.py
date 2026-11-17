@@ -21,10 +21,11 @@ from . import style
 from .plotzoom import AxisGroup
 from .responsecharts import (FitChart, LoopChart, PhaseChart, PsthChart, ResponseChart, ResponseCycleChart,
                              SpikeCycleChart, StaChart, StimulusCycleChart)
-from .spikecharts import IntervalsChart, PcaChart, RasterChart, RateChart, SizesChart, StimulusChart, WaveformsChart
+from .spikecharts import (IntervalsChart, PcaChart, RasterChart, RateChart, ScatterChart, SizesChart, StimulusChart,
+                          WaveformsChart)
 from .waveformview import PhasePlotChart, SlopeChart, VoltsChart
 
-CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart,
+CHARTS = (StimulusChart, RasterChart, RateChart, PcaChart, WaveformsChart, SizesChart, IntervalsChart, ScatterChart,
           ResponseChart, PsthChart, StaChart, StimulusCycleChart, ResponseCycleChart, SpikeCycleChart, PhaseChart,
           LoopChart, FitChart, PhasePlotChart, VoltsChart, SlopeChart)
 KINDS = {c.kind: c for c in CHARTS}
@@ -32,7 +33,7 @@ KINDS = {c.kind: c for c in CHARTS}
 GROUPS = {"Raw recording": ("Response", "Stimulus", "Stimulus fit"),
           "Spikes": ("Raster", "Rate",
                      {"Spike shape": ("Waveforms", "V", "dV/dt", "V against dV/dt", "AP sizes", "PCA map"),
-                      "Timing": ("Intervals",)}),
+                      "Timing": ("Intervals",)}, "Scatter"),
           "Around a stimulus": ("Stimulus-triggered rate", "Spike-triggered average"),
           "Cycles and phase": ("Stimulus cycle", "Response by cycle", "Spikes by cycle", "Spikes per phase",
                                "Response against stimulus")}

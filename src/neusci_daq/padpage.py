@@ -998,11 +998,34 @@ def _clear(lay) -> None:
 
 
 # ------------------------------------------------------------------------------- the table
+def _name_action(menu: QtWidgets.QMenu, html: str, fn, tip: str = "") -> None:
+    """A menu item whose name has true subscripts (I<sub>B</sub>), which a QAction's text can't."""
+    lab = QtWidgets.QLabel(html)
+    lab.setTextFormat(QtCore.Qt.TextFormat.RichText)
+    lab.setContentsMargins(20, 3, 20, 3)
+    lab.setStyleSheet("QLabel:hover { background: palette(highlight); color: palette(highlighted-text); }")
+    lab.setToolTip(tip)
+    act = QtWidgets.QWidgetAction(menu)
+    act.setDefaultWidget(lab)
+
+    def released(_ev) -> None:
+        top = menu
+        while isinstance(top.parent(), QtWidgets.QMenu):
+            top = top.parent()
+        top.close()
+        QtCore.QTimer.singleShot(0, fn)
+
+    lab.mouseReleaseEvent = released
+    menu.addAction(act)
+
+
 class _Header(QtWidgets.QHeaderView):
-    """Names with true subscripts and units; the picked column tinted; ▾ opens its editor."""
+    """Names with true subscripts and units; the picked column tinted (and a ⌘-clicked one, the
+    X of a scatter); ▾ opens its editor; right-click for its menu."""
 
     menu_clicked = QtCore.Signal(int)
     plus_clicked = QtCore.Signal(QtCore.QPoint)   # the last column, "+": add a column
+    context_clicked = QtCore.Signal(int, QtCore.QPoint)   # right-click on a column
 
     def __init__(self, view: "PadView"):
         super().__init__(QtCore.Qt.Orientation.Horizontal)
@@ -1036,6 +1059,11 @@ class _Header(QtWidgets.QHeaderView):
             return
         super().mousePressEvent(ev)
 
+    def contextMenuEvent(self, ev):
+        idx = self.logicalIndexAt(ev.pos())
+        if self.view.first_col <= idx < self.view.first_col + len(self.view.pad.columns):
+            self.context_clicked.emit(idx, ev.globalPos())
+
     def paintSection(self, painter, rect, idx):
         painter.save()
         super().paintSection(painter, rect, -1)
@@ -1053,7 +1081,7 @@ class _Header(QtWidgets.QHeaderView):
             painter.restore()
             return
         painter.save()
-        if k >= 0 and k == self.view.picked:
+        if k >= 0 and (k == self.view.picked or self.view.pad.columns[k].name == self.view.scatter_x):
             col = QtGui.QColor(tok["focus"])
             col.setAlpha(34)
             painter.fillRect(rect, col)
@@ -1084,6 +1112,7 @@ class PadView(QtWidgets.QWidget):
         self.pad = P.Pad()
         self.tab = P.Table([])
         self.picked = -1
+        self.scatter_x = ""                     # a column ⌘-clicked before the picked one: Scatter's X
         self.cur_row = -1                       # the table row the preview shows
         self.setting = ""                       # a column whose window is being set on the preview
         self.quick_sel: P.Selection | None = None   # what the quick measure row measures
@@ -1146,6 +1175,8 @@ class PadView(QtWidgets.QWidget):
         self.btn_col.setMenu(menu)
         self.btn_plot = QtWidgets.QPushButton("Plot…")
         self.btn_plot.setToolTip("Make a figure of columns in Single Plot")
+        self.btn_scatter = QtWidgets.QPushButton("Scatter")
+        self.btn_scatter.hide()                 # shown once two columns are picked (click, then ⌘-click)
         self.btn_recipe = QtWidgets.QToolButton(text="Recipe ▾")
         self.btn_recipe.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         rm = QtWidgets.QMenu(self.btn_recipe)
@@ -1154,7 +1185,7 @@ class PadView(QtWidgets.QWidget):
                          ("Clear rows added by hand", self.clear_manual), ("Clear columns", self.clear_columns)):
             rm.addSeparator() if text is None else rm.addAction(text, fn)
         self.btn_recipe.setMenu(rm)
-        for w in (self.btn_col, self.btn_plot, self.btn_recipe):
+        for w in (self.btn_col, self.btn_plot, self.btn_scatter, self.btn_recipe):
             top.addWidget(w)
 
         # -- preview, quick charts, table --------------------------------------------------
@@ -1205,12 +1236,14 @@ class PadView(QtWidgets.QWidget):
         self.rows.currentIndexChanged.connect(self._rows_picked)
         self.rows_seg.currentIndexChanged.connect(self._rows_picked)
         self.btn_plot.clicked.connect(self.plot_dialog)
+        self.btn_scatter.clicked.connect(lambda: self.scatter(*self._scatter_pair()) if self._scatter_pair() else None)
         self.summary.currentIndexChanged.connect(lambda *_: self.fill_table())
         self.header.sectionClicked.connect(self._header_clicked)
         self.header.sectionDoubleClicked.connect(lambda i: self.edit_column(i - self.first_col)
                                                  if i >= self.first_col else None)
         self.header.menu_clicked.connect(lambda i: self.edit_column(i - self.first_col))
         self.header.plus_clicked.connect(lambda at: self.btn_col.menu().exec(at))
+        self.header.context_clicked.connect(self._header_menu)
         self.table.cellClicked.connect(self._cell_clicked)
         self.table.itemChanged.connect(self._ticked)
         self.preview.segment_clicked.connect(self._segment_clicked)
@@ -1813,6 +1846,7 @@ class PadView(QtWidgets.QWidget):
 
     def pick(self, k: int, follow: bool = True) -> None:
         self.picked = k
+        self.scatter_x = ""
         c = self.current()
         if follow and c is not None and c.kind in ("measure", "duration", "level") and c.over == "window":
             self.view_sel = None                  # stimulus time and phase follow the picked column
@@ -1822,8 +1856,56 @@ class PadView(QtWidgets.QWidget):
         self._show_fx()
 
     def _header_clicked(self, idx: int) -> None:
+        """Pick a column. ⌘-click a second (Ctrl elsewhere): the one picked before is X, this
+        one Y, for Scatter."""
         if self.first_col <= idx < self.first_col + len(self.pad.columns):
+            before = self.current()
+            add = bool(QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.KeyboardModifier.ControlModifier)
             self.pick(idx - self.first_col)
+            if add and before is not None and before is not self.current():
+                self.scatter_x = before.name
+                self.header.viewport().update()
+                self._show_scatter()
+
+    def _scatter_pair(self) -> tuple[str, str] | None:
+        """(X, Y) for Scatter: the ⌘-clicked pair, if both are still number columns."""
+        c = self.current()
+        names = [k.name for k in self.pad.columns if k.name not in self.tab.text]
+        if c is None or not self.scatter_x or self.scatter_x == c.name \
+                or self.scatter_x not in names or c.name not in names:
+            return None
+        return self.scatter_x, c.name
+
+    def _show_scatter(self) -> None:
+        pair = self._scatter_pair()
+        self.btn_scatter.setVisible(pair is not None)
+        if pair:
+            x, y = (P.html_name(self._shown_name(n)) for n in pair)
+            self.btn_scatter.setToolTip(f"{y} against {x}, one point per row, in Single Plot")
+
+    def _header_menu(self, idx: int, at: QtCore.QPoint) -> None:
+        """Right-click a column: edit it, plot, or scatter it against another."""
+        k = idx - self.first_col
+        c = self.pad.columns[k]
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Edit column…", lambda: self.edit_column(k))
+        menu.addAction("Plot…", lambda: (self.pick(k), self.plot_dialog()))
+        others = [o.name for o in self.pad.columns if o.name not in self.tab.text and o.name != c.name]
+        if c.name not in self.tab.text and others:
+            sub = menu.addMenu("Scatter against")
+            sub.setToolTipsVisible(True)
+            for n in others:
+                _name_action(sub, P.html_name(self._shown_name(n)), lambda n=n: self.scatter(n, c.name),
+                             f"{P.html_name(c.shown())} up, {P.html_name(self._shown_name(n))} across")
+        menu.exec(at)
+
+    def scatter(self, x: str, y: str) -> None:
+        """Y against X, one point per row, in a square plot, in Single Plot."""
+        spec = figspec.new_spec(kind="xy")
+        spec["series"] = [figspec.new_series(x, y)]
+        spec["points"] = True
+        spec["aspect"] = 1.0
+        self.page.open_plot(spec)
 
     def rename(self, c: P.Column, new: str) -> None:
         old = c.name
@@ -1870,6 +1952,7 @@ class PadView(QtWidgets.QWidget):
             self.fx.setText(c.recipe() if c else "")
         self.fx.setReadOnly(c is None or c.kind == "python")
         self.fx_error.setText(self.tab.errors.get(c.name, "") if c else "")
+        self._show_scatter()
         self.fx_error.setToolTip(self.fx_error.text())
 
     def _fx_entered(self) -> None:
@@ -2028,6 +2111,8 @@ class PadView(QtWidgets.QWidget):
             return
         self.cur_row = r
         if self.first_col <= col < self.first_col + len(self.pad.columns):
+            if self.picked != col - self.first_col:
+                self.scatter_x = ""
             self.picked = col - self.first_col
             self.header.viewport().update()
             self._show_fx()

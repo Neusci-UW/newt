@@ -117,8 +117,12 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
 
         def do_GET(self):
             path, _, query = self.path.partition("?")
-            if path == "/":
-                path = "/static/live.html"
+            if path == "/":                  # to where the pages are, so their relative links work
+                self.send_response(302)            # (the browser keeps the #key)
+                self.send_header("Location", "/static/live.html")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if path.startswith("/static/lessons/"):
                 return self._send(*lessons.page(path[len("/static/lessons/"):]))
             if path.startswith("/static/"):

@@ -77,7 +77,7 @@ def main() -> None:
     app = App(data, live, trials, recording, stimulator, design)
     srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, args.port,
                       breadboard=breadboard, app=app)
-    url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
+    url = f"http://127.0.0.1:{srv.server_address[1]}/static/live.html#k={key}"
     print(f"serving {url}", flush=True)
     try:
         if args.browser or args.serve:

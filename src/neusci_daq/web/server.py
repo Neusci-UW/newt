@@ -19,6 +19,11 @@ POST /trials/calc     JSON {"kind", "source", "values", "name", "unit", "old"}: 
                       formula, name, unit, and why it can't be made (see Trials.calc_check)
 GET /spikes/state     JSON: the spike search's settings, the units found (see Spikes.state)
 POST /spikes/cmd      JSON {"cmd": ...}: set, identify, find, clear, unit, unit_color, unit_opacity
+GET /network/state   JSON: the simulated network's cells, synapses, recordings, firing (see Network.state)
+GET /network/rates   JSON: each cell's firing now (see Network.rates)
+POST /network/cmd    JSON {"cmd": ...}: set (edits), cells, reset (see Network.command)
+GET /static/lessons/ the lesson pages (the lessons submodule), with lessonbridge.js (see lessons.py)
+POST /lessons/save   JSON {"name", "text"}: the lesson editor saves questions/<name>.js (see lessons.save)
 GET /charts/state     JSON: the Analysis board's charts, and what they can show (see Charts.state)
 POST /charts/cmd      JSON {"cmd": ...}: add, remove, set, move, spread (see Charts.command)
 POST /charts/data     JSON {"id", "x0", "x1", "cols"}: what a chart draws, shrunk (see Charts.data)
@@ -58,7 +63,9 @@ from pathlib import Path
 from .charts import Charts
 from .design import Design
 from .figures import Figures
+from . import lessons
 from .live import Live
+from .network import Network
 from .pad import Pad
 from .record import COMMANDS as RECORD_COMMANDS, Recording
 from .stimulator import Stimulator
@@ -70,6 +77,8 @@ STATIC = Path(__file__).parent / "static"
 def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, recording: Recording,
                 charts: Charts, pad: Pad, figures: Figures, key: str,
                 port: int = 0, breadboard=None) -> ThreadingHTTPServer:
+    network = Network(live)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
@@ -97,6 +106,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
             path, _, query = self.path.partition("?")
             if path == "/":
                 path = "/static/live.html"
+            if path.startswith("/static/lessons/"):
+                return self._send(*lessons.page(path[len("/static/lessons/"):]))
             if path.startswith("/static/"):
                 f = (STATIC / path[len("/static/"):]).resolve()
                 if STATIC.resolve() in f.parents and f.is_file():
@@ -109,6 +120,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 return self._stream()
             if path == "/live/state":
                 return self._json(live.state())
+            if path in ("/network/state", "/network/rates"):
+                return self._json(network.state() if path == "/network/state" else network.rates())
             if path == "/trials/state":
                 return self._json(trials.state())
             if path == "/spikes/state":
@@ -133,6 +146,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
             if not self._keyed():
                 return
             path = self.path.split("?")[0]
+            if path in ("/network/cmd", "/lessons/save"):
+                return self._network_lessons(path)
             d = {}
             state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state, "/charts/cmd": charts.state,
                      "/charts/data": dict, "/pad/cmd": pad.state, "/pad/chart": dict, "/pad/preview": dict,
@@ -186,6 +201,17 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 self._json({**state(), **out})
             except Exception as e:            # shown on the page
                 self._json({**state(), "problem": str(e)}, 400)
+
+        def _network_lessons(self, path: str) -> None:
+            try:
+                d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                if path == "/lessons/save":
+                    out = lessons.save(d)
+                    return self._json(out, 400 if out else 200)
+                network.command(d)
+                self._json(network.state())
+            except Exception as e:            # shown on the page
+                self._json({**(network.state() if path == "/network/cmd" else {}), "problem": str(e)}, 400)
 
         def _live(self, d: dict) -> dict:
             cmd = d.get("cmd")

@@ -104,11 +104,13 @@ function showSub(t) {
   if (t === 'network') mountNetwork();
   const h = new URLSearchParams(location.hash.slice(1));
   h.set('t', t);
-  history.replaceState(null, '', '#' + h.toString());
+  history.replaceState(null, '', location.pathname + '#' + h.toString());
 }
 BreadboardUI.mount(document.getElementById('breadboard'));
 document.getElementById('sub').onclick = (e) => { if (e.target.dataset.t) showSub(e.target.dataset.t); };
-showSub(new URLSearchParams(location.hash.slice(1)).get('t') === 'network' ? 'network' : 'breadboard');
+// the sub-tab: ?show=network (from Lessons) or #t=network (a reload); the Breadboard otherwise
+const asked = new URLSearchParams(location.search).get('show') || new URLSearchParams(location.hash.slice(1)).get('t');
+showSub(asked === 'network' ? 'network' : 'breadboard');
 </script>
 </body>
 </html>

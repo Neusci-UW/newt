@@ -11,6 +11,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from .charts import Charts
 from .design import Design
 from .live import Live
 from .record import Recording
@@ -43,7 +44,7 @@ def main() -> None:
     if first is not None:           # read while the window opens
         threading.Thread(target=trials.open, args=(first,), daemon=True, name="web-open").start()
     key = args.key or secrets.token_urlsafe(16)
-    srv = make_server(live, trials, stimulator, design, recording, key, args.port)
+    srv = make_server(live, trials, stimulator, design, recording, Charts(trials), key, args.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
     print(f"serving {url}", flush=True)
     try:

@@ -23,7 +23,7 @@ import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import analysis as A
-from . import analysisfile
+from . import analysisfile, chartplan
 from . import colors
 from . import dsp
 from . import groupsfile
@@ -579,7 +579,8 @@ class AnalysisPage(QtWidgets.QWidget):
         if folder is not None and analysisfile.exists(folder):
             try:
                 state, events = analysisfile.load(folder, self._stems())
-                self.raw.restore(state["spikes"], events)
+                if "spikes" in state:             # (not when only the HTML front end's charts were saved)
+                    self.raw.restore(state["spikes"], events)
                 self.pad_view.pad.restore(state.get("pad"))
                 self.plot_canvas.restore(state.get("plot_canvas"))
                 b = state.get("baseline") or {}
@@ -1244,14 +1245,7 @@ class AnalysisPage(QtWidgets.QWidget):
     def hidden_blocks(self) -> set[int]:
         """The blocks left out of everything: those of unticked pages, and those you unticked,
         but not those you ticked yourself."""
-        looks = self._looks
-        out = {i for name, blocks in self.shown if name in looks["hidden_groups"] for i in blocks}
-        for i, p in enumerate(self._paths):
-            if p.stem in looks["hidden_trials"]:
-                out.add(i)
-            elif p.stem in looks["shown_trials"]:
-                out.discard(i)
-        return out
+        return chartplan.hidden_blocks(self.shown, [p.stem for p in self._paths], self._looks)
 
     def set_hidden(self, item: tuple, hidden: bool) -> None:
         """Leave a page ("page", name) or block ("block", i) out of everything, or put it back.
@@ -1416,16 +1410,10 @@ class AnalysisPage(QtWidgets.QWidget):
         the blocks to show as trials). A page picked in the Blocks panel (or when a chart was
         pinned: `picked`, `pages_picked`) shows its average, a block picked on its own its
         trial, and with nothing picked every page's average."""
-        wanted = set(chosen)
         picked = self.picked if picked is None else picked
         pages_picked = self.picked_pages if pages_picked is None else pages_picked
-        averaged = [(g, name, [i for i in blocks if i in wanted]) for g, (name, blocks) in enumerate(self.shown)
-                    if not picked or name in pages_picked]
-        averaged = [a for a in averaged if a[2]]
-        if self._looks.get("avg_each"):           # a combined group: an average for each stimulus in it
-            averaged = [part for a in averaged for part in self._each_stimulus(a)]
-        done = {i for _, _, blocks in averaged for i in blocks}
-        return averaged, [i for i in chosen if i not in done]
+        each = self._each_stimulus if self._looks.get("avg_each") else None   # a combined group: by stimulus
+        return chartplan.plan(self.shown, chosen, picked, pages_picked, each)
 
     def _each_stimulus(self, entry: tuple) -> list[tuple]:
         """A combined group's (page number, name, blocks) as one for each stimulus in it."""
@@ -1459,14 +1447,8 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def trial_colors(self, blocks: list[int]) -> dict[int, QtGui.QColor]:
         """How each of these trials is drawn: in order within its page, by the Trials setting."""
-        style_ = self._looks["trial_map"] or colors.SOLID
-        out: dict[int, QtGui.QColor] = {}
-        for g, (_, members) in enumerate(self.shown):
-            rows = [i for i in blocks if i in members]
-            out.update(zip(rows, colors.spread(style_, self.group_color(g), len(rows), self.trial_opacity())))
-        rest = [i for i in blocks if i not in out]
-        out.update(zip(rest, colors.spread(style_, self.group_color(0), len(rest), self.trial_opacity())))
-        return out
+        return chartplan.trial_colors(self.shown, blocks, self.group_color, self._looks["trial_map"] or colors.SOLID,
+                                      self.trial_opacity())
 
     def in_browser_order(self, blocks) -> list[int]:
         """These trials as the Trials browser lists them: group by group, in the groups' order
@@ -1488,14 +1470,7 @@ class AnalysisPage(QtWidgets.QWidget):
         group ticked shows its average of the trials still ticked in it (unticking a trial leaves
         it out of the average, not the average out), as does one whose trials are all ticked; a
         trial ticked on its own, in a group left unticked, shows its trace."""
-        hidden = self.hidden_blocks()
-        every = sorted(i for _, blocks in self.shown for i in blocks)
-        picked = [i for i in every if i not in hidden]
-        if picked == every:
-            return [], []
-        off = set(self._looks["hidden_groups"])
-        return picked, [n for n, blocks in self.shown if blocks and
-                        (not set(blocks) & hidden or (n not in off and set(blocks) - hidden))]
+        return chartplan.ticked(self.shown, self.hidden_blocks(), self._looks["hidden_groups"])
 
     def _blocks_picked(self, picked: list[int]) -> None:
         """Highlighting in the Trials list: just the trial you're looking at (ticks choose what's

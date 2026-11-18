@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import analysis as A
-from .. import colors, grouping, groupsfile, session
+from .. import chartplan, colors, grouping, groupsfile, session
 from .. import stimmeasures as SM
 from ..trialstore import TrialStore
 
@@ -50,6 +50,7 @@ class Trials:
         self.busy = ""                       # what's being worked on, for the page
         self._lock = threading.RLock()
         self._state: dict | None = None      # the last state, until something changes
+        self._view: dict = {}                # what the charts need of it (view())
         self._auto: tuple | None = None      # (how, the stimulus groups): grouping is the slow part
 
     # -- opening -------------------------------------------------------------------
@@ -99,6 +100,14 @@ class Trials:
                 self._state = self._work_out()
             return {**self._state, "busy": self.busy}
 
+    def view(self) -> dict:
+        """What the charts draw from (charts.py), as the pane shows it now: the trials, their
+        groups [(name, trials)], each group's color, the trials left out, and the looks."""
+        with self._lock:
+            if self._state is None:
+                self._state = self._work_out()
+            return self._view
+
     def _sig(self, i, y, fs):
         return self.store.memo(self.paths[i], ("stimulus", self.how), lambda: A.stimulus_signature(y, fs))
 
@@ -138,12 +147,7 @@ class Trials:
         kinds = groupsfile.kinds(auto, d)
         shown = groupsfile.arrange(groupsfile.apply(auto, stems, d), d, self._page_measure) if stems else []
         names = [n for n, _ in shown]
-        hidden = {i for n, bl in shown if n in d["hidden_groups"] for i in bl}
-        for i, s in enumerate(stems):
-            if s in d["hidden_trials"]:
-                hidden.add(i)
-            elif s in d["shown_trials"]:
-                hidden.discard(i)
+        hidden = chartplan.hidden_blocks(shown, stems, d)
         values = self._values(shown, d)
         sparks = {i: self._spark(i) for _, bl in shown for i in bl}
         top = max([float(np.max(np.abs(np.r_[lo, hi]))) for s in sparks.values() if s for lo, hi in [s]] or [1.0]) or 1.0
@@ -159,6 +163,8 @@ class Trials:
                                "spark": [np.round(s[0] / top, 3).tolist(), np.round(s[1] / top, 3).tolist()] if s else None})
             groups.append({"name": name, "color": self.group_color(g, names, d, values), "own": name in d["colors"],
                            "kind": kinds.get(name, ""), "hidden": name in d["hidden_groups"], "trials": trials})
+        self._view = {"folder": self.folder, "paths": list(self.paths), "blocks": list(self.blocks), "how": self.how,
+                      "shown": shown, "colors": [g["color"] for g in groups], "hidden": hidden, "looks": d}
         n = len([x for x in names if x != NONE_FOUND])
         return {
             "folder": str(self.folder) if self.folder else "", "name": self.folder.name if self.folder else "",

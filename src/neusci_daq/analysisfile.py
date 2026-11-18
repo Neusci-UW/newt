@@ -12,6 +12,7 @@ import numpy as np
 from . import analysis as A
 
 FILE, SPIKES = "analysis.json", "analysis_spikes.npz"
+BOARD = "board"         # the HTML front end's charts (web/charts.py): kept when the Qt app saves
 
 
 def exists(folder: str | Path) -> bool:
@@ -20,6 +21,9 @@ def exists(folder: str | Path) -> bool:
 
 def save(folder: str | Path, state: dict, events: A.Events | None, stems: list[str]) -> None:
     folder = Path(folder)
+    kept = read_state(folder).get(BOARD)
+    if kept is not None and BOARD not in state:
+        state = {**state, BOARD: kept}
     (folder / FILE).write_text(json.dumps(state, indent=2), encoding="utf-8")
     spikes = folder / SPIKES
     if events is None:
@@ -45,3 +49,24 @@ def load(folder: str | Path, stems: list[str]) -> tuple[dict, A.Events | None]:
                                unit=d["unit"][keep], amplitude=d["amplitude"][keep], waves=d["waves"][keep],
                                wave_t_ms=d["wave_t_ms"], level=float(d["level"]), duration_s=float(d["duration_s"]),
                                notes=[str(n) for n in d["notes"]])
+
+
+def read_state(folder: str | Path) -> dict:
+    """The settings saved in this folder, without the spikes; {} if there are none (or they
+    can't be read)."""
+    try:
+        state = json.loads((Path(folder) / FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def save_part(folder: str | Path, key: str, value) -> None:
+    """Change one part of the saved settings (as the HTML front end saves its charts),
+    leaving the rest, and the spikes, as they are."""
+    folder = Path(folder)
+    state = read_state(folder)
+    state[key] = value
+    tmp = folder / (FILE + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp.replace(folder / FILE)

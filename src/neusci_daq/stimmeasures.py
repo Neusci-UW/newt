@@ -42,8 +42,8 @@ def rest_level(y) -> float | None:
     return float(np.median(ok[(ok >= edges[k]) & (ok <= edges[k + 1])]))
 
 
-def window(y, fs: float) -> np.ndarray | None:
-    """The stimulus as a swing from rest, first to last sample it's on; None if it's flat."""
+def _on(y) -> tuple[np.ndarray, int, int] | None:
+    """(the stimulus as a swing from rest, its first and last sample on); None if it's flat."""
     y = np.asarray(y, float)
     rest = rest_level(y)
     if rest is None:
@@ -53,7 +53,19 @@ def window(y, fs: float) -> np.ndarray | None:
     if not big > 0:
         return None
     on = np.flatnonzero(np.abs(d) > ON * big)
-    return d[on[0]:on[-1] + 1]
+    return d, int(on[0]), int(on[-1])
+
+
+def window(y, fs: float) -> np.ndarray | None:
+    """The stimulus as a swing from rest, first to last sample it's on; None if it's flat."""
+    got = _on(y)
+    return None if got is None else got[0][got[1]:got[2] + 1]
+
+
+def on_span(y, fs: float) -> tuple[float, float] | None:
+    """When the stimulus is on, (first, just after the last sample on) in s; None if it's flat."""
+    got = _on(y)
+    return None if got is None else (got[1] / fs, (got[2] + 1) / fs)
 
 
 def _pushes(w: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

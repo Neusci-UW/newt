@@ -55,6 +55,7 @@ function show(st) {
   floor = Math.min(0, ...st.groups.flatMap((g) => g.trials.map((t) => t.spark ? Math.min(...t.spark[0]) : 0)));
   fillControls();
   renderGroups();
+  if (window.boardTrials) window.boardTrials(st);         // the charts follow (charts.js)
 }
 
 function fillControls() {

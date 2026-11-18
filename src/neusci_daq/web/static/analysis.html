@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Analysis</title>
 <link rel="stylesheet" href="/static/newt.css">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
 <style>
 .analysis{display:grid;grid-template-columns:360px minmax(0,1fr) 280px;gap:20px;align-items:start}
 @media (max-width:1250px){.analysis{grid-template-columns:340px minmax(0,1fr)}.analysis .looks{grid-column:1 / -1}}
@@ -67,6 +68,46 @@ select{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);bo
 .board{min-height:560px;display:flex;flex-direction:column;gap:12px}
 .empty{flex:1;border:1.5px dashed var(--line);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);text-align:center;padding:40px}
 .empty b{color:var(--ink);font-size:16px;font-weight:600}
+.addwrap{position:relative}
+.addmenu{position:absolute;right:0;top:calc(100% + 6px);z-index:5;width:340px;display:flex;flex-direction:column;gap:2px;padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+.addmenu[hidden]{display:none}
+.addmenu button{border:0;text-align:left;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:7px}
+.addmenu button:hover{background:var(--bg)}
+.addmenu b{font-weight:600;font-size:14px}
+.addmenu span{font-size:12.5px;color:var(--muted);line-height:1.35}
+.empty[hidden]{display:none}
+.charts{display:flex;flex-direction:column;gap:14px}
+.chart{border:1px solid var(--line);border-radius:10px;padding:10px 12px 8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.chead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctitle{font-size:15px;font-weight:600;cursor:help}
+.cnote{font-size:12.5px;color:var(--muted)}
+.crow{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.crow .seg button{padding:3px 10px;font-size:12.5px}
+.cbtns{display:inline-flex;gap:4px}
+.ib{font-size:13px;padding:3px 9px;line-height:1.3}
+.cbtns .ib{padding:3px 7px}
+.csets{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13px;color:var(--muted)}
+.cfield{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
+.cfield select{font-size:13px;padding:3px 6px}
+.chgroup{display:inline-flex;gap:3px}
+.csets .chip{font-size:12.5px;padding:2px 10px}
+.csets .chip.small{font-size:11.5px;padding:2px 7px}
+.csets .chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.muted{color:var(--muted)}
+.cbody{min-width:0;display:flex;flex-direction:column;gap:2px}
+.prompt{border:1.5px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center;padding:36px 16px;font-size:14px}
+.plot .ptitle{font-size:12.5px;font-weight:500;padding-left:76px}
+.plot .u-over{cursor:grab}
+.plot .u-over.grabbing{cursor:grabbing}
+.hint{font-size:12px}
+.scatter{display:block;max-width:100%;height:auto;font-family:var(--font-mono)}
+.scatter .grid{stroke:var(--line);stroke-width:1}
+.scatter .frame{fill:none;stroke:var(--line)}
+.scatter .tick{fill:var(--muted);font-size:11.5px}
+.scatter .alab{fill:var(--ink);font-family:var(--font-body);font-size:13px}
+.scatter circle{stroke:var(--surface);stroke-width:.8}
+.scatter .gpt circle{stroke-width:1.5}
+.scatter .gpt path{stroke-width:1.6;fill:none}
 .looks .card{gap:12px}
 .picks{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
 .picks input[type=color]{width:34px;height:24px;border:1px solid var(--line);border-radius:6px;padding:0;background:none}
@@ -115,12 +156,15 @@ select{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);bo
 
     <section class="card board">
       <div class="runbar"><span class="runlab">Charts</span><span class="spacer"></span>
-        <button class="primary" disabled title="Charts come next in the HTML front end">Add a chart</button></div>
-      <div class="empty">
+        <span class="status" title="Shade each group's average with the standard deviation (SD) or standard error (SEM) of the trials in it">Spread</span>
+        <div class="seg" id="spread"><button data-s="">None</button><button data-s="sd">± SD</button><button data-s="sem">± SEM</button></div>
+        <span class="addwrap"><button class="primary" id="addChart" disabled>Add a chart</button><div class="addmenu" id="addMenu" hidden></div></span></div>
+      <div class="empty" id="noCharts">
         <b>No charts yet</b>
-        <span>Pick what to plot: the trials overlaid, a measure against the stimulus, spikes as dots…<br>
-          Charts will show the ticked groups in their colors.</span>
+        <span>Add a chart, then choose what it plots: the trials over time, the stimulus, or a measure against the stimulus.<br>
+          Charts show what's ticked in the Trials pane, in its colors.</span>
       </div>
+      <div class="charts" id="charts"></div>
     </section>
 
     <aside class="panel looks">
@@ -139,5 +183,7 @@ select{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);bo
 <input type="color" id="colorpick" hidden>
 <script src="/static/nav.js"></script>
 <script src="/static/analysis.js"></script>
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/charts.js"></script>
 </body>
 </html>

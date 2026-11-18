@@ -1,7 +1,9 @@
 // The Trials pane, on Analysis and the DataPad: the session's groups from /trials/state, and
 // every change sent to /trials/cmd, which saves it (pages.json) and answers with the new state.
 // It fills <section id="trials">; a page with a Colors panel (#page_map…) gets that too, and
-// window.boardTrials(state), if the page has one, hears of every change.
+// window.boardTrials(state) and window.panelsTrials(state), if the page has them, hear of
+// every change. With data-preview on the section (Analysis), ↑ and ↓ step through the list
+// (Shift adds to what's highlighted) and the trial looked at shows below it, every channel.
 'use strict';
 
 const $ = (id) => document.getElementById(id);
@@ -23,6 +25,7 @@ $('trials').innerHTML = `
       <button data-a="split" title="Back into the stimuli it was made of">Split</button>
       <button data-a="move" title="Put these trials in another group">Move to…</button>
       <button data-a="uncolor" title="Back to the color from the Colors setting">Default color</button>
+      <button data-a="delete" class="danger" title="Move these trials' files to the Trash (you can put them back from there)">Delete…</button>
     </div>
     <div class="mover" id="mover" hidden>
       <span class="caption">Move to:</span>
@@ -31,6 +34,7 @@ $('trials').innerHTML = `
     </div>
 
     <div class="groups" id="groups"></div>
+    <div class="tpreview" id="tpreview" hidden><div class="pvtitle" id="pvtitle"></div><div id="pvplots"></div></div>
 
     <div class="foot">
       <button id="tickall">Tick all</button><button id="untickall">Untick all</button><span class="spacer"></span>
@@ -38,13 +42,19 @@ $('trials').innerHTML = `
       <button id="reset" title="Forget the group names you gave and the trials you moved">Reset…</button>
     </div>
     <p class="caption" id="summary"></p>
-    <p class="caption">Click to highlight; Shift or ⌘ adds more. Double-click a name to rename it. Drag ⠿ to reorder, or a trial onto a group to move it. Unticked trials are left out of every chart and measurement.</p>
+    <p class="caption">Click to highlight; Shift or ⌘ adds more<span class="stepnote" hidden>; ↑ and ↓ step through them (Shift adds)</span>. Double-click a name to rename it. Drag ⠿ to reorder, or a trial onto a group to move it. Unticked trials are left out of every chart and measurement.</p>
+    <dialog class="confirm" id="delask"><p class="dtitle" id="deltitle"></p><p class="caption" id="delnames"></p>
+      <p class="caption">You can put them back from the Trash.</p>
+      <div class="dbtns"><button id="delno" autofocus>Cancel</button><button id="delyes" class="danger">Move to Trash</button></div></dialog>
 `;
+const PREVIEW = $('trials').hasAttribute('data-preview');
+if (PREVIEW) document.querySelector('#trials .stepnote').hidden = false;
 const H = {'X-Newt-Key': new URLSearchParams(location.hash.slice(1)).get('k') || ''};
 let S = null;                       // the last state
 let lit = new Set();                // highlighted: 'g:' + group name, or 't:' + trial index
 let open = new Set();               // groups showing their trials
 let lastClick = null;               // for Shift-click ranges of trials
+let cur = null;                     // the entry looked at: 't:' + trial, or 'a:' + group (its average)
 
 async function cmd(d, busy) {
   if (busy) showBusy(busy);
@@ -79,9 +89,12 @@ function spark(t, color) {
 
 // ---------------------------------------------------------------- showing the state
 function show(st) {
+  const before = S && S.folder;
   S = st;
   showBusy(st.busy);
   showProblem(st.problem);
+  if (st.note) showNote(st.note);
+  if (before !== st.folder) cur = null;
   if (!st.folder && st.sessions.length && !st.busy) {      // nothing open yet: the newest session
     return cmd({cmd: 'open', folder: st.sessions[0].path}, 'Reading ' + st.sessions[0].name + '…');
   }
@@ -90,9 +103,19 @@ function show(st) {
   lit = new Set([...lit].filter((k) => k[0] === 'g' ? names.has(k.slice(2)) : trials.has(+k.slice(2))));
   open = new Set([...open].filter((n) => names.has(n)));
   floor = Math.min(0, ...st.groups.flatMap((g) => g.trials.map((t) => t.spark ? Math.min(...t.spark[0]) : 0)));
+  if (cur && !(cur[0] === 'a' ? names.has(cur.slice(2)) : trials.has(+cur.slice(2)))) cur = null;
   fillControls();
   renderGroups();
   if (window.boardTrials) window.boardTrials(st);         // the charts follow (charts.js)
+  if (window.panelsTrials) window.panelsTrials(st);       // the side panels too (sidepanels.js)
+  preview();
+}
+let noteTimer = 0;
+function showNote(text) {
+  const b = $('busy');
+  b.textContent = text; b.hidden = false; b.classList.add('ok');
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => { b.classList.remove('ok'); showBusy(S && S.busy); }, 8000);
 }
 
 function fillControls() {
@@ -148,6 +171,7 @@ function renderGroups() {
   act('split').hidden = !(litGroups.length === 1 && litGroups[0].kind === 'combined');
   act('move').hidden = !nt.length || S.organize === 'time';
   act('uncolor').hidden = !litGroups.some((g) => g.own);
+  act('delete').hidden = !nt.length;
   if (!nt.length) $('mover').hidden = true;
 }
 
@@ -163,7 +187,8 @@ function groupEl(g) {
       <span class="gname" title="${esc(g.name)}">${esc(g.name)}</span>
       <span class="gmeta">${g.kind ? `<span class="badge" title="${g.kind === 'alike' ? 'Group alike stimuli joined these' : 'You combined these'}">${g.kind}</span>` : ''}${on < g.trials.length ? `${on}/` : ''}${g.trials.length}</span>
       <span class="chev">›</span></div>` +
-    (open.has(g.name) ? `<div class="tlist">${g.trials.map((t) => `<div class="trial${t.off ? ' off' : ''}${lit.has('t:' + t.i) ? ' lit' : ''}" data-i="${t.i}" draggable="true">
+    (open.has(g.name) ? `<div class="tlist">${PREVIEW && g.trials.length >= 2 ? `<div class="trial avg${cur === 'a:' + g.name ? ' cur' : ''}" data-avg="1" title="Every channel averaged over this group's ticked trials: click to look at it">
+        <span></span><span class="tname">Average <span class="tnote">· of ${on || g.trials.length}</span></span><span></span><span></span></div>` : ''}${g.trials.map((t) => `<div class="trial${t.off ? ' off' : ''}${lit.has('t:' + t.i) ? ' lit' : ''}${cur === 't:' + t.i ? ' cur' : ''}" data-i="${t.i}" draggable="true">
         <input type="checkbox" ${t.off ? '' : 'checked'}>
         <span class="tname" title="${esc(t.stem + (t.note ? ' · ' + t.note : ''))}">${esc(t.stem)}${t.note ? ` <span class="tnote">· ${esc(t.note)}</span>` : ''}</span>
         ${spark(t, g.color)}<span class="dur">${t.dur == null ? '?' : t.dur.toFixed(1) + ' s'}</span></div>`).join('')}</div>` : '');
@@ -176,7 +201,9 @@ function groupEl(g) {
   el.querySelector('.ghead').ondblclick = (e) => { if (!e.target.closest('.gname')) toggleOpen(g.name); };
   const nm = el.querySelector('.gname');
   nm.ondblclick = (e) => { e.stopPropagation(); rename(nm, g.name); };
-  for (const row of el.querySelectorAll('.trial')) {
+  const avg = el.querySelector('.trial.avg');
+  if (avg) avg.onclick = () => look('a:' + g.name);
+  for (const row of el.querySelectorAll('.trial[data-i]')) {
     const i = +row.dataset.i;
     row.querySelector('input').onclick = (e) => { e.stopPropagation(); cmd({cmd: 'tick', kind: 'block', i, on: e.target.checked}); };
     row.onclick = (e) => highlight('t:' + i, e, g);
@@ -220,7 +247,9 @@ function highlight(key, e, g) {
     lit = lit.has(key) && lit.size === 1 ? new Set() : new Set([key]);
   }
   lastClick = key;
+  if (key[0] === 't' && lit.has(key)) cur = key;          // the trial clicked is the one looked at
   renderGroups();
+  if (key[0] === 't' && cur === key) preview();
 }
 
 function rename(nm, old) {
@@ -277,6 +306,7 @@ $('actions').onclick = (e) => {
   else if (a === 'combine') cmd({cmd: 'combine', names: pages});
   else if (a === 'split') cmd({cmd: 'split', name: pages[0]});
   else if (a === 'uncolor') pages.forEach((name) => cmd({cmd: 'color', name, color: null}));
+  else if (a === 'delete') askDelete(blocks);
   else if (a === 'move') {
     const from = new Set(S.groups.filter((g) => g.trials.some((t) => blocks.includes(t.i))).map((g) => g.name));
     $('moveto').innerHTML = S.groups.filter((g) => !(from.size === 1 && from.has(g.name)))
@@ -316,8 +346,175 @@ if ($('page_map')) {
   $('op').onchange = () => cmd({cmd: 'looks', trial_opacity: +$('op').value});
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !e.target.isContentEditable && e.target.tagName !== 'INPUT') { lit.clear(); $('mover').hidden = true; renderGroups(); }
+  const typing = e.target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || $('delask').open;
+  if (e.key === 'Escape' && !typing) { lit.clear(); $('mover').hidden = true; renderGroups(); }
+  if (typing || !S || !S.folder) return;
+  if (PREVIEW && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    step(e.key === 'ArrowDown' ? 1 : -1, e.shiftKey);
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && [...lit].some((k) => k[0] === 't')) {
+    e.preventDefault();
+    askDelete([...lit].filter((k) => k[0] === 't').map((k) => +k.slice(2)));
+  }
 });
+
+// ---------------------------------------------------------------- ↑ and ↓, and the trial looked at
+// (AnalysisPage.step_list): on to the entry before or after (each group's Average, then its
+// trials), highlighting just it, opening its group and closing the one left; with Shift, on
+// to the next trial, keeping the ones highlighted.
+function groupOf(key) {
+  return key[0] === 'a' ? key.slice(2) : (S.groups.find((g) => g.trials.some((t) => 't:' + t.i === key)) || {}).name;
+}
+function step(d, extend) {
+  const stops = [];
+  for (const g of S.groups) {
+    if (g.trials.length >= 2 && !extend) stops.push('a:' + g.name);
+    for (const t of g.trials) stops.push('t:' + t.i);
+  }
+  if (!stops.length) return;
+  const here = cur;
+  let pos = stops.indexOf(here);
+  if (pos < 0 && here && here[0] === 'a') {                // Shift from an Average: on from its group's first trial
+    const g = S.groups.find((x) => x.name === here.slice(2));
+    const k = g && g.trials.length ? stops.indexOf('t:' + g.trials[0].i) : -1;
+    if (k >= 0) pos = d > 0 ? k - 1 : k;
+  }
+  if (pos < 0) pos = (d > 0 ? 0 : stops.length - 1) - d;
+  const next = stops[Math.max(0, Math.min(stops.length - 1, pos + d))];
+  if (extend) {
+    if (here && here[0] === 't') lit.add(here);
+    lit.add(next);
+  } else {
+    lit = new Set(next[0] === 't' ? [next] : []);
+    const left = here && groupOf(here), to = groupOf(next);
+    if (left && left !== to) open.delete(left);
+  }
+  open.add(groupOf(next));
+  lastClick = next;
+  look(next, true);
+}
+function look(key, scroll) {
+  cur = key;
+  renderGroups();
+  if (scroll) {
+    const el = key[0] === 'a' ? [...$('groups').querySelectorAll('.group')].find((x) => x.querySelector('.gname').textContent === key.slice(2))?.querySelector('.trial.avg')
+      : $('groups').querySelector(`.trial[data-i="${key.slice(2)}"]`);
+    if (el) el.scrollIntoView({block: 'nearest'});
+  }
+  preview();
+}
+window.trialsCurrent = () => cur && cur[0] === 't' ? +cur.slice(2) : null;
+window.showTrial = (i) => {                               // a raster's row clicked: look at that trial
+  const key = 't:' + i;
+  const left = cur && groupOf(cur), to = groupOf(key);
+  if (left && left !== to) open.delete(left);
+  if (to) open.add(to);
+  lit = new Set([key]);
+  lastClick = key;
+  look(key, true);
+};
+
+let pv = {seq: 0, plots: [], shape: '', key: null};
+async function preview() {
+  if (window.boardCurrent) window.boardCurrent();
+  if (!PREVIEW) return;
+  const box = $('tpreview');
+  if (!cur || !S || !S.folder) { box.hidden = true; pv.key = null; return; }
+  box.hidden = false;
+  const seq = ++pv.seq, key = cur;
+  const cols = Math.max(100, Math.round(box.clientWidth - 70));
+  let buf;
+  try {
+    const r = await fetch('/trials/preview', {method: 'POST', headers: H,
+      body: JSON.stringify(key[0] === 'a' ? {avg: key.slice(2), cols} : {i: +key.slice(2), cols})});
+    buf = await r.arrayBuffer();
+  } catch (e) { return; }
+  if (seq !== pv.seq) return;                             // a newer one is on its way
+  const dv = new DataView(buf), hl = dv.getUint32(0, true);
+  const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl)));
+  const title = $('pvtitle');
+  if (head.note) { title.textContent = head.note; drawPreview(null); return; }
+  title.innerHTML = `<span class="dot" style="background:${head.color || 'var(--muted)'}"></span> ${esc(head.title)}`;
+  let off = 4 + hl;
+  const n = head.n, x = new Float64Array(buf, off, n);
+  off += 8 * n;
+  const ys = head.plots.map(() => {
+    const a = new Float32Array(buf, off, n), out = new Array(n);
+    off += 4 * n;
+    for (let k = 0; k < n; k++) { const v = a[k]; out[k] = v === v ? v : null; }
+    return out;
+  });
+  drawPreview({head, x, ys});
+}
+function drawPreview(d) {
+  const host = $('pvplots');
+  if (!d || !window.uPlot) { pv.plots.forEach((u) => u.destroy()); pv.plots = []; pv.shape = ''; host.replaceChildren(); return; }
+  const width = Math.max(160, host.clientWidth), h = 62;
+  const shape = JSON.stringify([width, d.head.plots.map((p) => [p.label, p.unit])]);
+  const color = d.head.color || getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
+  if (shape !== pv.shape) {
+    pv.plots.forEach((u) => u.destroy());
+    pv.plots = [];
+    host.replaceChildren();
+    const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    const muted = css('--muted'), line = css('--line'), font = '11px "IBM Plex Mono", ui-monospace, Menlo, monospace';
+    d.head.plots.forEach((p, k) => {
+      const last = k === d.head.plots.length - 1;
+      const wrap = document.createElement('div');
+      wrap.className = 'pvplot';
+      wrap.innerHTML = `<div class="pvlab">${esc(p.label)}</div>`;
+      host.append(wrap);
+      pv.plots.push(new uPlot({
+        width, height: h + (last ? 22 : 0), padding: [4, 8, 0, 0], legend: {show: false},
+        cursor: {show: false}, scales: {x: {time: false, auto: false}, y: {auto: false}},
+        axes: [{stroke: muted, grid: {show: false}, ticks: {stroke: line, size: 3}, font, size: last ? 22 : 2, space: 60,
+                values: last ? (u, v) => v.map((t) => (+t.toFixed(3)) + ' s') : (u, v) => v.map(() => '')},
+               {stroke: muted, grid: {stroke: line, width: 1}, ticks: {show: false}, font, size: 62, space: 24,
+                values: (u, v) => previewTicks(v, p.unit)}],
+        series: [{}, {stroke: color, width: 1.2, points: {show: false}}],
+      }, [[], []], wrap));
+    });
+    pv.shape = shape;
+  }
+  d.head.plots.forEach((p, k) => {
+    const u = pv.plots[k];
+    let [lo, hi] = p.yr || [-1, 1];
+    if (hi - lo < 1e-12) { const m = Math.abs(lo) * 0.1 || 1; lo -= m; hi += m; }
+    const pad = (hi - lo) * 0.08;
+    u.series[1].stroke = () => color;
+    u.batch(() => {
+      u.setData([d.x, d.ys[k]], false);
+      u.setScale('x', {min: 0, max: d.head.end});
+      u.setScale('y', {min: lo - pad, max: hi + pad});
+    });
+  });
+}
+function previewTicks(vals, unit) {                       // 0.02 V reads as 20 mV
+  const big = Math.max(0, ...vals.filter((v) => v != null).map(Math.abs));
+  const [k, pre] = !unit || unit === 's' || !(big > 0) ? [1, ''] : big < 1e-3 ? [1e6, 'µ'] : big < 1 ? [1e3, 'm'] : [1, ''];
+  const st = vals.length > 1 ? Math.abs(vals[1] - vals[0]) * k : 1;
+  const dec = Math.max(0, Math.min(5, -Math.floor(Math.log10(st || 1) + 1e-9)));
+  return vals.map((v) => String((v * k).toFixed(dec)).replace('-', '−') + ' ' + pre + unit);
+}
+
+// ---------------------------------------------------------------- deleting trials (ReviewView.delete_trials)
+function askDelete(blocks) {
+  if (!blocks.length) return;
+  const stems = S.groups.flatMap((g) => g.trials).filter((t) => blocks.includes(t.i)).map((t) => t.stem);
+  const n = blocks.length;
+  $('deltitle').textContent = `Move ${n} trial${n === 1 ? '' : 's'} to the Trash?`;
+  $('delnames').textContent = stems.slice(0, 6).join(', ') + (stems.length > 6 ? ` and ${stems.length - 6} more` : '');
+  const dlg = $('delask');
+  $('delyes').onclick = () => {
+    dlg.close();
+    for (const b of blocks) lit.delete('t:' + b);
+    cur = null;                                           // (the trials after it move up one)
+    cmd({cmd: 'delete', blocks}, `Moving ${n} trial${n === 1 ? '' : 's'} to the Trash…`);
+  };
+  $('delno').onclick = () => dlg.close();
+  dlg.showModal();
+}
 window.addEventListener('focus', load);                   // the Qt app may have changed the groups meanwhile
 
 load();

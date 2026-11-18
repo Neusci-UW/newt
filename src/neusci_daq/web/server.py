@@ -11,7 +11,14 @@ GET /design/state     JSON: Stimulus Design's segments, trials, run (see Design.
                       out the picture if it is still version N
 POST /design/cmd      JSON {"cmd": ..., "pic": N}: pick, set, per_trial, add, run, once, save... (Design.command)
 GET /trials/state     JSON: the session's trials in their groups (see Trials.state)
-POST /trials/cmd      JSON {"cmd": ...}: open, channel, tick, rename, combine, ... (see Trials.command)
+POST /trials/cmd      JSON {"cmd": ...}: open, channel, tick, rename, combine, gain, fit, alike, calc,
+                      delete, ... (see Trials.command)
+POST /trials/preview  JSON {"i" | "avg", "cols"}: a trial's (or a group's average's) recorded channels,
+                      shrunk, packed as /charts/data packs a chart (see Trials.preview)
+POST /trials/calc     JSON {"kind", "source", "values", "name", "unit", "old"}: a calculated channel's
+                      formula, name, unit, and why it can't be made (see Trials.calc_check)
+GET /spikes/state     JSON: the spike search's settings, the units found (see Spikes.state)
+POST /spikes/cmd      JSON {"cmd": ...}: set, identify, find, clear, unit, unit_color, unit_opacity
 GET /charts/state     JSON: the Analysis board's charts, and what they can show (see Charts.state)
 POST /charts/cmd      JSON {"cmd": ...}: add, remove, set, move, spread (see Charts.command)
 POST /charts/data     JSON {"id", "x0", "x1", "cols"}: what a chart draws, shrunk (see Charts.data)
@@ -102,6 +109,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 return self._json(live.state())
             if path == "/trials/state":
                 return self._json(trials.state())
+            if path == "/spikes/state":
+                return self._json(trials.spikes.state())
             if path == "/charts/state":
                 return self._json(charts.state())
             if path == "/pad/state":
@@ -124,7 +133,9 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
             state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state, "/charts/cmd": charts.state,
                      "/charts/data": dict, "/pad/cmd": pad.state, "/pad/chart": dict, "/pad/preview": dict,
                      "/design/cmd": lambda: design.state(d.get("pic")), "/fig/cmd": figures.state,
-                     "/fig/png": dict, "/fig/export": dict, "/canvas/cmd": figures.canvas}.get(path, trials.state)
+                     "/fig/png": dict, "/fig/export": dict, "/canvas/cmd": figures.canvas,
+                     "/spikes/cmd": trials.spikes.state, "/trials/preview": dict, "/trials/calc": dict,
+                     }.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 out = {}
@@ -134,6 +145,10 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     return self._send(*pad.preview(d))
                 if path == "/pad/chart":
                     return self._json(pad.chart(d))
+                if path == "/trials/preview":
+                    return self._send(*trials.preview(d))
+                if path == "/trials/calc":
+                    return self._json(trials.calc_check(d))
                 if path == "/fig/png":
                     return self._json(figures.picture(d))
                 if path == "/fig/export":
@@ -147,6 +162,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     trials.command(d)
                 elif path == "/charts/cmd":
                     charts.command(d)
+                elif path == "/spikes/cmd":
+                    trials.spikes.command(d)
                 elif path == "/pad/cmd":
                     out = pad.command(d)
                 elif path == "/fig/cmd":

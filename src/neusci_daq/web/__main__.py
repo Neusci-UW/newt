@@ -40,6 +40,7 @@ def main() -> None:
     trials = Trials(data)
     recording = Recording(live, stimulator, data)
     recording.on_saved = trials.added          # a new trial shows on Analysis
+    trials.busy_path = lambda: recording.rec.path if recording.rec.recording else None   # never deleted
     if args.run:
         live.run(True)
     first = Path(args.session) if args.session else next(iter(session_folders(trials.data)), None)

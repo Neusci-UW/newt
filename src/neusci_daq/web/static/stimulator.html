@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stimulator</title>
+<link rel="stylesheet" href="/static/newt.css">
+<style>
+.subtabs{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.subtabs p{margin:0;color:var(--muted);font-size:14px;max-width:80ch}
+.ssgrid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:start}
+@media (max-width:1100px){.ssgrid{grid-template-columns:1fr}}
+.ssgrid .stage{gap:16px}
+.ssgrid .sspic{max-width:640px}
+.ssgrid .ssmodes button{font-size:14px;padding:6px 14px}
+.design{border:1.5px dashed var(--line);border-radius:10px;padding:40px;text-align:center;color:var(--muted)}
+.design b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
+.check{flex-wrap:wrap;line-height:2.1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="subtabs">
+    <div class="seg" id="sub"><button data-t="simple" aria-pressed="true">Simple Stimulus</button><button data-t="design">Stimulus Design</button></div>
+    <p id="about">A stimulator box on screen: pick a pulse type, read the labeled picture, set the numbers, press Stimulate. Watch what happens on Record.</p>
+  </div>
+  <div id="simple"></div>
+  <div id="design" hidden>
+    <div class="design"><b>Stimulus Design comes next</b>
+      Segments and trials, for instructors and projects (your stimulus_design_mockup.html). Its designs will show up here as Lab presets.</div>
+  </div>
+</div>
+<script src="/static/nav.js"></script>
+<script src="/static/stimui.js"></script>
+<script>
+StimUI.mount(document.getElementById('simple'), true);
+document.getElementById('sub').onclick = (e) => {
+  const t = e.target.dataset.t;
+  if (!t) return;
+  for (const b of e.currentTarget.children) b.setAttribute('aria-pressed', String(b.dataset.t === t));
+  document.getElementById('simple').hidden = t !== 'simple';
+  document.getElementById('design').hidden = t !== 'design';
+  document.getElementById('about').hidden = t !== 'simple';
+};
+</script>
+</body>
+</html>

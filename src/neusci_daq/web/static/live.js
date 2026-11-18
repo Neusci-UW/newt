@@ -194,7 +194,6 @@ function lag() {
 function showState(st) {
   S = st;
   $('run').textContent = st.running ? 'Stop' : 'Run';
-  $('fire').disabled = !st.running || st.stim_busy;
   $('chunk').textContent = st.chunk_ms.toFixed(0) + ' ms';
   const status = $('status');
   status.textContent = st.error ? st.error : st.running ? `Recording ${st.fs / 1000} kHz` : 'Stopped';
@@ -216,16 +215,7 @@ function showState(st) {
 }
 
 // ---------------------------------------------------------------- controls
-for (const out of document.querySelectorAll('output[data-for]')) {
-  const inp = $(out.dataset.for);
-  const show = () => { out.textContent = inp.value + (out.dataset.unit ? ' ' + out.dataset.unit : ''); };
-  inp.addEventListener('input', show);
-  show();
-}
 $('run').onclick = () => post({cmd: 'run', on: !(S && S.running)}).then(showState);
-$('fire').onclick = () => post({cmd: 'stim', amp: +$('amp').value, width: +$('width').value,
-                                count: +$('count').value, every: +$('every').value})
-  .then((st) => { showState(st); $('sent').textContent = st.problem || 'Sent: ' + st.sent; });
 
 new ResizeObserver(() => {
   const w = $('strips').clientWidth;
@@ -236,6 +226,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => S &&
 
 (async () => {
   showState(await (await fetch('/live/state', {headers: H})).json());
+  StimUI.mount($('dock'), false);
   buildStrips();
   stream();
   setInterval(lag, 250);

@@ -1,7 +1,7 @@
 // The tabs across the top, the same on every page. The launch's key (after #) goes along.
 'use strict';
 (function () {
-  const TABS = [['Record', 'live.html'], ['Stimulator'], ['Protocols'], ['Analysis', 'analysis.html'],
+  const TABS = [['Record', 'live.html'], ['Stimulator', 'stimulator.html'], ['Protocols'], ['Analysis', 'analysis.html'],
                 ['DataPad'], ['Plot Canvas'], ['Simulators'], ['Lessons']];
   const here = location.pathname.split('/').pop();
   const nav = document.createElement('nav');

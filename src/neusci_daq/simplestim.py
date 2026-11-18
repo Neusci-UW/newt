@@ -17,26 +17,12 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import style
 from .mainparts import LIVE
-from dataclasses import replace
 
-from .stim import Stimulus, to_segments
+from . import simplestimulus as SS
+from .simplestimulus import DEFAULTS, FIELDS, MARKED, MODES, NAMES, WAVES
+from .stim import Stimulus
 
-MODES = (("single", "Single pulse"), ("pair", "Pulse pair"), ("train", "Train"),
-         ("sine", "Sine wave"), ("triangle", "Triangle wave"))
-WAVES = ("sine", "triangle")
-FIELDS = {"single": ("level", "width", "offset"), "pair": ("level", "width", "interval", "offset"),
-          "train": ("level", "width", "rate", "count", "offset"), "sine": ("level", "freq", "dur", "offset"),
-          "triangle": ("level", "freq", "dur", "offset")}
-MARKED = {"single": ("level", "width"), "pair": ("level", "interval"), "train": ("level", "rate", "count"),
-          "sine": ("level", "freq", "dur"), "triangle": ("level", "freq", "dur")}
-NAMES = {"level": "Amplitude", "width": "Width", "interval": "Interval", "rate": "Rate", "count": "Pulses",
-         "freq": "Frequency", "dur": "Duration", "offset": "Offset"}
-MAX_CYCLES = 500               # a triangle wave is made of ramps: 3 per cycle
-DELAY_MS = 2.0                 # 0 V before the first pulse, so the recorded stimulus has a clear start
 DIM = {style.LIGHT: "#d9822b", style.DARK: "#f0a35a"}
-DEFAULTS = dict(mode="single", level=1.0, width=0.2, interval=20.0, rate=20.0, count=5,
-                every=2.0, ramp=False, ramp_by=0.2, ramp_to=10.0, freq=10.0, dur=500.0, offset=0.0,
-                windows=False, before=100.0, after=500.0, repeats=0)
 
 
 def _repeats_spin() -> QtWidgets.QSpinBox:
@@ -54,18 +40,6 @@ class _Spin(QtWidgets.QDoubleSpinBox):
 
     def textFromValue(self, v: float) -> str:
         return f"{v:.{self.decimals()}f}".rstrip("0").rstrip(".") or "0"
-
-
-def triangle_parts(amp_v: float, freq_hz: float, dur_ms: float) -> list[dict]:
-    """A triangle wave around 0 V as ramp segments: up to +amp, down to −amp, back to 0,
-    for as many whole cycles as fit in `dur_ms` (at least one)."""
-    period = 1000.0 / freq_hz
-    cycles = max(1, min(MAX_CYCLES, round(dur_ms / period)))
-    ramp = lambda a, b, ms: {"kind": "ramp", "start": a, "level": b, "dur": ms, "d_level": "", "d_dur": ""}
-    parts = [{"kind": "base", "level": 0.0, "dur": DELAY_MS, "d_level": "", "d_dur": ""}]
-    for _ in range(cycles):
-        parts += [ramp(0.0, amp_v, period / 4), ramp(amp_v, -amp_v, period / 2), ramp(-amp_v, 0.0, period / 4)]
-    return parts
 
 
 def _spin(lo, hi, decimals, suffix, tip):
@@ -492,38 +466,15 @@ class SimpleStimPage(QtWidgets.QWidget):
 
     # -- the stimulus ----------------------------------------------------------------------
     def stimulus(self) -> Stimulus:
-        """What Stimulate sends, in volts at the output, on its offset (from the first
-        sample to the last; the output goes back to 0 V after)."""
-        s = to_segments(self._shape())
-        off = self.offset.value() / (self.main.cfg.stim_scale or 1.0)
-        return replace(s, parts=[{**p, "offset": off} for p in s.parts]) if off else s
+        """What Stimulate sends, in volts at the output (simplestimulus.stimulus)."""
+        return SS.stimulus(self.values(), self.main.cfg.stim_scale or 1.0)
 
     def _shape(self) -> Stimulus:
         """A pulse, two, a train, or a wave, before the offset."""
-        cfg, mode = self.main.cfg, self.mode()
-        scale = cfg.stim_scale or 1.0
-        amp, freq, dur = self.level.value() / scale, self.freq.value(), self.dur.value()
-        if mode == "sine":
-            return Stimulus(shape="sine", delay_ms=DELAY_MS, amplitude_v=amp, freq_hz=freq, duration_ms=dur)
-        if mode == "triangle":
-            return Stimulus(shape="segments", parts=triangle_parts(amp, freq, dur))
-        count = {"single": 1, "pair": 2}.get(mode, self.count.value())
-        interval = {"single": 100.0, "pair": self.interval.value()}.get(mode, 1000.0 / self.rate.value())
-        return Stimulus(shape="pulse", delay_ms=DELAY_MS, amplitude_v=self.level.value() / scale,
-                        width_ms=self.width.value(), count=count, interval_ms=interval)
+        return SS.shape(self.values(), self.main.cfg.stim_scale or 1.0)
 
     def describe(self) -> str:
-        units, mode = self.main.cfg.stim_units or "V", self.mode()
-        off = f" · offset {self.offset.value():g} {units}" if self.offset.value() else ""
-        if mode in WAVES:
-            return (f"{'Sine' if mode == 'sine' else 'Triangle'} {self.level.value():g} {units} · "
-                    f"{self.freq.value():g} Hz · {self.dur.value():g} ms" + off)
-        s = f"{self.level.value():g} {units} · {self.width.value():g} ms"
-        if mode == "pair":
-            s += f" · pair {self.interval.value():g} ms apart"
-        elif mode == "train":
-            s += f" · {self.count.value()} at {self.rate.value():g} Hz"
-        return s + off
+        return SS.describe(self.values(), self.main.cfg.stim_units or "V")
 
     def _changed(self, *_):
         mode = self.mode()

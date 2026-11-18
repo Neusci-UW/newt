@@ -14,7 +14,7 @@ import time
 
 import numpy as np
 
-from .. import backends, colors, config, stim, stimout
+from .. import backends, colors, config, stimout
 from .. import simulation as sim
 from ..config import Channel
 from ..ringbuffer import RingBuffer
@@ -56,7 +56,7 @@ class Live:
                              for c in self.cfg.channels]
         self.window_s = 5.0
         self.cols = 1200              # screen columns the page draws (it tells us)
-        self.last_stim = ""
+        self.last_stim = ""              # what the Stimulator sent last (stimulator.py)
         self._clear = False           # the pump empties the ring (it alone touches it)
         self._dirty = True            # make a frame even without new data (window changed...)
         self._newest_wall = 0.0       # wall time (ms) the newest chunk reached us
@@ -84,17 +84,6 @@ class Live:
     def set_cols(self, n: int) -> None:
         self.cols = max(50, min(4000, int(n)))
         self._dirty = True
-
-    def stimulate(self, amp_v: float, width_ms: float, count: int, interval_ms: float) -> str:
-        if not self.backend.running:
-            raise RuntimeError("Press Run first.")
-        s = stim.Stimulus(shape="pulse", amplitude_v=float(amp_v), width_ms=float(width_ms),
-                          count=int(count), interval_ms=float(interval_ms))
-        wave = s.waveform(self.cfg.stim_rate)
-        stim.check_limit(wave, self.cfg.stim_max_v)
-        self.output.fire(wave, self.cfg.stim_rate)
-        self.last_stim = s.describe(self.cfg.stim_units, self.cfg.stim_scale)
-        return self.last_stim
 
     def state(self) -> dict:
         rates = self.backend.rates(10.0) if self.backend.running and hasattr(self.backend, "rates") else []

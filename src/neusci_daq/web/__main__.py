@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .live import Live
 from .server import make_server
+from .stimulator import Stimulator
 from .trials import Trials, session_folders
 
 
@@ -30,12 +31,13 @@ def main() -> None:
     live = Live()
     if args.run:
         live.run(True)
+    stimulator = Stimulator(live)
     trials = Trials(Path(args.data).expanduser().resolve())
     first = Path(args.session) if args.session else next(iter(session_folders(trials.data)), None)
     if first is not None:           # read while the window opens
         threading.Thread(target=trials.open, args=(first,), daemon=True, name="web-open").start()
     key = args.key or secrets.token_urlsafe(16)
-    srv = make_server(live, trials, key, args.port)
+    srv = make_server(live, trials, stimulator, key, args.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
     print(f"serving {url}", flush=True)
     try:
@@ -52,6 +54,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        stimulator.stop()
         live.close()
         srv.server_close()
 

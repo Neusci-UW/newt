@@ -29,7 +29,6 @@
     <section class="card stage">
       <div class="runbar">
         <button id="run" class="primary">Run</button>
-        <button id="fire" disabled>Stimulate</button>
         <span class="runlab">Window</span>
         <div class="seg" id="win"></div>
         <span class="spacer"></span>
@@ -38,16 +37,7 @@
       <div id="strips"></div>
     </section>
     <aside class="panel">
-      <div class="card">
-        <p class="sect-title">Stimulus</p>
-        <fieldset id="stim">
-          <div class="row"><label for="amp">Size</label><input id="amp" type="range" min="0.1" max="5" step="0.1" value="1"><output data-for="amp" data-unit="V"></output></div>
-          <div class="row"><label for="width">Width</label><input id="width" type="range" min="0.1" max="5" step="0.1" value="1"><output data-for="width" data-unit="ms"></output></div>
-          <div class="row"><label for="count">Pulses</label><input id="count" type="range" min="1" max="10" step="1" value="3"><output data-for="count" data-unit=""></output></div>
-          <div class="row"><label for="every">Every</label><input id="every" type="range" min="5" max="200" step="5" value="20"><output data-for="every" data-unit="ms"></output></div>
-        </fieldset>
-        <p class="caption" id="sent">A 1 V, 1 ms pulse depolarizes cell 1 by about 25 mV.</p>
-      </div>
+      <div class="card" id="dock"></div>
       <div class="card">
         <p class="sect-title">Lag</p>
         <div class="vbox">
@@ -65,6 +55,7 @@
   </div>
 </div>
 <script src="/static/nav.js"></script>
+<script src="/static/stimui.js"></script>
 <script src="/static/vendor/uPlot.iife.min.js"></script>
 <script src="/static/live.js"></script>
 </body>

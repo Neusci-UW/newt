@@ -3,7 +3,9 @@
 GET /                 the first page (Record)      GET /static/...  the pages and their files
 GET /live/stream      never-ending binary: [u32 length][frame] for every frame (see Live._build)
 GET /live/state       JSON: channels, running, rates, ...
-POST /live/cmd        JSON {"cmd": ...}: run, window, cols, stim, lag (the page's lag numbers, printed)
+POST /live/cmd        JSON {"cmd": ...}: run, window, cols, lag (the page's lag numbers, printed)
+GET /stim/state       JSON: Simple Stimulus's settings, what was sent, presets (see Stimulator.state)
+POST /stim/cmd        JSON {"cmd": ...}: set, fire, repeat, stop, preset_save, preset_load, preset_delete
 GET /trials/state     JSON: the session's trials in their groups (see Trials.state)
 POST /trials/cmd      JSON {"cmd": ...}: open, channel, tick, rename, combine, ... (see Trials.command)
 
@@ -21,12 +23,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .live import Live
+from .stimulator import Stimulator
 from .trials import Trials
 
 STATIC = Path(__file__).parent / "static"
 
 
-def make_server(live: Live, trials: Trials, key: str, port: int = 0) -> ThreadingHTTPServer:
+def make_server(live: Live, trials: Trials, stimulator: Stimulator, key: str, port: int = 0) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
@@ -66,13 +69,15 @@ def make_server(live: Live, trials: Trials, key: str, port: int = 0) -> Threadin
                 return self._json(live.state())
             if path == "/trials/state":
                 return self._json(trials.state())
+            if path == "/stim/state":
+                return self._json(stimulator.state())
             self._send(b"not found", "text/plain", 404)
 
         def do_POST(self):
             if not self._keyed():
                 return
             path = self.path.split("?")[0]
-            state = live.state if path == "/live/cmd" else trials.state
+            state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state}.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 out = {}
@@ -80,6 +85,8 @@ def make_server(live: Live, trials: Trials, key: str, port: int = 0) -> Threadin
                     out = self._live(d)
                 elif path == "/trials/cmd":
                     trials.command(d)
+                elif path == "/stim/cmd":
+                    self._stim(d)
                 else:
                     return self._send(b"not found", "text/plain", 404)
                 self._json({**state(), **out})
@@ -94,13 +101,30 @@ def make_server(live: Live, trials: Trials, key: str, port: int = 0) -> Threadin
                 live.set_window(d["s"])
             elif cmd == "cols":
                 live.set_cols(d["n"])
-            elif cmd == "stim":
-                return {"sent": live.stimulate(d["amp"], d["width"], d["count"], d["every"])}
             elif cmd == "lag":
                 print("lag ({engine}, {vis}): Python→screen {age_med:.0f} ms median, {age_p95:.0f} ms p95 "
                       "(→page {net_med:.0f}, →canvas {canvas_med:.0f}) · draw {draw_ms:.2f} ms · {fps:.0f} frames/s "
                       "· screen {refresh:.0f}/s · Python frame {build_ms:.2f} ms".format(**d), flush=True)
             return {}
+
+        def _stim(self, d: dict) -> None:
+            cmd = d.get("cmd")
+            if cmd == "set":
+                stimulator.set(d["values"])
+            elif cmd == "fire":
+                stimulator.fire()
+            elif cmd == "repeat":
+                stimulator.start_repeat()
+            elif cmd == "stop":
+                stimulator.stop()
+            elif cmd == "preset_save":
+                stimulator.save_preset(d["name"])
+            elif cmd == "preset_load":
+                stimulator.load_preset(d["name"])
+            elif cmd == "preset_delete":
+                stimulator.delete_preset(d["name"])
+            else:
+                raise ValueError(f"Unknown command {cmd!r}")
 
         def _stream(self):
             self.send_response(200)

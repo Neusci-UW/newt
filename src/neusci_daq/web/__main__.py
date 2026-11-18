@@ -13,6 +13,7 @@ import secrets
 import threading
 import webbrowser
 from pathlib import Path
+from types import SimpleNamespace
 
 from .breadboard import Breadboard
 from .app import App, window_dialog
@@ -43,6 +44,39 @@ def load_config(path: str | None, backend: str | None):
     return cfg
 
 
+def build(data: Path, key: str, port: int = 0, cfg=None, config_path: str | None = None):
+    """The app's parts, wired together, and their server: (server, parts). main() and the smoke
+    test (tests/test_web.py) both make the app here, so the test runs what the window runs."""
+    live = Live(cfg, config_path)
+    stimulator = Stimulator(live)
+    design = Design(live, stimulator)
+    trials = Trials(data)
+    recording = Recording(live, stimulator, data)
+    recording.on_saved = trials.added          # a new trial shows on Analysis
+    trials.busy_path = lambda: recording.rec.path if recording.rec.recording else None   # never deleted
+    charts, pad = Charts(trials), Pad(trials)
+    figures = Figures(trials, pad, charts)
+    breadboard = Breadboard(live, stimulator, data)
+    app = App(data, live, trials, recording, stimulator, design)
+    srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, port,
+                      breadboard=breadboard, app=app)
+    return srv, SimpleNamespace(live=live, stimulator=stimulator, design=design, trials=trials, recording=recording,
+                                charts=charts, pad=pad, figures=figures, breadboard=breadboard, app=app)
+
+
+def address(srv, key: str) -> str:
+    """Where the window opens: Record, at its own address (the tabs are links beside it), with the key."""
+    return f"http://127.0.0.1:{srv.server_address[1]}/static/live.html#k={key}"
+
+
+def close(srv, parts) -> None:
+    parts.design.stop()
+    parts.stimulator.stop()
+    parts.live.close()                 # (ends the trial being recorded)
+    parts.recording.close()
+    srv.server_close()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m neusci_daq.web")
     ap.add_argument("--browser", action="store_true", help="open in your web browser, not a window")
@@ -57,27 +91,16 @@ def main() -> None:
     ap.add_argument("--key", help=argparse.SUPPRESS)      # a fixed key (for previews); default: a new one
     args = ap.parse_args()
 
-    live = Live(load_config(args.config, args.backend), args.config)
-    stimulator = Stimulator(live)
-    design = Design(live, stimulator)
     data = Path(args.data).expanduser().resolve()
-    trials = Trials(data)
-    recording = Recording(live, stimulator, data)
-    recording.on_saved = trials.added          # a new trial shows on Analysis
-    trials.busy_path = lambda: recording.rec.path if recording.rec.recording else None   # never deleted
+    key = args.key or secrets.token_urlsafe(16)
+    srv, parts = build(data, key, args.port, load_config(args.config, args.backend), args.config)
+    live, trials, figures, breadboard, app = parts.live, parts.trials, parts.figures, parts.breadboard, parts.app
     if args.run:
         live.run(True)
     first = Path(args.session) if args.session else next(iter(session_folders(trials.data)), None)
     if first is not None:           # read while the window opens
         threading.Thread(target=trials.open, args=(first,), daemon=True, name="web-open").start()
-    key = args.key or secrets.token_urlsafe(16)
-    charts, pad = Charts(trials), Pad(trials)
-    figures = Figures(trials, pad, charts)
-    breadboard = Breadboard(live, stimulator, data)
-    app = App(data, live, trials, recording, stimulator, design)
-    srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, args.port,
-                      breadboard=breadboard, app=app)
-    url = f"http://127.0.0.1:{srv.server_address[1]}/static/live.html#k={key}"
+    url = address(srv, key)
     print(f"serving {url}", flush=True)
     try:
         if args.browser or args.serve:
@@ -104,11 +127,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        design.stop()
-        stimulator.stop()
-        live.close()                   # (ends the trial being recorded)
-        recording.close()
-        srv.server_close()
+        close(srv, parts)
 
 
 if __name__ == "__main__":

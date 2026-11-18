@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help</title>
+<link rel="stylesheet" href="/static/newt.css">
+<style>
+.helpgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;align-items:start}
+.card h2{font-size:18px;font-weight:600;margin:0 0 8px}
+.card p{margin:0 0 10px;max-width:75ch}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin:0;font-size:14.5px}
+.keys dt{font-family:var(--font-mono);font-size:13px;white-space:nowrap}
+.keys dt kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--bg)}
+.keys dd{margin:0}
+.warn{color:var(--dim)}
+.gloss{display:grid;grid-template-columns:minmax(110px,max-content) 1fr;gap:6px 14px;margin:6px 0 0;font-size:14px}
+.gloss dt{font-weight:600}
+.gloss dd{margin:0;color:var(--muted)}
+.topics{display:flex;flex-direction:column;gap:20px}
+code{font-family:var(--font-mono);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Help</h1>
+  <p>How Newt keeps your work, the keys that work on every tab, and what the words on Analysis mean.</p>
+</header>
+
+<div class="helpgrid">
+  <section class="card">
+    <h2>Keys</h2>
+    <dl class="keys">
+      <dt><kbd>Esc</kbd></dt><dd>Stops any stimulus, from any tab, and sets the outputs to 0 V.</dd>
+      <dt><kbd class="mod"></kbd> <kbd>S</kbd></dt><dd>Save the session in its Newt file (the first time, it asks where). Add <kbd>Shift</kbd> to save it as another file.</dd>
+      <dt><kbd class="mod"></kbd> <kbd>O</kbd></dt><dd>Open a Newt file.</dd>
+      <dt><kbd>C</kbd></dt><dd>On Record, while a trial is recording: type a comment. It's saved at that moment in the trial.</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Your files</h2>
+    <p>A <b>Newt file</b> (<code>.newt</code>) holds a whole session: its trials, what you worked out on Analysis,
+      the DataPad and the plots, and the stimulus settings. Open it again and Newt is as you left it. The Qt
+      version of Newt opens the same files.</p>
+    <p>Newt records each trial to the computer as it comes in, into a folder of its own, so nothing is lost if
+      the computer crashes. <b>Save</b> packs that folder into one file you can keep, share or hand in.</p>
+    <p><b>Import</b> opens a LabChart or MATLAB <code>.mat</code> (it isn't changed: Newt keeps its own copy), or
+      an <code>.argus</code> file (Newt's old name). <b>Export</b> writes the trials as a <code>.mat</code> for
+      LabChart or MATLAB.</p>
+  </section>
+
+  <section class="card">
+    <h2>The stimulator is safe to leave</h2>
+    <p>Every stimulus ends at 0 V. The outputs also go to 0 V when you press <kbd>Esc</kbd> or Stop, when you close
+      Newt's window, and a few seconds after the last Newt page closes (a browser tab, say), so nothing is left on.</p>
+  </section>
+</div>
+
+<div class="topics" id="topics"></div>
+</div>
+<script src="/static/nav.js"></script>
+<script>
+'use strict';
+(async function () {
+  const H = {'X-Newt-Key': new URLSearchParams(location.hash.slice(1)).get('k') || ''};
+  for (const k of document.querySelectorAll('kbd.mod')) k.textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  let st;
+  try { st = await (await fetch('/app/help', {headers: H})).json(); } catch (e) { return; }
+  const box = document.getElementById('topics');
+  const head = document.createElement('header');
+  head.innerHTML = '<h1>Analysis, explained</h1><p>What the ? buttons on Analysis say. Some of these tools are only in the Qt version of Newt so far.</p>';
+  box.append(head);
+  const grid = document.createElement('div');
+  grid.className = 'helpgrid';
+  for (const t of Object.values(st.topics || {})) {
+    const c = document.createElement('section');
+    c.className = 'card';
+    c.innerHTML = `<h2></h2><p class="t"></p>${t.warning ? '<p class="warn"></p>' : ''}<dl class="gloss"></dl>`;
+    c.querySelector('h2').textContent = t.title;
+    c.querySelector('.t').innerHTML = t.text;          // the topics' own words, with <b> for terms (helptopics.py)
+    if (t.warning) c.querySelector('.warn').textContent = t.warning;
+    const dl = c.querySelector('dl');
+    for (const [term, meaning] of t.glossary) {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = term;
+      dd.textContent = meaning;
+      dl.append(dt, dd);
+    }
+    grid.append(c);
+  }
+  box.append(grid);
+})();
+</script>
+</body>
+</html>

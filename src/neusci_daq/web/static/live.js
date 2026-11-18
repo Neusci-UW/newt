@@ -16,7 +16,7 @@ const H = {'X-Newt-Key': new URLSearchParams(location.hash.slice(1)).get('k') ||
 const post = (d) => fetch('/live/cmd', {method: 'POST', headers: H, body: JSON.stringify(d)}).then((r) => r.json());
 const minus = (s) => s.replace('-', '−');
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const dark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+const dark = () => (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
 
 function fmtVal(v, units) {
   if (!isFinite(v)) return '–';
@@ -289,6 +289,7 @@ new ResizeObserver(() => {
   sendCols();
 }).observe($('strips'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => S && buildStrips());
+addEventListener('newt-theme', (e) => { e.preventDefault(); if (S) buildStrips(); });    // the switch (app.js)
 
 (async () => {
   showState(await (await fetch('/live/state', {headers: H})).json());

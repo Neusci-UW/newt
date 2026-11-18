@@ -16,4 +16,5 @@
     nav.append(a);
   }
   document.querySelector('.wrap').prepend(nav);
+  document.head.append(Object.assign(document.createElement('script'), {src: '/static/app.js'}));   // File, theme, Esc
 })();

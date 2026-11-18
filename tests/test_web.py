@@ -161,6 +161,28 @@ def test_every_route_in_the_servers_notes_answers(web):
         assert status in (200, 400), f"POST {path} {{}}: {status} {body[:300]!r}"
 
 
+# ---------------------------------------------------------------- shared with the Qt app
+def test_groups_are_colored_by_the_one_function_both_front_ends_use():
+    from neusci_daq import colors, groupsfile
+    from neusci_daq.analysispage import AnalysisPage
+    from neusci_daq.web.trials import Trials
+    assert Trials.group_color is colors.page_color                 # the HTML side
+    assert "colors.page_color(" in Path(AnalysisPage.group_color.__code__.co_filename).read_text()   # the Qt tab
+    names = ["a", "b", "c"]
+    looks = {**groupsfile.load(None), "first_color": "#ff0000", "last_color": "#0000ff"}
+    for style in colors.PAGE_STYLES:                               # every Groups setting gives a color
+        got = [colors.page_color(g, names, {**looks, "page_map": style}) for g in range(3)]
+        assert all(re.fullmatch(r"#[0-9a-fA-F]{6}", c) for c in got), (style, got)
+    two = {**looks, "page_map": colors.TWO}
+    assert [colors.page_color(g, names, two) for g in (0, 2)] == ["#ff0000", "#0000ff"]     # first to last
+    assert colors.page_color(1, names, {**two, "colors": {"b": "#123456"}}) == "#123456"    # its own color
+    hidden = {**two, "hidden_groups": ["b"]}                       # the groups left showing take the ends
+    assert [colors.page_color(g, names, hidden) for g in (0, 2)] == ["#ff0000", "#0000ff"]
+    by = {"a": 0.0, "b": 10.0, "c": 5.0}                           # Color groups by: along a measure
+    assert [colors.page_color(g, names, two, by) for g in (0, 1)] == ["#ff0000", "#0000ff"]
+    assert colors.page_color(0, names, {**looks, "page_map": colors.ONE, "base_color": "#00ff00"}) == "#00ff00"
+
+
 # ---------------------------------------------------------------- one pass through the app
 def test_run_stimulate_and_record_then_the_trial_is_on_analysis(web):
     rec = web.parts.recording

@@ -134,6 +134,30 @@ def along(style: str, f: float, looks: dict):
     return sample(style if style in MAPS else "Viridis", f)
 
 
+def page_color(g: int, names: list[str], looks: dict, values: dict | None = None) -> str:
+    """Group g's color ("#rrggbb") among `names`, the groups in order: the one you gave it; else
+    along the Groups setting, by Color groups by's measure (`values`: {group: its value}, when
+    one is picked) or by its place among the groups left showing; else (Palette) from the
+    groups' palette. `looks` is the session's (groupsfile.load). The Qt Analysis tab and the
+    HTML front end both color groups with this."""
+    name = names[g] if g < len(names) else None
+    if looks["colors"].get(name):
+        return looks["colors"][name]
+    way, values = looks["page_map"], values or {}
+    if name in values:                             # Color groups by: along a measure
+        left = [n for n in names if n in values and n not in looks["hidden_groups"]] or [name]
+        lo, hi = min(values[n] for n in left), max(values[n] for n in left)
+        return along(way, (values[name] - lo) / (hi - lo) if hi > lo else 0.5, looks).name()
+    if way == ONE:
+        return picked(looks, "base_color")
+    if way in MAPS or way in (SHADES, TWO):        # first group left showing to last
+        left = [n for n in names if n not in looks["hidden_groups"]]
+        place = left.index(name) if name in left else g
+        f = 1.0 if way == SHADES and len(left) < 2 else place / max(1, len(left) - 1)
+        return along(way, f, looks).name()
+    return group_color(g)
+
+
 def alpha(opacity: float) -> float:
     """How solid (0 to 255) the Opacity setting (0 to 1) draws, never quite invisible."""
     return 255 * min(1.0, max(0.02, opacity))

@@ -144,9 +144,7 @@ function fillColors() {
   const L = S.looks;
   $('page_map').innerHTML = S.page_styles.map((s) => `<option${s === (L.page_map || 'Palette') ? ' selected' : ''}>${s}</option>`).join('');
   $('trial_map').innerHTML = S.trial_styles.map((s) => `<option${s === (L.trial_map || 'Solid') ? ' selected' : ''}>${s}</option>`).join('');
-  const style = L.page_map || 'Palette';
-  const picks = style === 'From one color to another' ? [['first_color', 'First', '#0072B2'], ['last_color', 'Last', '#D55E00']]
-    : style === 'One color' || style === 'Shades of one color' ? [['base_color', 'Color', '#0072B2']] : [];
+  const picks = S.picks || [];              // the colors this Groups setting is made from (colors.PICKS)
   $('picks').innerHTML = picks.map(([k, t, dflt]) => `<label>${t} <input type="color" data-k="${k}" value="${L[k] || dflt}"></label>`).join('');
   $('picks').hidden = !picks.length;
   const shown = S.groups.filter((g) => !g.hidden).map((g) => g.color);

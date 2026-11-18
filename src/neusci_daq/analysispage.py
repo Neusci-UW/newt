@@ -1336,29 +1336,11 @@ class AnalysisPage(QtWidgets.QWidget):
             self.set_page_color(name, c.name())
 
     def group_color(self, g: int, names: list[str] | None = None, looks: dict | None = None) -> str:
-        """Page g's color (of `names`; default the pages here): the one you gave it; else along
-        the Groups setting, by Color groups by's measure or by its place among the pages left
-        showing; else (Palette) from a palette in a different order from the unit colors, so
-        they don't look alike."""
+        """Page g's color (of `names`; default the pages here): see colors.page_color, which the
+        HTML front end colors groups with too."""
         names = [n for n, _ in self.shown] if names is None else names
         looks = self._looks if looks is None else looks
-        name = names[g] if g < len(names) else None
-        if looks["colors"].get(name):
-            return looks["colors"][name]
-        way = looks["page_map"]
-        values = self._page_values if looks.get("color_by") else {}
-        if name in values:                             # Color groups by: along a measure
-            left = [n for n in names if n in values and n not in looks["hidden_groups"]] or [name]
-            lo, hi = min(values[n] for n in left), max(values[n] for n in left)
-            return colors.along(way, (values[name] - lo) / (hi - lo) if hi > lo else 0.5, looks).name()
-        if way == colors.ONE:
-            return colors.picked(looks, "base_color")
-        if way in colors.MAPS or way in (colors.SHADES, colors.TWO):    # first page left showing to last
-            left = [n for n in names if n not in looks["hidden_groups"]]
-            place = left.index(name) if name in left else g
-            f = 1.0 if way == colors.SHADES and len(left) < 2 else place / max(1, len(left) - 1)
-            return colors.along(way, f, looks).name()
-        return colors.group_color(g)
+        return colors.page_color(g, names, looks, self._page_values if looks.get("color_by") else {})
 
     def plan(self, chosen: list[int], picked: list[int] | None = None, pages_picked: list[str] | None = None
              ) -> tuple[list[tuple[int, str, list[int]]], list[int]]:

@@ -33,6 +33,7 @@ from .stimulator import read_settings, update_settings
 
 SPARK = 42                          # columns in a trial's little stimulus picture
 NONE_FOUND = "No stimulus found"
+PICK_NAMES = {"base_color": "Color", "first_color": "First", "last_color": "Last"}   # (colors.PICKS)
 HAND = (0.0, None)                  # the repeats, as Qt's Repeats box has them until set: found by itself
 QT_SETTINGS = ("neusci", "neusci-daq-visualizer")
 
@@ -371,6 +372,7 @@ class Trials:
             "looks": {k: d[k] for k in ("page_map", "trial_map", "trial_opacity", "base_color", "first_color",
                                         "last_color", "color_by", "avg_each")},
             "page_styles": list(colors.PAGE_STYLES), "trial_styles": list(colors.TRIAL_STYLES),
+            "picks": [[k, PICK_NAMES[k], colors.picked(d, k)] for k in colors.PICKS.get(d["page_map"], ())],
             "changed": bool(d["moved"] or d["renamed"]),
             "alike": self._alike_view(shown, auto, d, [g["color"] for g in groups]),
             # Channels: gains, the stimulus fit, calculated channels
@@ -400,35 +402,7 @@ class Trials:
                 out[name] = float(v)
         return out
 
-    @staticmethod
-    def group_color(g: int, names: list[str], looks: dict, values: dict) -> str:
-        """Group g's color, as the Qt Analysis tab works it out (AnalysisPage.group_color)."""
-        given = looks["colors"].get(names[g]) if g < len(names) else None
-        if given:
-            return given
-        style = looks["page_map"]
-        left = [n for n in names if n not in looks["hidden_groups"]]
-        if g < len(names) and names[g] in values:      # Color groups by: along a measure
-            vals = [values[n] for n in left if n in values] or [values[names[g]]]
-            lo, hi = min(vals), max(vals)
-            f = (values[names[g]] - lo) / (hi - lo) if hi > lo else 0.5
-            if style == colors.SHADES:
-                return colors.shade(looks.get("base_color") or colors.BASE_COLOR, f).name()
-            if style == colors.TWO:
-                return colors.blend(looks.get("first_color"), looks.get("last_color"), f).name()
-            return colors.sample(style if style in colors.MAPS else "Viridis", f).name()
-        place = left.index(names[g]) if g < len(names) and names[g] in left else g
-        if style in (colors.ONE, colors.SHADES):
-            base = looks.get("base_color") or colors.BASE_COLOR
-            if style == colors.ONE:
-                return base
-            return colors.shade(base, place / max(1, len(left) - 1) if len(left) > 1 else 1.0).name()
-        if style in colors.MAPS or style == colors.TWO:
-            f = place / max(1, len(left) - 1)
-            if style == colors.TWO:
-                return colors.blend(looks.get("first_color"), looks.get("last_color"), f).name()
-            return colors.sample(style, f).name()
-        return colors.group_color(g)
+    group_color = staticmethod(colors.page_color)      # as the Qt Analysis tab colors them
 
     # -- Group alike stimuli (AnalysisPage._alike_groups, _show_alike) ------------------------------
     def _shapes(self, points: list) -> np.ndarray:
@@ -713,9 +687,9 @@ class Trials:
             names = list(shown)
             at, row = names.index(c["name"]), int(c["row"])
             names.insert(row - 1 if at < row else row, names.pop(at))
-            d.update(order=names, sort="", sorts=[])
+            d.update(order=names, sorts=[])
         elif cmd == "sorts":
-            d.update(sorts=[[str(k), -1 if w == -1 else 1] for k, w in c["sorts"]], sort="")
+            d.update(sorts=[[str(k), -1 if w == -1 else 1] for k, w in c["sorts"]])
         elif cmd == "organize":
             d["organize"] = "time" if c["key"] == "time" else ""
         elif cmd == "combine":

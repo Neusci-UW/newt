@@ -9,10 +9,9 @@ from pathlib import Path
 from pyqtgraph.Qt import QtWidgets
 
 from . import config as cfgmod
-from . import session
+from . import rigsetup
 from . import trialfile
 from .channels import ChannelRow, ChannelStrip
-from .config import Channel, Config, valid_inputs
 from . import colors
 from .mainparts import LIVE, REVIEW
 from .units import whole
@@ -50,17 +49,11 @@ class ChannelSetupMixin:
         self._stim_monitor_changed(phys)
 
     def add_channel(self) -> bool:
-        used = {r.ch.physical for r in self.rows}
-        free = [p for p in valid_inputs(self.cfg) if p not in used]
-        if not free:
+        ch = rigsetup.new_channel(self.cfg, [r.ch for r in self.rows])
+        if ch is None:
             self._channel_message("All inputs are already in use.")
             return False
-        names = {r.ch.name for r in self.rows}
-        n = len(self.rows) + 1
-        while f"Ch{n}" in names:
-            n += 1
-        color = colors.next_color(r.ch.color for r in self.rows)
-        return self.apply_channels(self._copy_rows() + [ChannelRow(Channel(free[0], f"Ch{n}", color=color))])
+        return self.apply_channels(self._copy_rows() + [ChannelRow(ch)])
 
     # -- colors (display only: allowed while recording, never restarts) ----
     def _channel_recolored(self, strip: ChannelStrip, color: str):
@@ -143,9 +136,7 @@ class ChannelSetupMixin:
         if self._overlay_sel:
             self._draw_overlay()                 # the overlaid trials match it
 
-    @staticmethod
-    def _layout(channels: list[Channel]) -> list[tuple]:
-        return [(c.physical, c.name, c.units) for c in channels]
+    _layout = staticmethod(rigsetup.layout)
 
     def apply_channels(self, rows: list[ChannelRow]) -> bool:
         """Switch to a new channel setup (see apply_setup)."""
@@ -183,11 +174,9 @@ class ChannelSetupMixin:
             changes["terminal_config"] = terminal_config
             if terminal_config == "DIFF":
                 # Say which channel to move, rather than a generic "ai5 isn't available".
-                stuck = [r.ch for r in rows if r.ch.physical not in ("ai0", "ai1", "ai2", "ai3")]
+                stuck = rigsetup.diff_problem([r.ch for r in rows])
                 if stuck:
-                    names = ", ".join(f"{c.name} ({c.physical})" for c in stuck)
-                    return refuse(f"Can't switch to DIFF: {names} must move to ai0–ai3 or be removed "
-                                  "first, because DIFF uses ai4–ai7 as the minus inputs.")
+                    return refuse(stuck)
         trial = self.cfg.with_channels([r.ch for r in rows], **changes)
         try:
             with warnings.catch_warnings():
@@ -246,17 +235,7 @@ class ChannelSetupMixin:
         return r == B.Ok
 
     # -- sampling rate and wiring ------------------------------------------
-    @staticmethod
-    def _parse_rate(text: str) -> float | None:
-        t = text.lower().replace(",", "").replace("hz", "").strip()
-        mult = 1.0
-        if t.endswith("k"):
-            t, mult = t[:-1].strip(), 1000.0
-        try:
-            v = float(t) * mult
-        except ValueError:
-            return None
-        return v if v > 0 else None
+    _parse_rate = staticmethod(rigsetup.parse_rate)
 
     def _rate_entered(self):
         # Selecting a preset fires both activated and editingFinished, and a

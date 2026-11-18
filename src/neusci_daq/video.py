@@ -26,6 +26,7 @@ from pathlib import Path
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import amscope
+from .videofile import save_nudge, sidecar, video_ms, video_of
 
 try:
     from PyQt6.QtMultimedia import (QCamera, QMediaCaptureSession, QMediaDevices, QMediaPlayer,
@@ -74,35 +75,6 @@ NONE_FOUND = ("No camera found. Plug it in and it appears here. If it's plugged 
               "Windows Camera app show it? Some microscope cameras (many AmScope models) only work "
               "with their own software and aren't listed as cameras. Close that software if it's "
               "open: only one program can use a camera at a time.")
-
-
-def sidecar(block: Path) -> Path:
-    return Path(block).with_suffix(".video.json")
-
-
-def video_of(block: Path) -> tuple[Path, float] | None:
-    """(video file, offset_s) recorded with this block, or None."""
-    meta = sidecar(block)
-    if not meta.exists():
-        return None
-    try:
-        d = json.loads(meta.read_text())
-        f = Path(block).parent / d["file"]
-        return (f, float(d.get("offset_s", 0.0)) + float(d.get("nudge_s", 0.0))) if f.exists() else None
-    except (ValueError, KeyError, OSError):
-        return None
-
-
-def save_nudge(block: Path, nudge_s: float) -> None:
-    meta = sidecar(block)
-    d = json.loads(meta.read_text())
-    d["nudge_s"] = float(nudge_s)
-    meta.write_text(json.dumps(d, indent=1))
-
-
-def video_ms(t_block: float, offset_s: float) -> int:
-    """Where in the video (ms) a time in the block (s) is."""
-    return max(0, int(round((t_block - offset_s) * 1000)))
 
 
 class CameraPanel(QtWidgets.QFrame):

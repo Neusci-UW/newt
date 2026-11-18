@@ -4,7 +4,11 @@ GET /                 the first page (Record)      GET /static/...  the pages an
 GET /live/stream      never-ending binary: [u32 length][frame] for every frame (see Live._build)
 GET /live/state       JSON: channels, running, rates, ...
 POST /live/cmd        JSON {"cmd": ...}: run, window, cols, lag (the page's lag numbers, printed);
-                      record, comment, label, new_session, add_to, sessions (Recording.command)
+                      record, comment, label, new_session, add_to, sessions (Recording.command);
+                      setup_..., calc_..., yrange, recolor (Rig.command); review_..., comment_...
+                      (Review.command)
+POST /live/review     JSON {"x0", "x1", "cols"}: the reviewed trial, packed as a live frame
+POST /live/video      the reviewed trial's video (mp4), if the Qt app recorded one
 GET /stim/state       JSON: Simple Stimulus's settings, what was sent, presets (see Stimulator.state)
 POST /stim/cmd        JSON {"cmd": ...}: set, fire, repeat, stop, preset_save, preset_load, preset_delete
 GET /design/state     JSON: Stimulus Design's segments, trials, run (see Design.state); ?pic=N leaves
@@ -68,6 +72,8 @@ from .live import Live
 from .network import Network
 from .pad import Pad
 from .record import COMMANDS as RECORD_COMMANDS, Recording
+from .review import COMMANDS as REVIEW_COMMANDS
+from .rig import COMMANDS as RIG_COMMANDS
 from .stimulator import Stimulator
 from .trials import Trials
 
@@ -155,6 +161,7 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                      "/fig/png": dict, "/fig/export": dict, "/canvas/cmd": figures.canvas,
                      "/spikes/cmd": trials.spikes.state, "/trials/preview": dict, "/trials/calc": dict,
                      "/breadboard/cmd": breadboard.state if breadboard else dict,
+                     "/live/review": dict, "/live/video": dict,
                      }.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -163,6 +170,10 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     return self._send(*charts.data(d))
                 if path == "/pad/preview":
                     return self._send(*pad.preview(d))
+                if path == "/live/review":
+                    return self._send(*live.review.frame(d))
+                if path == "/live/video":
+                    return self._send(*live.review.video_bytes(d))
                 if path == "/pad/chart":
                     return self._json(pad.chart(d))
                 if path == "/trials/preview":
@@ -223,6 +234,10 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 live.set_cols(d["n"])
             elif cmd in RECORD_COMMANDS:
                 return recording.command(d)
+            elif cmd in RIG_COMMANDS:
+                return live.rig.command(d)
+            elif cmd in REVIEW_COMMANDS:
+                return live.review.command(d)
             elif cmd == "lag":
                 print("lag ({engine}, {vis}): Python→screen {age_med:.0f} ms median, {age_p95:.0f} ms p95 "
                       "(→page {net_med:.0f}, →canvas {canvas_med:.0f}) · draw {draw_ms:.2f} ms · {fps:.0f} frames/s "

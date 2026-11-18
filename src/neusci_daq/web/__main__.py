@@ -1,5 +1,8 @@
-"""Newt's HTML front end: python -m neusci_daq.web [--run] [--session FOLDER] [--data DIR]
-[--browser | --serve] [--port N]
+"""Newt's HTML front end: python -m neusci_daq.web [--config FILE] [--backend B] [--run]
+[--session FOLDER] [--data DIR] [--browser | --serve] [--port N]
+
+Without --config, Record starts on the simulated rig (three cells and the stimulus); with
+one (e.g. config.toml), on its device and channels, read as the Qt app reads it.
 
 Opens a native window (pywebview: WebKit on macOS) on pages served from this process;
 --browser serves them to your web browser instead, --serve only serves (Ctrl+C to quit)."""
@@ -23,18 +26,37 @@ from .stimulator import Stimulator
 from .trials import Trials, session_folders
 
 
+def load_config(path: str | None, backend: str | None):
+    """The config file's setup (as the Qt app's __main__ reads it), or None: the simulated rig."""
+    if path is None and backend is None:
+        return None
+    from .. import config
+    from .live import make_cfg
+    cfg = config.load(path) if path else make_cfg()
+    if backend:
+        cfg.backend = backend
+        if backend == "audio":
+            from .. import audio
+            audio.use_audio_channels(cfg)
+        config.validate(cfg)
+    return cfg
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m neusci_daq.web")
     ap.add_argument("--browser", action="store_true", help="open in your web browser, not a window")
     ap.add_argument("--serve", action="store_true", help="only serve the pages (open the printed address yourself)")
     ap.add_argument("--port", type=int, default=0, help="port to serve on (default: any free one)")
+    ap.add_argument("--config", help="a config file (as the Qt app's -c, e.g. config.toml): its device and channels")
+    ap.add_argument("--backend", choices=["nidaqmx", "multichannelio", "simulated", "audio"],
+                    help="override the input device in the config")
     ap.add_argument("--run", action="store_true", help="start recording right away")
     ap.add_argument("--data", default="data", help="the data folder, where sessions are (default: ./data)")
     ap.add_argument("--session", help="a session folder to open on Analysis (default: the newest in --data)")
     ap.add_argument("--key", help=argparse.SUPPRESS)      # a fixed key (for previews); default: a new one
     args = ap.parse_args()
 
-    live = Live()
+    live = Live(load_config(args.config, args.backend), args.config)
     stimulator = Stimulator(live)
     design = Design(live, stimulator)
     data = Path(args.data).expanduser().resolve()
@@ -72,7 +94,7 @@ def main() -> None:
                 if isinstance(got, (list, tuple)):
                     got = got[0] if got else None
                 return got
-            figures.ask_path = ask_path
+            figures.ask_path = live.rig.ask_path = ask_path
             breadboard.ask_path = ask_path
             webview.start()
     except KeyboardInterrupt:

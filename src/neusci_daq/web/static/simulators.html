@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulators</title>
+<link rel="stylesheet" href="/static/newt.css">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<style>
+.subtabs{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.subtabs p{margin:0;color:var(--muted);font-size:14px;max-width:80ch}
+.coming{color:var(--muted);font-size:15px;padding:28px 16px;text-align:center}
+/* the Breadboard (breadboard.js) */
+:root{--bb:#f7f6f2;--hole:#9aa0a8;--chan:#e6e9e5;--warn:#8a5a00}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bb:#2a2d33;--hole:#5a5f68;--chan:#1c2120;--warn:#f2c14e}}
+:root[data-theme="dark"]{--bb:#2a2d33;--hole:#5a5f68;--chan:#1c2120;--warn:#f2c14e}
+.bbgrid [hidden]{display:none !important}
+.bbgrid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
+@media (max-width:1100px){.bbgrid{grid-template-columns:1fr}}
+.bbtools{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.bbtools button{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;font-size:13.5px}
+.bbtools button svg{width:34px;height:16px;flex:none}
+.bbtools button[aria-pressed=true]{background:color-mix(in srgb, var(--accent) 14%, var(--surface));border-color:var(--accent);color:var(--accent)}
+.bbmore{position:relative}
+.bbmenu{position:absolute;z-index:5;top:calc(100% + 4px);left:0;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:6px;display:flex;flex-direction:column;gap:2px;min-width:290px;box-shadow:0 6px 24px rgba(0,0,0,.12)}
+.bbmenu[hidden]{display:none}
+.bbmenu button{border:0;justify-content:flex-start;text-align:left;width:100%}
+.bbmenu button span{color:var(--muted);font-size:12.5px}
+.bbmenu hr{border:0;border-top:1px solid var(--line);margin:3px 0;width:100%}
+.bbacts{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.bbacts button{font-size:13.5px;padding:5px 11px}
+.bbboard svg{display:block;width:100%;height:auto;touch-action:none;user-select:none;-webkit-user-select:none}
+.bbboard text{font-family:var(--font-mono)}
+.bbmsg{font-size:13.5px;margin:0;color:var(--muted);min-height:1.5em}
+.bbmsg.bad{color:var(--bad)}
+.bbfile{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13.5px;border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+.bbfile[hidden]{display:none}
+.bbfile input[type=text]{font:inherit;font-size:13.5px;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);width:200px}
+.bbfiles{display:flex;flex-direction:column;gap:3px;width:100%;max-height:180px;overflow:auto}
+.bbfiles button{text-align:left;font-family:var(--font-mono);font-size:12.5px;padding:4px 9px}
+.bblegend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;color:var(--muted)}
+.bblegend span{display:inline-flex;align-items:center;gap:6px}
+.bblegend i{width:16px;height:0;border-top:2.5px solid;display:inline-block}
+.bblegend i.dash{border-top-style:dashed;border-top-width:1.5px}
+.bbform{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 10px;align-items:center;font-size:14px}
+.bbform>label{color:var(--muted);font-size:13.5px}
+.bbform select,.bbform input[type=text]{font:inherit;font-size:13.5px;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);width:100%;min-width:0}
+.bbform input.num{font-family:var(--font-mono)}
+.bbform input.bad{border-color:var(--bad)}
+.bbform .wiper{display:flex;align-items:center;gap:8px}
+.bbform .wiper output{font-family:var(--font-mono);font-size:12.5px;min-width:3.2em;text-align:right}
+.bbname{font-size:14.5px;margin:0}
+.bbinfo{font-size:13.5px;margin:0;color:var(--ink)}
+.bbinfo .warn{color:var(--warn)}
+.bbkey svg{display:block;width:100%;height:auto;max-height:150px}
+.bbkey table{border-collapse:collapse;font-size:13.5px}
+.bbkey td{padding:2px 8px 2px 0;vertical-align:top}
+.bbkey td:first-child{font-weight:700;font-family:var(--font-mono)}
+.bbsites{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:13.5px}
+.bbsites li{display:flex;gap:8px;align-items:baseline}
+.bbsites .dot{position:relative;top:1px}
+.bbtiming{font-size:13.5px;display:flex;flex-direction:column;gap:8px}
+.bbtiming p{margin:0}
+.bbtiming .warn{color:var(--warn)}
+.bbrun{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bbrun a{color:var(--accent);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="subtabs">
+    <div class="seg" id="sub"><button data-t="breadboard" aria-pressed="true">Breadboard</button><button data-t="network">Neural network</button></div>
+    <p id="about"></p>
+  </div>
+  <div id="breadboard"></div>
+  <div id="network" hidden></div>
+</div>
+<script src="/static/nav.js"></script>
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/breadboard.js"></script>
+<script>
+'use strict';
+const ABOUT = {breadboard: 'Build a circuit on a breadboard and record from it: a probe given an input shows on Record, like a real electrode.',
+               network: 'A few model neurons wired together: the simulated rig records them on Record.'};
+const net = {el: document.getElementById('network'), mounted: false};
+function mountNetwork() {                 // networkui.js, when it's there; a note until then
+  if (net.mounted) return;
+  net.mounted = true;
+  const s = document.createElement('script');
+  s.src = '/static/networkui.js';
+  s.onload = () => {
+    if (window.NetworkUI) NetworkUI.mount(net.el);
+    else s.onerror();
+  };
+  s.onerror = () => { net.el.innerHTML = '<div class="card coming">The Neural network simulator is coming to this tab soon.</div>'; };
+  document.body.append(s);
+}
+function showSub(t) {
+  for (const b of document.getElementById('sub').children) b.setAttribute('aria-pressed', String(b.dataset.t === t));
+  document.getElementById('breadboard').hidden = t !== 'breadboard';
+  net.el.hidden = t !== 'network';
+  document.getElementById('about').textContent = ABOUT[t];
+  BreadboardUI.active(t === 'breadboard');
+  if (t === 'network') mountNetwork();
+  const h = new URLSearchParams(location.hash.slice(1));
+  h.set('t', t);
+  history.replaceState(null, '', location.pathname + '#' + h.toString());
+}
+BreadboardUI.mount(document.getElementById('breadboard'));
+document.getElementById('sub').onclick = (e) => { if (e.target.dataset.t) showSub(e.target.dataset.t); };
+// the sub-tab: ?show=network (from Lessons) or #t=network (a reload); the Breadboard otherwise
+const asked = new URLSearchParams(location.search).get('show') || new URLSearchParams(location.hash.slice(1)).get('t');
+showSub(asked === 'network' ? 'network' : 'breadboard');
+</script>
+</body>
+</html>

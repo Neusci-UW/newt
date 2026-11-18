@@ -18,20 +18,33 @@ from .. import stim
 SETTINGS = Path.home() / ".newt" / "web.json"
 INTS = ("count", "repeats")
 BOOLS = ("ramp", "windows")
+_FILE_LOCK = threading.Lock()          # Simple Stimulus and Stimulus Design both keep theirs there
 
 
-def _read_settings() -> dict:
+def read_settings() -> dict:
     try:
         return json.loads(SETTINGS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
+def update_settings(**changes) -> None:
+    """Change some of the saved settings, keeping the rest."""
+    with _FILE_LOCK:
+        d = read_settings()
+        d.update(changes)
+        try:
+            SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS.write_text(json.dumps(d, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+
 class Stimulator:
     def __init__(self, live):
         self.live, self.cfg = live, live.cfg
         self._lock = threading.RLock()
-        saved = _read_settings()
+        saved = read_settings()
         self.values = {**SS.DEFAULTS, **{k: v for k, v in saved.get("simple_stim", {}).items() if k in SS.DEFAULTS}}
         self.presets: list[dict] = list(saved.get("simple_stim_presets", []))
         self.log: list[str] = []                # what was sent, newest first
@@ -39,15 +52,10 @@ class Stimulator:
         self.message, self.error = "", False
         self.repeating, self.rep_sent = False, 0
         self._timer: threading.Timer | None = None
+        self.design = None                      # Stimulus Design (design.py): its saved designs, if it's running
 
     def _save(self) -> None:
-        d = _read_settings()
-        d["simple_stim"], d["simple_stim_presets"] = self.values, self.presets
-        try:
-            SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-            SETTINGS.write_text(json.dumps(d, indent=2), encoding="utf-8")
-        except OSError:
-            pass
+        update_settings(simple_stim=self.values, simple_stim_presets=self.presets)
 
     def _say(self, text: str, error: bool = False) -> None:
         self.message, self.error = text, error
@@ -75,6 +83,9 @@ class Stimulator:
             out = self.live.output
             if out is None:
                 self._say("No stimulator: it needs the simulated (or nidaqmx) backend.", True)
+                return False
+            if self.design is not None and self.design.running:
+                self._say("Stimulus Design is running its trials: stop them there first.", True)
                 return False
             if out.busy:
                 self._say("The previous stimulus is still running.", True)
@@ -204,4 +215,5 @@ class Stimulator:
                 "status": status, "ok": ok, "message": self.message, "error": self.error,
                 "output": cfg.stim_output, "monitor": cfg.stim_monitor, "monitor_name": mon,
                 "limit": cfg.stim_max_v, "presets": [p["name"] for p in self.presets], "running": running,
+                "designs": self.design.names() if self.design is not None else [],
             }

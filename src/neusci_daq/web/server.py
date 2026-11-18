@@ -6,6 +6,9 @@ GET /live/state       JSON: channels, running, rates, ...
 POST /live/cmd        JSON {"cmd": ...}: run, window, cols, lag (the page's lag numbers, printed)
 GET /stim/state       JSON: Simple Stimulus's settings, what was sent, presets (see Stimulator.state)
 POST /stim/cmd        JSON {"cmd": ...}: set, fire, repeat, stop, preset_save, preset_load, preset_delete
+GET /design/state     JSON: Stimulus Design's segments, trials, run (see Design.state); ?pic=N leaves
+                      out the picture if it is still version N
+POST /design/cmd      JSON {"cmd": ..., "pic": N}: pick, set, per_trial, add, run, once, save... (Design.command)
 GET /trials/state     JSON: the session's trials in their groups (see Trials.state)
 POST /trials/cmd      JSON {"cmd": ...}: open, channel, tick, rename, combine, ... (see Trials.command)
 
@@ -19,9 +22,11 @@ import json
 import mimetypes
 import secrets
 import struct
+from urllib.parse import parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .design import Design
 from .live import Live
 from .stimulator import Stimulator
 from .trials import Trials
@@ -29,7 +34,8 @@ from .trials import Trials
 STATIC = Path(__file__).parent / "static"
 
 
-def make_server(live: Live, trials: Trials, stimulator: Stimulator, key: str, port: int = 0) -> ThreadingHTTPServer:
+def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, key: str,
+                port: int = 0) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
@@ -52,7 +58,7 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, key: str, po
             return False
 
         def do_GET(self):
-            path = self.path.split("?")[0]
+            path, _, query = self.path.partition("?")
             if path == "/":
                 path = "/static/live.html"
             if path.startswith("/static/"):
@@ -71,13 +77,17 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, key: str, po
                 return self._json(trials.state())
             if path == "/stim/state":
                 return self._json(stimulator.state())
+            if path == "/design/state":
+                return self._json(design.state(parse_qs(query).get("pic", [None])[0]))
             self._send(b"not found", "text/plain", 404)
 
         def do_POST(self):
             if not self._keyed():
                 return
             path = self.path.split("?")[0]
-            state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state}.get(path, trials.state)
+            d = {}
+            state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state,
+                     "/design/cmd": lambda: design.state(d.get("pic"))}.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 out = {}
@@ -87,6 +97,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, key: str, po
                     trials.command(d)
                 elif path == "/stim/cmd":
                     self._stim(d)
+                elif path == "/design/cmd":
+                    design.command(d)
                 else:
                     return self._send(b"not found", "text/plain", 404)
                 self._json({**state(), **out})

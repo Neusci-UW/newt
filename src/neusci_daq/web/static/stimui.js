@@ -157,8 +157,9 @@ const StimUI = (() => {
         if (st.message || !st.error) view.say(st.message, st.error);
         if (full) {
           q('.sslog').innerHTML = st.log.length ? st.log.map((s) => `<li>${esc(s)}</li>`).join('') : '<li>Nothing yet.</li>';
-          q('.sspresets').innerHTML = st.presets.length ? st.presets.map((n) => `<div class="p"><button data-p="${esc(n)}" title="Load these settings">${esc(n)}</button><button class="x" data-x="${esc(n)}" title="Delete this preset">×</button></div>`).join('')
-            : '<p class="caption">None yet: set things up, name them, Save.</p>';
+          q('.sspresets').innerHTML = (st.presets.length ? st.presets.map((n) => `<div class="p"><button data-p="${esc(n)}" title="Load these settings">${esc(n)}</button><button class="x" data-x="${esc(n)}" title="Delete this preset">×</button></div>`).join('')
+            : '<p class="caption">None yet: set things up, name them, Save.</p>')
+            + st.designs.map((n) => `<div class="p"><button data-dz="${esc(n)}" title="Open this design on Stimulus Design, ready to run">${esc(n)}<span class="tag">design</span></button></div>`).join('');
           q('.out').textContent = `Output on ${st.output}` + (st.monitor ? `, recorded on ${st.monitor}${st.monitor_name ? ' (' + st.monitor_name + ')' : ''}` : '')
             + ` · limit ±${fmt(st.limit)} V`;
         }
@@ -179,6 +180,7 @@ const StimUI = (() => {
       else if (t.dataset.a === 'save') { const n = q('.prow input'); post({cmd: 'preset_save', name: n.value}); n.value = ''; }
       else if (t.dataset.p) post({cmd: 'preset_load', name: t.dataset.p});
       else if (t.dataset.x) post({cmd: 'preset_delete', name: t.dataset.x});
+      else if (t.dataset.dz && api.onDesign) api.onDesign(t.dataset.dz);
     });
     el.addEventListener('change', (e) => {
       const k = e.target.dataset.k;
@@ -194,5 +196,6 @@ const StimUI = (() => {
     if (S) view.show(S);
     if (!timer) { poll(); timer = setInterval(poll, 500); }
   }
-  return {mount};
+  const api = {mount, onDesign: null};       // onDesign(name): a saved design was clicked (stimulator.html)
+  return api;
 })();

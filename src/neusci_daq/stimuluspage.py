@@ -24,10 +24,9 @@ from . import stim as stimmod
 from . import style
 from dataclasses import replace
 
-from .designparts import KindPicker, SegmentPanel, StimPicture, segment_spans
+from .designparts import KindPicker, SegmentPanel, StimPicture
 from .simplestim import _spin
-
-MAX_FADED = 30               # trials drawn faded behind the one shown
+from .stimdesign import MAX_FADED, seg_name, segment_spans, trials_note
 
 
 def _heading(text: str, hint: str = "") -> QtWidgets.QLabel:
@@ -442,11 +441,7 @@ class StimulusPage(QtWidgets.QWidget):
             spans = segment_spans(s.at_trial(cur), rate)
         except ValueError:
             spans = segment_spans(s, rate)
-        names = []
-        for p in parts:
-            kind = p.get("kind")
-            names.append("Train" if kind == "pulse" and int(p.get("count", 1)) > 1
-                         else stimmod.SEG_KINDS.get(kind, kind))
+        names = [seg_name(p) for p in parts]
         units, k = stim._unit_label, stim._scale
         if not self.offset.hasFocus():
             self.offset.blockSignals(True)
@@ -512,15 +507,7 @@ class StimulusPage(QtWidgets.QWidget):
                 self.n_trials.setValue(int(a.stop))
                 self.n_trials.blockSignals(False)
             n = self.n_trials.value()
-            lists = self.main.stimulus.list_lengths() + (
-                self.main.stimulus2.list_lengths() if self.main.stimulus2 is not None else [])
-            steps = self.main.stimulus.steps or (self.main.stimulus2 is not None and self.main.stimulus2.steps)
-            if n == 1 and steps:
-                self.n_note.setText("Set How many above 1 to use the per-trial changes.")
-            elif lists and min(lists) < n:
-                self.n_note.setText(f"A per-trial list has only {min(lists)} values.")
-            else:
-                self.n_note.setText("")
+            self.n_note.setText(trials_note(self.main.stimulus, n, self.main.stimulus2))
             self.n_note.setVisible(bool(self.n_note.text()))
             want = n > 1 or tr._has_b or tr.repeats.value() > 1
             if tr.varying != want:

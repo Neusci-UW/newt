@@ -13,8 +13,6 @@
 .ssgrid .stage{gap:16px}
 .ssgrid .sspic{max-width:640px}
 .ssgrid .ssmodes button{font-size:14px;padding:6px 14px}
-.design{border:1.5px dashed var(--line);border-radius:10px;padding:40px;text-align:center;color:var(--muted)}
-.design b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
 .check{flex-wrap:wrap;line-height:2.1}
 </style>
 </head>
@@ -25,23 +23,26 @@
     <p id="about">A stimulator box on screen: pick a pulse type, read the labeled picture, set the numbers, press Stimulate. Watch what happens on Record.</p>
   </div>
   <div id="simple"></div>
-  <div id="design" hidden>
-    <div class="design"><b>Stimulus Design comes next</b>
-      Segments and trials, for instructors and projects (your stimulus_design_mockup.html). Its designs will show up here as Lab presets.</div>
-  </div>
+  <div id="design" hidden></div>
 </div>
 <script src="/static/nav.js"></script>
 <script src="/static/stimui.js"></script>
+<script src="/static/designui.js"></script>
 <script>
-StimUI.mount(document.getElementById('simple'), true);
-document.getElementById('sub').onclick = (e) => {
-  const t = e.target.dataset.t;
-  if (!t) return;
-  for (const b of e.currentTarget.children) b.setAttribute('aria-pressed', String(b.dataset.t === t));
+const ABOUT = {simple: 'A stimulator box on screen: pick a pulse type, read the labeled picture, set the numbers, press Stimulate. Watch what happens on Record.',
+               design: 'Build a stimulus from segments and send it as trials: each trial can change a level or a duration. For instructors and projects.'};
+function showSub(t) {
+  for (const b of document.getElementById('sub').children) b.setAttribute('aria-pressed', String(b.dataset.t === t));
   document.getElementById('simple').hidden = t !== 'simple';
   document.getElementById('design').hidden = t !== 'design';
-  document.getElementById('about').hidden = t !== 'simple';
-};
+  document.getElementById('about').textContent = ABOUT[t];
+  if (t === 'design') DesignUI.poll();
+}
+StimUI.mount(document.getElementById('simple'), true);
+DesignUI.mount(document.getElementById('design'));
+StimUI.onDesign = (name) => { DesignUI.load(name); showSub('design'); };   // a saved design, from Lab presets
+document.getElementById('sub').onclick = (e) => { if (e.target.dataset.t) showSub(e.target.dataset.t); };
+if (new URLSearchParams(location.hash.slice(1)).get('t') === 'design') showSub('design');
 </script>
 </body>
 </html>

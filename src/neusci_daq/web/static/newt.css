@@ -87,7 +87,7 @@ input[type=number]:focus,input[type=text]:focus{outline:2px solid color-mix(in s
 .inl{width:72px !important;display:inline-block}
 .sslog{list-style:none;margin:0;padding:0;font-family:var(--font-mono);font-size:12.5px;max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:2px}
 .sslog li:first-child{color:var(--ink);font-weight:500}
-.sslog li{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sslog li{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
 .ssmsg{font-size:13px;margin:0;color:var(--muted)}
 .ssmsg.bad{color:var(--bad)}
 .sspresets{display:flex;flex-direction:column;gap:4px}
@@ -97,3 +97,82 @@ input[type=number]:focus,input[type=text]:focus{outline:2px solid color-mix(in s
 .prow{display:flex;gap:6px}
 .prow input{font:inherit;font-size:13.5px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);flex:1;min-width:0}
 button[aria-pressed=true].rep{background:color-mix(in srgb, var(--accent) 15%, var(--surface));border-color:var(--accent);color:var(--accent)}
+/* Stimulus Design (designui.js) */
+.dsgrid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:1100px){.dsgrid{grid-template-columns:1fr}}
+.dstop,.dshint,.dsedhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dsadd{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb, var(--accent) 8%, var(--surface));font-weight:600}
+.dsadd[aria-expanded=true]{background:var(--accent);color:var(--surface)}
+.dspic{min-height:280px}
+.dspic svg{display:block}
+.dspic .band{fill:transparent;stroke:var(--line);stroke-dasharray:4 3;cursor:pointer}
+.dspic .band:hover{fill:color-mix(in srgb, var(--accent) 6%, transparent)}
+.dspic .band.on{fill:color-mix(in srgb, var(--accent) 11%, transparent);stroke:var(--accent);stroke-dasharray:none}
+.dspic .zero{stroke:var(--line);stroke-width:1}
+.dspic text{font-family:var(--font-mono);font-size:12px;fill:var(--muted);pointer-events:none}
+.dspic text.let{font-family:var(--font-body);font-size:13px;font-weight:600;fill:var(--ink)}
+.dspic text.let.on{fill:var(--accent)}
+.dspic text.nm{font-family:var(--font-body)}
+.dspic text.dim{fill:var(--dim);font-size:13px;font-weight:500}
+.dspic .tr{fill:none;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;opacity:.6;pointer-events:none}
+.dspic .tr.cur{stroke-width:3;opacity:1}
+.dstrial{display:inline-flex;align-items:center;gap:6px}
+.dstrial button{padding:1px 9px;font-size:15px;line-height:1.2}
+.dstrial b{font-family:var(--font-mono);min-width:1.5em;text-align:center;color:var(--ink)}
+.dsed,.dspicker{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+.dsed[hidden],.dspicker[hidden],.dsprog[hidden],.dstrial[hidden]{display:none}
+.dstitle{font-size:15px}
+button.link{background:none;border-color:transparent;color:var(--accent);padding:3px 8px}
+button.link:hover{border-color:var(--line)}
+button.link.danger{color:var(--bad)}
+.dsfields{display:flex;flex-wrap:wrap;gap:16px 22px;align-items:flex-start}
+.dsf{display:flex;flex-direction:column;gap:5px;font-size:14px}
+.dsf .lab{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+.dsf .lab i{width:9px;height:9px;border-radius:2px;background:var(--dim);flex:none}
+.stepper{display:inline-flex;align-items:center}
+.stepper button{padding:3px 0;width:30px;font-size:15px;line-height:1.2}
+.stepper button:first-child{border-radius:7px 0 0 7px;border-right:0}
+.stepper button[data-d="1"]{border-radius:0 7px 7px 0;border-left:0}
+.stepper input[type=number]{width:96px;border-radius:0;text-align:center}
+.stepper input:only-of-type:first-child{border-radius:7px}
+.stepper .u{font-size:13px;color:var(--muted);margin-left:7px;min-width:1.5em}
+input.pt{font:inherit;font-family:var(--font-mono);font-size:12.5px;width:156px;padding:4px 8px;border:1.5px dashed var(--line);border-radius:7px;background:transparent;color:var(--ink)}
+input.pt.set{border-style:solid;border-color:var(--accent);background:color-mix(in srgb, var(--accent) 8%, var(--surface))}
+input.pt::placeholder{color:var(--muted);opacity:.8}
+input.pt:focus{outline:2px solid color-mix(in srgb, var(--accent) 40%, transparent)}
+.dsx button{font-size:13px}
+.dspts table{border-collapse:collapse;font-size:13px}
+.dspts th{font-weight:500;color:var(--muted);text-align:left;padding:0 6px 4px 0}
+.dspts td{padding:2px 6px 2px 0}
+.dspts td input{width:96px}
+.mono{font-family:var(--font-mono);font-size:13px}
+.dskinds{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+.kind{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:7px 9px}
+.kind svg{width:64px;height:30px}
+.kind polyline{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round}
+.kind b{font-weight:600;font-size:13.5px}
+.kind span{font-size:12px;color:var(--muted)}
+.kind:hover{background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+.dsprob{min-height:0}
+.dsprob.bad{color:var(--bad)}
+.dstrials{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:flex-end;border-top:1px solid var(--line);padding-top:14px}
+.dstrials .sect-title{align-self:center}
+.dstrials input[type=number]{width:84px}
+.dsrun{font-size:16px !important;padding:12px !important;width:100%}
+.dslamp{display:flex;gap:8px;align-items:baseline;margin:0;font-size:13.5px;color:var(--muted)}
+.dslamp i{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none;position:relative;top:1px}
+.dslamp.bad{color:var(--bad)}
+.dslamp.bad i{background:var(--bad)}
+.dsprog{display:flex;flex-direction:column;gap:8px}
+.dsprog .btns{display:flex;gap:6px}
+.dsprog .btns button{flex:1}
+.bar{height:7px;border-radius:4px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);transition:width .2s}
+details.fold{gap:10px}
+details.fold summary{cursor:pointer;font-size:14px}
+details.fold[open] summary{margin-bottom:6px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:center;font-size:13.5px}
+.kv>span:nth-child(odd){color:var(--muted)}
+.kv b{font-weight:500;font-family:var(--font-mono);font-size:13px}
+.sspresets .tag{font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:0 7px;margin-left:auto}
+.sspresets [data-dz]{display:flex;align-items:center;gap:8px}

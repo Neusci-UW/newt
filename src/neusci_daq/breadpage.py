@@ -20,16 +20,15 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import breadboard as bb
+from . import breadlayout
 from . import lessoncircuit
 from . import style, theme
+from .breadlayout import (PITCH, ROW_Y as _ROW_Y, X0 as _X0, W as _W, H as _H, ROWS as _ROWS,
+                          dropped_part, gate_hole, key_legs, placed_part, key_text, shifted)
 from .unitbox import UnitSpinBox
 from .units import best_prefix
 from .viewkit import scroll_column
 
-PITCH = 20                                    # board units between holes
-_ROW_Y = {"t+": 20, "t-": 40, **{r: 80 + 20 * i for i, r in enumerate("abcde")},
-          **{r: 200 + 20 * i for i, r in enumerate("fghij")}, "b+": 300, "b-": 320}
-_X0, _W, _H = 40, 40 + bb.COLS * PITCH + 20, 345
 _TOOLS = (("select", "Select", "Click a part to select it and change its value; drag it, or one of its ends, to move it"),
           ("vin", "Input voltage", "The stimulator's output, or a fixed voltage: drag it onto the board, "
                                    "or click its + end, then its - end"),
@@ -58,65 +57,14 @@ _WARN = {style.LIGHT: "#8a5a00", style.DARK: "#f2c14e"}
 
 
 def hole_xy(hole: str) -> QtCore.QPointF:
-    row, col = bb.parse_hole(hole)
-    return QtCore.QPointF(_X0 + (col - 1) * PITCH, _ROW_Y[row])
+    return QtCore.QPointF(*breadlayout.hole_xy(hole))
 
 
 def nearest_hole(p: QtCore.QPointF) -> str | None:
-    col = round((p.x() - _X0) / PITCH) + 1
-    if not 1 <= col <= bb.COLS or abs(p.x() - (_X0 + (col - 1) * PITCH)) > 8:
-        return None
-    row = min(_ROW_Y, key=lambda r: abs(_ROW_Y[r] - p.y()))
-    if abs(_ROW_Y[row] - p.y()) > 8:
-        return None
-    return f"{row}{col}"
+    return breadlayout.nearest_hole(p.x(), p.y())
 
 
-_ROWS = ["t+", "t-", *"abcde", *"fghij", "b+", "b-"]   # top to bottom
 _MIME = "application/x-newt-part"
-_SPAN = 4                                     # columns a part dropped from the strip spans
-
-
-def shifted(hole: str, drow: int, dcol: int) -> str | None:
-    """`hole` moved down `drow` rows and right `dcol` columns, or None off the board."""
-    row, col = bb.parse_hole(hole)
-    r, c = _ROWS.index(row) + drow, col + dcol
-    return f"{_ROWS[r]}{c}" if 0 <= r < len(_ROWS) and 1 <= c <= bb.COLS else None
-
-
-def placed_part(kind: str, a: str, b: str = "") -> bb.Part | None:
-    """A new part from `a` to `b` with its defaults; a potentiometer gets its wiper beside
-    the middle. None if there's no room for the wiper."""
-    part = bb.new_part(kind, a, b)
-    if kind == "pot":
-        part.wiper = gate_hole(a, b) or ""
-        if not part.wiper:
-            return None
-    return part
-
-
-def dropped_part(kind: str, hole: str) -> bb.Part | None:
-    """A part dropped on `hole`: a probe or ground there, anything else from there across _SPAN columns."""
-    if kind in bb.ONE_HOLE:
-        return bb.new_part(kind, hole)
-    end = shifted(hole, 0, _SPAN) or shifted(hole, 0, -_SPAN)
-    return placed_part(kind, hole, end)
-
-
-def gate_hole(a: str, b: str) -> str | None:
-    """A free hole beside the middle of a part from `a` to `b`, for a MOSFET's gate leg."""
-    pa, pb = hole_xy(a), hole_xy(b)
-    mid = (pa + pb) / 2
-    dx, dy = pb.x() - pa.x(), pb.y() - pa.y()
-    n = math.hypot(dx, dy) or 1.0
-    for d in (PITCH, -PITCH, 2 * PITCH, -2 * PITCH):
-        p = mid + QtCore.QPointF(-dy / n * d, dx / n * d)
-        col = min(max(round((p.x() - _X0) / PITCH) + 1, 1), bb.COLS)    # snap to a column, then a row
-        row = min(_ROW_Y, key=lambda r: abs(_ROW_Y[r] - p.y()))
-        h = f"{row}{col}"
-        if abs(_ROW_Y[row] - p.y()) < PITCH and h not in (a, b):
-            return h
-    return None
 
 
 class PartButton(QtWidgets.QPushButton):
@@ -610,61 +558,6 @@ class BoardView(QtWidgets.QWidget):
         q.restore()
 
 
-# ---------------------------------------------------------------- the key: what each leg of a part is
-# (leg, tag on the drawing, name, where it goes and what it does)
-_ENDS = [("a", "1", "end", "the first hole you click"), ("b", "2", "end", "the second hole; either way round works")]
-
-
-def key_legs(part: bb.Part) -> list[tuple[str, str, str, str]]:
-    k = part.kind
-    if k in ("vin", "battery"):
-        what = "the stimulator's output" if k == "vin" and part.source == "stim" else "the fixed voltage"
-        return [("a", "+", "+ end", f"first hole: held at {what} above the − end"),
-                ("b", "−", "− end", "second hole: usually ground (a − rail)")]
-    if k in ("led", "diode"):
-        return [("a", "+", "anode", "first hole: toward the higher voltage"),
-                ("b", "−", "cathode", "second hole: toward ground")]
-    if k == "switch" and part.mode == "mosfet":
-        return [("a", "D", "drain", "first hole"),
-                ("b", "S", "source", "second hole: the gate is measured against it"),
-                ("gate", "G", "gate", "placed beside the middle; draws no current")]
-    if k == "pot":
-        return [("a", "1", "end", "first hole"), ("b", "2", "end", "second hole"),
-                ("wiper", "W", "wiper", "placed beside the middle: taps the resistance part-way along")]
-    if k == "probe":
-        return [("a", "P", "probe", "one hole: records the voltage of its strip")]
-    if k == "ground":
-        return [("a", "0", "ground", "one hole: ties its strip to 0 V")]
-    return _ENDS
-
-
-def key_text(part: bb.Part) -> str:
-    k = part.kind
-    if k == "vin":
-        return ("Drives its + end to the stimulator's output, so whatever the Stimulus tab sends plays into the circuit."
-                if part.source == "stim" else "Holds its + end a fixed voltage above its − end.")
-    if k == "switch":
-        if part.mode == "mosfet":
-            side = "above" if part.channel == "n" else "below"
-            return f"Joins drain to source while the gate is more than V<sub>th</sub> {side} the source; otherwise connects nothing."
-        return "Joins its two ends while closed; double-click it, or use Close it, to flip it."
-    return {
-        "resistor": "Lets current through in proportion to the voltage across it (Ohm's law). Either way round.",
-        "capacitor": "Stores charge: current flows in while the voltage across it changes, then stops. Either way round.",
-        "wire": "Joins two strips into one, so they're at the same voltage.",
-        "probe": "Records its strip's voltage on the input you pick, for Acquisition.",
-        "ground": "The 0 V reference, the same as a wire to a − rail.",
-        "battery": "Holds its + end a fixed voltage above its − end.",
-        "led": "Lights when + is more than its forward voltage above −, brighter with more current. "
-               "Put a resistor in series to keep the current under its maximum.",
-        "diode": "Lets current flow from + to − only, once + is more than its forward voltage above −.",
-        "button": "Joins its two ends only while you hold the mouse down on it.",
-        "pot": "A resistor with a third leg: the wiper splits it in two, so the wiper's voltage is a set fraction "
-               "of the way between the ends (a divider).",
-        "inductor": "Resists changes in current: the voltage across it is L times how fast the current changes. Either way round.",
-    }.get(k, "")
-
-
 class KeyDrawing(QtWidgets.QWidget):
     """A part drawn large, the way it looks on the board, with each leg tagged and named."""
 
@@ -698,9 +591,9 @@ class KeyDrawing(QtWidgets.QWidget):
         legs = [(leg, tag, name) for leg, tag, name, _ in key_legs(self.part) if getattr(self.part, leg)]
         pts = [hole_xy(getattr(self.part, leg)) for leg, _t, _n in legs]
         x0, x1 = min(p.x() for p in pts), max(p.x() for p in pts)
-        y0, y1 = min(p.y() for p in pts), max(p.y() for p in pts)
+        y0 = min(p.y() for p in pts)
         s = min(2.2, (self.width() - 60) / max(x1 - x0, 1.0)) if x1 > x0 else 2.2
-        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2 + (6 if self.part.kind == "ground" else 0)
+        cx = (x0 + x1) / 2
         top = 34 if len(legs) > 1 else 40                 # room above for the names
         to_px = lambda p: QtCore.QPointF(self.width() / 2 + (p.x() - cx) * s, top + 12 + (p.y() - y0) * s)
         q.save()

@@ -31,6 +31,8 @@ POST /fig/export      JSON {"what": "single" | "page", "fmt", "dpi"}: the file i
 GET /canvas/state     JSON: the Plot Canvas's page, figures and drawings (see Figures.canvas)
 POST /canvas/cmd      JSON {"cmd": ...}: paper, letters, text, move, resize, freeze, duplicate, remove,
                       image, ann_add, ann_set (see Figures.canvas_command)
+GET /breadboard/state JSON: the Breadboard simulator's board, preview, timing (see breadboard.py)
+POST /breadboard/cmd  JSON {"cmd": ...}: add, drop, edit, delete, reset, clear, save, open, files, load
 
 Only 127.0.0.1 is served, and everything but the pages' files needs this launch's key
 (header X-Newt-Key): any program on the computer can reach a local server, and
@@ -60,7 +62,7 @@ STATIC = Path(__file__).parent / "static"
 
 def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, recording: Recording,
                 charts: Charts, pad: Pad, figures: Figures, key: str,
-                port: int = 0) -> ThreadingHTTPServer:
+                port: int = 0, breadboard=None) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
@@ -114,6 +116,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 return self._json(stimulator.state())
             if path == "/design/state":
                 return self._json(design.state(parse_qs(query).get("pic", [None])[0]))
+            if path == "/breadboard/state" and breadboard is not None:
+                return self._json(breadboard.state(parse_qs(query).get("v", [None])[0]))
             self._send(b"not found", "text/plain", 404)
 
         def do_POST(self):
@@ -124,7 +128,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
             state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state, "/charts/cmd": charts.state,
                      "/charts/data": dict, "/pad/cmd": pad.state, "/pad/chart": dict, "/pad/preview": dict,
                      "/design/cmd": lambda: design.state(d.get("pic")), "/fig/cmd": figures.state,
-                     "/fig/png": dict, "/fig/export": dict, "/canvas/cmd": figures.canvas}.get(path, trials.state)
+                     "/fig/png": dict, "/fig/export": dict, "/canvas/cmd": figures.canvas,
+                     "/breadboard/cmd": breadboard.state if breadboard else dict}.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 out = {}
@@ -157,6 +162,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     self._stim(d)
                 elif path == "/design/cmd":
                     design.command(d)
+                elif path == "/breadboard/cmd" and breadboard is not None:
+                    breadboard.command(d)
                 else:
                     return self._send(b"not found", "text/plain", 404)
                 self._json({**state(), **out})

@@ -11,6 +11,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from .breadboard import Breadboard
 from .charts import Charts
 from .design import Design
 from .figures import Figures
@@ -48,7 +49,9 @@ def main() -> None:
     key = args.key or secrets.token_urlsafe(16)
     charts, pad = Charts(trials), Pad(trials)
     figures = Figures(trials, pad, charts)
-    srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, args.port)
+    breadboard = Breadboard(live, stimulator, data)
+    srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, args.port,
+                      breadboard=breadboard)
     url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
     print(f"serving {url}", flush=True)
     try:
@@ -69,6 +72,7 @@ def main() -> None:
                     got = got[0] if got else None
                 return got
             figures.ask_path = ask_path
+            breadboard.ask_path = ask_path
             webview.start()
     except KeyboardInterrupt:
         pass

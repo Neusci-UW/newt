@@ -30,6 +30,16 @@
       ],
       "url": "http://localhost:18491",
       "port": 18491
+    },
+    {
+      "name": "newt-web",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "PY=.venv/bin/python; [ -x $PY ] || PY=../../../.venv/bin/python; PYTHONPATH=src exec $PY -m neusci_daq.web --serve --port 18520 --key dev"
+      ],
+      "url": "http://127.0.0.1:18520",
+      "port": 18520
     }
   ]
 }

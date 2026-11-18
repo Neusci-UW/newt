@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live recording</title>
+<link rel="stylesheet" href="/static/newt.css">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<style>
+/* the strips: one chart per input, sharing the time axis */
+#strips{display:flex;flex-direction:column;gap:6px}
+.strip{display:flex;flex-direction:column;gap:2px}
+.shead{display:flex;align-items:center;gap:8px;font-size:13.5px;min-height:28px}
+.sname{font-weight:600}
+.sval{font-family:var(--font-mono);font-size:13px;min-width:86px;font-variant-numeric:tabular-nums}
+.srate{font-size:13px;color:var(--muted)}
+.shead .seg button{padding:2px 10px;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Live recording</h1>
+    <p>Four inputs from the simulated rig: two cells recorded from inside, one from outside, and the
+      stimulus, which drives cell 1. Cell 1 excites cell 2, cell 2 excites cell 3, and cell 3 inhibits cell 1.
+      Press Run, then Stimulate.</p>
+  </header>
+  <div class="top">
+    <section class="card stage">
+      <div class="runbar">
+        <button id="run" class="primary">Run</button>
+        <button id="fire" disabled>Stimulate</button>
+        <span class="runlab">Window</span>
+        <div class="seg" id="win"></div>
+        <span class="spacer"></span>
+        <span class="status" id="status">Stopped</span>
+      </div>
+      <div id="strips"></div>
+    </section>
+    <aside class="panel">
+      <div class="card">
+        <p class="sect-title">Stimulus</p>
+        <fieldset id="stim">
+          <div class="row"><label for="amp">Size</label><input id="amp" type="range" min="0.1" max="5" step="0.1" value="1"><output data-for="amp" data-unit="V"></output></div>
+          <div class="row"><label for="width">Width</label><input id="width" type="range" min="0.1" max="5" step="0.1" value="1"><output data-for="width" data-unit="ms"></output></div>
+          <div class="row"><label for="count">Pulses</label><input id="count" type="range" min="1" max="10" step="1" value="3"><output data-for="count" data-unit=""></output></div>
+          <div class="row"><label for="every">Every</label><input id="every" type="range" min="5" max="200" step="5" value="20"><output data-for="every" data-unit="ms"></output></div>
+        </fieldset>
+        <p class="caption" id="sent">A 1 V, 1 ms pulse depolarizes cell 1 by about 25 mV.</p>
+      </div>
+      <div class="card">
+        <p class="sect-title">Lag</p>
+        <div class="vbox">
+          <div class="vnum" id="age">–</div>
+          <p class="caption">from the data reaching Python to it being on screen (median, last 2 s)</p>
+        </div>
+        <div class="vrow"><span>Slowest 5%</span><b id="p95">–</b></div>
+        <div class="vrow"><span>Drawing a frame</span><b id="draw">–</b></div>
+        <div class="vrow"><span>Frames per second</span><b id="fps">–</b></div>
+        <div class="vrow"><span>Python's part of a frame</span><b id="build">–</b></div>
+        <div class="vrow"><span>Data arrives every</span><b id="chunk">–</b></div>
+        <p class="caption">The device's own delay (one chunk of data) comes on top, the same as in the Qt app.</p>
+      </div>
+    </aside>
+  </div>
+</div>
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/live.js"></script>
+</body>
+</html>

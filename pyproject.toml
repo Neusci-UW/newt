@@ -17,6 +17,7 @@ nidaqmx = ["nidaqmx>=1.0"]
 multichannelio = ["PyDAQmx"]
 audio = ["sounddevice>=0.4"]
 web = ["PyQt6-WebEngine"]   # the Membrane potential tab
+html = ["pywebview>=6"]     # the HTML front end (python -m neusci_daq.web)
 pdf = ["pypdfium2"]         # PDFs put on the Plot Canvas (on macOS, sips does without)
 dev = ["pytest", "neuscitk", "scikit-learn", "matplotlib"]
 
@@ -28,4 +29,5 @@ neusci-daq = "neusci_daq.__main__:main"      # the old command, still works
 where = ["src"]
 
 [tool.setuptools.package-data]
-neusci_daq = ["fonts/*.ttf", "fonts/OFL.txt", "icons/*.png", "icons/*.ico", "icons/*.svg", "lessons/*.html", "lessons/*.js", "lessons/questions/*.js", "lessons/vendor/mathjax/*.js"]
+neusci_daq = ["fonts/*.ttf", "fonts/OFL.txt", "icons/*.png", "icons/*.ico", "icons/*.svg", "lessons/*.html", "lessons/*.js", "lessons/questions/*.js", "lessons/vendor/mathjax/*.js",
+              "web/static/*.html", "web/static/*.js", "web/static/*.css", "web/static/fonts/*", "web/static/vendor/*"]

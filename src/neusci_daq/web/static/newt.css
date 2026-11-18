@@ -1,0 +1,60 @@
+/* Newt's look: the Lessons' tokens and parts (lessons/action_potential.html), shared by
+   every page of the HTML front end. Fonts are local files: nothing needs internet. */
+@import url("fonts/plex.css");
+
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --ink:#1c2220; --muted:#5b6662; --line:#d6dcd8; --accent:#0d6b7c;
+  --bad:#c0392b;
+  --font-body:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+    --bad:#f0646b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+  --bad:#f0646b;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.5;padding:24px 20px 32px}
+.wrap{max-width:1640px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header h1{font-weight:600;font-size:26px;letter-spacing:-0.01em;margin:0 0 6px}
+header p{margin:0;color:var(--muted);max-width:90ch}
+.top{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+@media (max-width:1100px){.top{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.stage{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel{display:flex;flex-direction:column;gap:16px}
+.panel .card{display:flex;flex-direction:column;gap:10px}
+.runbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.runlab{font-size:14px;font-weight:600}
+.spacer{flex:1}
+.status{font-size:13px;color:var(--muted)}
+.status.bad{color:var(--bad)}
+button{font:inherit;font-size:14px;cursor:pointer;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 12px}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:default;border-color:var(--line)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:500;min-width:76px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{border:0;border-radius:0;font-size:13px;padding:5px 12px}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.sect-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
+.caption{font-size:13px;color:var(--muted);margin:0}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.row{display:grid;grid-template-columns:62px minmax(0,1fr) 64px;align-items:center;gap:10px;font-size:14px}
+.row output{font-family:var(--font-mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+input[type=range]{width:100%;accent-color:var(--accent)}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.vbox{display:flex;flex-direction:column;gap:2px}
+.vnum{font-family:var(--font-mono);font-size:40px;font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums}
+.vrow{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.vrow b{color:var(--ink);font-family:var(--font-mono);font-weight:500;white-space:nowrap}
+.uplot{font-family:var(--font-mono)}

@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import breadboard as bb
+from .. import colors
 from .. import breadlayout as bl
 from .. import lessoncircuit
 from .stimulator import read_settings, update_settings
@@ -101,7 +102,8 @@ class Breadboard:
     # -- what the page shows -----------------------------------------------------------
     def inputs(self) -> list[dict]:
         cfg, out = self.live.cfg, []
-        for c, (light, dark) in zip(cfg.channels, self.live.trace_colors):
+        for c in cfg.channels:                 # each channel's own color (Record's channel setup)
+            light, dark = colors.display_color(c.color, "light"), colors.display_color(c.color, "dark")
             if c.physical != cfg.stim_monitor:
                 out.append({"physical": c.physical, "name": c.name, "units": c.units, "scale": c.scale,
                             "light": light, "dark": dark})

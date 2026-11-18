@@ -12,55 +12,20 @@ as pictures at 300 dpi when they're added, and every picture is kept inside the 
 """
 from __future__ import annotations
 
-import io
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 
-from matplotlib.figure import Figure
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
+from . import figpage
 from . import figspec as F
-from . import stim as stimmod
+from .figpage import LINKS, MARGIN, PAPERS            # the page's papers, margin and links
 from .viewkit import with_slider
 
 PX = 4.0                          # scene units per mm
-PAPERS = {"A4 portrait": (210, 297), "A4 landscape": (297, 210), "Letter portrait": (216, 279),
-          "Letter landscape": (279, 216), "Slide 16:9": (338, 190)}
-MARGIN = 12.0                     # mm
-LINKS = {"text": True, "lines": True, "axes": False, "colors": False, "legend": False}   # the same on every figure
-
-
-def _laid_out_axes(spec: dict, data: dict):
-    """Where the axes sit in a figure of this spec's size, laid out tightly: (x0, y0, w, h)
-    as fractions of the figure."""
-    if spec.get("kind") == "image":
-        return 0.0, 0.0, 1.0, 1.0
-    fig = Figure(figsize=(spec["w_mm"] / 25.4, spec["h_mm"] / 25.4))
-    F.draw(fig, spec, data)
-    try:
-        fig.tight_layout()
-    except Exception:
-        pass
-    p = fig.axes[0].get_position()
-    return p.x0, p.y0, p.width, p.height
 
 
 def render(spec: dict, data: dict, dpi: float) -> QtGui.QImage:
-    if spec.get("kind") == "image":
-        import base64
-        return QtGui.QImage.fromData(base64.b64decode(data.get("png", "")))
-    fig = Figure(figsize=(spec["w_mm"] / 25.4, spec["h_mm"] / 25.4), dpi=dpi)
-    try:
-        F.draw(fig, spec, data)
-        fig.tight_layout()
-    except Exception as e:
-        fig.clear()
-        fig.text(0.5, 0.5, f"Can't draw: {e}", ha="center", va="center")
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, facecolor="white")
-    return QtGui.QImage.fromData(buf.getvalue())
+    return QtGui.QImage.fromData(figpage.png(spec, data, dpi))
 
 
 class Panel(QtWidgets.QGraphicsObject):
@@ -578,23 +543,13 @@ class PlotCanvasPage(QtWidgets.QWidget):
 
     def _free_spot(self, spec) -> tuple[float, float]:
         """The next place along the rows, left to right, top to bottom."""
-        W, H = self.paper_mm()
-        x, y, row_h = MARGIN, MARGIN, 0.0
-        taken = [QtCore.QRectF(p.pos().x() / PX, p.pos().y() / PX, p.spec["w_mm"], p.spec["h_mm"])
-                 for p in self.panels]
-        for _ in range(200):
-            r = QtCore.QRectF(x, y, spec["w_mm"], spec["h_mm"])
-            if not any(r.intersects(t) for t in taken) and r.right() <= W - MARGIN + 1:
-                return x, y
-            x += 5
-            if x + spec["w_mm"] > W - MARGIN:
-                x, y = MARGIN, y + 5
-        return MARGIN, MARGIN
+        taken = [(p.pos().x() / PX, p.pos().y() / PX, p.spec["w_mm"], p.spec["h_mm"]) for p in self.panels]
+        return figpage.free_spot(spec, taken, self.paper_mm())
 
     def relabel(self) -> None:
-        order = sorted(self.panels, key=lambda p: (round(p.pos().y() / PX / 20), p.pos().x()))
-        for k, p in enumerate(order):
-            p.letter = stimmod.letter(k)
+        for p, letter in zip(self.panels, figpage.letters([(p.pos().x() / PX, p.pos().y() / PX)
+                                                         for p in self.panels])):
+            p.letter = letter
         self.hint.setVisible(not self.panels)
         self.scene.update()
 
@@ -632,7 +587,7 @@ class PlotCanvasPage(QtWidgets.QWidget):
 
     # -- the look the figures share: sections linked across the page (figspec.SECTIONS) ----------
     def linked_keys(self) -> list[str]:
-        return [k for sec, on in self.links.items() if on and sec in F.SECTIONS for k in F.SECTIONS[sec]]
+        return figpage.linked_keys(self.links)
 
     def _take_look(self, spec: dict) -> None:
         """The page's shared look from this figure (the first on the page)."""
@@ -787,28 +742,7 @@ class PlotCanvasPage(QtWidgets.QWidget):
 
     def _export_annotations(self, fig, W: float, H: float) -> None:
         """The drawings in the saved page: text as text, lines and shapes as vector objects."""
-        from matplotlib.lines import Line2D
-        from matplotlib.patches import Ellipse, FancyArrowPatch, Rectangle
-        for a in self.annotations:
-            d = a.state()
-            if d["kind"] == "text":
-                fig.text(d["x_mm"] / W, 1 - d["y_mm"] / H, d["text"], fontsize=d["size"], color=d["color"],
-                         fontweight="bold" if d.get("bold") else "normal", va="top", ha="left")
-                continue
-            x0, y0, x1, y1 = d["x0"] / W, 1 - d["y0"] / H, d["x1"] / W, 1 - d["y1"] / H
-            lw = d["width"]
-            if d["kind"] == "line":
-                fig.add_artist(Line2D([x0, x1], [y0, y1], transform=fig.transFigure, color=d["color"], linewidth=lw,
-                                      solid_capstyle="round"))
-            elif d["kind"] == "arrow":
-                fig.add_artist(FancyArrowPatch((x0, y0), (x1, y1), transform=fig.transFigure, color=d["color"],
-                                               linewidth=lw, arrowstyle="-|>", mutation_scale=8 + 3 * lw))
-            elif d["kind"] == "rect":
-                fig.add_artist(Rectangle((min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0),
-                                         transform=fig.transFigure, fill=False, edgecolor=d["color"], linewidth=lw))
-            else:
-                fig.add_artist(Ellipse(((x0 + x1) / 2, (y0 + y1) / 2), abs(x1 - x0), abs(y1 - y0),
-                                       transform=fig.transFigure, fill=False, edgecolor=d["color"], linewidth=lw))
+        figpage.draw_annotations(fig, [a.state() for a in self.annotations], W, H)
 
     def data_changed(self) -> None:
         """The DataPad changed: the linked figures follow."""
@@ -835,20 +769,9 @@ class PlotCanvasPage(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Export", f"Couldn't save it: {e}")
 
     def save(self, path: str, dpi: int = 300) -> None:
-        W, H = self.paper_mm()
-        fig = Figure(figsize=(W / 25.4, H / 25.4))
-        for p in self.panels:
-            x0, y0, w, h = _laid_out_axes(p.spec, p.data)
-            px, py = p.pos().x() / PX, p.pos().y() / PX
-            pw, ph = p.spec["w_mm"], p.spec["h_mm"]
-            rect = [(px + x0 * pw) / W, 1 - (py + ph) / H + y0 * ph / H, w * pw / W, h * ph / H]
-            ax = fig.add_axes(rect)
-            F.draw(fig, p.spec, p.data, ax=ax)
-            if self.letters.isChecked():
-                fig.text(px / W, 1 - py / H, p.letter, fontsize=F.paper_font(p.spec) * 1.4,
-                         fontweight="bold", va="top", ha="left")
-        self._export_annotations(fig, W, H)
-        fig.savefig(path, dpi=dpi, facecolor="white")
+        panels = [(p.spec, p.data, p.pos().x() / PX, p.pos().y() / PX, p.letter) for p in self.panels]
+        figpage.save_page(path, self.paper_mm(), panels, [a.state() for a in self.annotations],
+                          self.letters.isChecked(), dpi)
 
     # -- saving with the session ---------------------------------------------------------------
     def state(self) -> dict:
@@ -917,21 +840,7 @@ def image_png(path: str, dpi: int = 300) -> tuple[bytes, int, int]:
 
 
 def _pdf_page(path: str, dpi: int) -> QtGui.QImage:
-    try:
-        import pypdfium2 as pdfium
-        page = pdfium.PdfDocument(path)[0]
-        pil = page.render(scale=dpi / 72).to_pil()
-        b = io.BytesIO()
-        pil.save(b, "PNG")
-        return QtGui.QImage.fromData(b.getvalue())
-    except ImportError:
-        pass
-    if shutil.which("sips"):                      # macOS draws PDFs itself
-        with tempfile.TemporaryDirectory() as d:
-            out = Path(d) / "page.png"
-            subprocess.run(["sips", "-s", "format", "png", "-s", "dpiWidth", str(dpi), "-s", "dpiHeight",
-                            str(dpi), path, "--out", str(out)], check=True, capture_output=True)
-            img = QtGui.QImage(str(out))
-            if not img.isNull():
-                return img
-    raise ValueError("PDFs need the pypdfium2 package here (pip install pypdfium2)")
+    img = QtGui.QImage.fromData(figpage.pdf_png(path, dpi))
+    if img.isNull():
+        raise ValueError("PDFs need the pypdfium2 package here (pip install pypdfium2)")
+    return img

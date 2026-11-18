@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plot Canvas</title>
+<link rel="stylesheet" href="/static/newt.css">
+<link rel="stylesheet" href="/static/figs.css">
+<style>
+.cvcard{display:flex;flex-direction:column;gap:10px;min-width:0}
+.textpt{display:inline-flex;align-items:center;gap:6px}
+.textpt input[type=range]{width:110px}
+.textpt input[type=number]{width:66px;padding:3px 6px;font-size:12.5px}
+.tools{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tools button{border:0;border-radius:0;font-size:13px;padding:4px 11px;border-right:1px solid var(--line)}
+.tools button:last-child{border-right:0}
+.tools button[aria-pressed=true]{background:var(--accent);color:var(--surface)}
+.fbar input[type=number]{width:62px;padding:3px 6px;font-size:12.5px}
+.bold{font-weight:700;min-width:30px}
+.zoomlab{font-family:var(--font-mono);font-size:12.5px;min-width:46px;text-align:center;color:var(--muted)}
+.view{position:relative;background:#d9dce1;border-radius:8px;height:calc(100vh - 230px);min-height:420px;overflow:auto;user-select:none}
+.view.drawing{cursor:crosshair}
+.view.drop{outline:3px dashed var(--accent);outline-offset:-6px}
+.sheet{position:absolute;background:white;box-shadow:0 0 0 1px #b0b4ba,0 2px 10px rgba(0,0,0,.12)}
+.hint{position:absolute;color:#888;font-size:14px;pointer-events:none}
+.pan{position:absolute;cursor:grab}
+.pan img{position:absolute;inset:0;width:100%;height:100%;display:block;-webkit-user-drag:none;pointer-events:none}
+.pan .letter{position:absolute;left:0;top:0;font-family:Arial,Helvetica,sans-serif;font-weight:700;color:black;line-height:1;pointer-events:none}
+.pan .frozen{position:absolute;right:4px;top:2px;font-size:11px;color:#888;pointer-events:none}
+.pan .corner{position:absolute;right:0;bottom:0;width:12px;height:12px;cursor:nwse-resize}
+.pan.lit{outline:1.5px dashed #1a5fd0;outline-offset:0}
+.pan.lit .corner{background:#1a5fd0}
+.view.drawing .pan,.view.drawing .atext{cursor:crosshair}
+svg.anns{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+svg.anns .hit{pointer-events:stroke;cursor:move;stroke:transparent;fill:none}
+svg.anns .hit.area{pointer-events:all}
+svg.anns .sel{fill:none;stroke:#1a5fd0;stroke-dasharray:4 3;stroke-width:1;vector-effect:non-scaling-stroke}
+.atext{position:absolute;white-space:pre;line-height:1.15;font-family:Arial,Helvetica,sans-serif;cursor:move;padding:0;outline:none}
+.atext.lit{outline:1px dashed #1a5fd0}
+.atext[contenteditable=true]{cursor:text;outline:1.5px solid #1a5fd0;background:rgba(255,255,255,.85)}
+.band{position:absolute;border:1px solid #1a5fd0;background:rgba(26,95,208,.08);pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="card cvcard" aria-label="Plot Canvas">
+    <div class="fbar">
+      <label>Page <select id="paper" title="The page's size"></select></label>
+      <label title="A, B, C… on each figure, in the order they sit: top to bottom, left to right"><input type="checkbox" id="letters"> Panel letters</label>
+      <span class="sep"></span>
+      <label class="textpt" title="The axis labels of every figure on the page, in pt as they print; each figure's numbers and title keep their size against them">Text
+        <input type="range" id="textr" min="4" max="36" step="0.5"><input type="number" id="textn" min="4" max="36" step="0.5"> pt</label>
+      <span class="sep"></span>
+      <button class="ib" id="edit" title="Change the figure picked in Single Plot (or double-click it)">Edit in Single Plot</button>
+      <button class="ib" id="freeze" title="Stop following the DataPad: keep the numbers the figure shows now. Again to follow it again">Freeze</button>
+      <button class="ib" id="dup" title="Another copy of what's picked">Duplicate</button>
+      <button class="ib" id="del" title="Take what's picked off the page (Delete)">Remove</button>
+      <span class="spacer"></span>
+      <button class="ib" id="addimg" title="Put a picture on the page: PNG, JPEG, TIFF, SVG or PDF (or drop it here)">Add image…</button>
+      <button class="ib" id="zout" title="Zoom out (⌘/Ctrl and scroll, or pinch)">−</button><span class="zoomlab" id="zoomlab">100%</span><button class="ib" id="zin" title="Zoom in (⌘/Ctrl and scroll, or pinch)">+</button>
+      <button class="ib" id="zfit" title="The whole page in view">Fit page</button>
+      <span class="dd"><button class="ib go" id="exportbtn" title="Save the whole page">Export ▾</button>
+        <div class="menu right" id="exportmenu" hidden>
+          <button data-fmt="pdf">PDF<span>Vector: sharp at any size, for printing</span></button>
+          <button data-fmt="svg">SVG<span>Vector, every line and label its own (Illustrator, Inkscape)</span></button>
+          <button data-fmt="png">PNG<span>A picture, 300 dpi</span></button>
+        </div></span>
+    </div>
+    <div class="fbar">
+      <label>Draw</label>
+      <span class="tools" id="tools">
+        <button data-t="select" aria-pressed="true" title="Pick, move and resize things (Delete removes what's picked)">Select</button>
+        <button data-t="text" title="Click to type a label; double-click a label to change it">Text</button>
+        <button data-t="line" title="Drag to draw a line">Line</button>
+        <button data-t="arrow" title="Drag to draw an arrow, pointing where you let go">Arrow</button>
+        <button data-t="rect" title="Drag to draw a box">Box</button>
+        <button data-t="ellipse" title="Drag to draw an ellipse or circle">Ellipse</button>
+      </span>
+      <label title="The color of new drawings, and of the ones picked">Color <input type="color" id="acolor" value="#000000"></label>
+      <label title="Line width of new lines and shapes, and of the ones picked">Width <input type="number" id="awidth" min="0.25" max="12" step="0.25" value="1"> pt</label>
+      <label title="Text size of new labels, and of the ones picked">Text <input type="number" id="asize" min="4" max="72" step="1" value="10"> pt</label>
+      <button class="ib bold" id="abold" aria-pressed="false" title="Bold labels">B</button>
+      <span class="spacer"></span>
+      <span class="problem" id="cproblem" hidden></span>
+    </div>
+    <div class="view" id="view">
+      <div class="sheet" id="sheet"></div>
+    </div>
+    <p class="caption">Drag a figure to move it, its corner to resize it; Shift-click picks more, or drag a box around them. Double-click a figure to change it in Single Plot. Figures of DataPad columns follow the table until you freeze them.</p>
+  </section>
+</div>
+<input type="file" id="imgfile" accept=".png,.jpg,.jpeg,.tif,.tiff,.bmp,.gif,.svg,.pdf,image/*,application/pdf" multiple hidden>
+<script src="/static/nav.js"></script>
+<script src="/static/figs.js"></script>
+<script src="/static/plotcanvas.js"></script>
+</body>
+</html>

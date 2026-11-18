@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Single Plot</title>
+<link rel="stylesheet" href="/static/newt.css">
+<link rel="stylesheet" href="/static/trials.css">
+<link rel="stylesheet" href="/static/figs.css">
+<style>
+.sppage{display:grid;grid-template-columns:300px minmax(0,1fr) 350px;gap:18px;align-items:start}
+@media (max-width:1250px){.sppage{grid-template-columns:minmax(0,1fr) 340px}.sppage>.trials{grid-column:1 / -1;order:3}}
+@media (max-width:900px){.sppage{grid-template-columns:minmax(0,1fr)}}
+.spfig{display:flex;flex-direction:column;gap:10px;min-width:0}
+.area{position:relative;background:#e9ebee;border-radius:8px;height:calc(100vh - 190px);min-height:380px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.area img{display:block;background:white;box-shadow:0 1px 6px rgba(0,0,0,.15);user-select:none;-webkit-user-drag:none}
+.area.grab img{cursor:grab}
+.area.grabbing img{cursor:grabbing}
+.area .busydot{position:absolute;top:10px;right:12px;width:9px;height:9px;border-radius:50%;background:var(--accent);opacity:0;transition:opacity .2s}
+.area .busydot.on{opacity:.8}
+.maker{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;max-width:560px;width:calc(100% - 40px);display:flex;flex-direction:column;gap:12px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+.maker[hidden]{display:none}
+.maker h3{margin:0;font-size:16px;font-weight:600}
+.maker .chips{display:flex;flex-wrap:wrap;gap:5px}
+.maker .chip{font-size:13px;padding:3px 11px;border-radius:999px}
+.maker .chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.maker .srcs{display:flex;flex-direction:column;gap:5px}
+.maker .srcs button{text-align:left;font-size:13.5px;padding:6px 10px;display:flex;justify-content:space-between;gap:10px}
+.maker .srcs button span{color:var(--muted);font-size:12.5px}
+.maker .x{position:absolute;right:0;top:0}
+.maker .head{display:flex;align-items:center;gap:8px}
+.maker .head h3{margin-right:auto}
+.spside{display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 110px);overflow:auto;padding:12px 14px}
+.spside[aria-disabled=true] .sbody{opacity:.45;pointer-events:none}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);position:sticky;top:-12px;background:var(--surface);z-index:2;margin:-12px -14px 0;padding:8px 14px 0}
+.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 12px;font-size:14px;color:var(--muted);background:none}
+.tabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+.sbody{display:flex;flex-direction:column;gap:10px}
+.sbody[hidden]{display:none}
+.shead{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:6px 0 0}
+.series{border:1px solid var(--line);border-radius:9px;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.series .top{display:flex;gap:6px;align-items:center}
+.series .top select{flex:1}
+.series .x{padding:2px 8px;font-size:13px;color:var(--muted)}
+.swatch{width:26px;height:22px;padding:0;border-radius:5px}
+.swatch.auto{width:auto;padding:1px 8px;font-size:12.5px}
+.presets{display:flex;flex-wrap:wrap;gap:4px}
+.presets button{font-size:12.5px;padding:3px 9px}
+details.sec{border-top:1px solid var(--line);padding-top:6px}
+details.sec summary{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:600;list-style:none;padding:2px 0}
+details.sec summary::-webkit-details-marker{display:none}
+details.sec summary::before{content:"▸";color:var(--muted);font-size:11px;width:10px}
+details.sec[open] summary::before{content:"▾"}
+details.sec summary label{margin-left:auto;font-weight:400;font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:5px}
+details.sec .form{margin:8px 0 4px}
+.fitres{border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;display:flex;flex-direction:column;gap:6px;user-select:text}
+.fitres table{border-collapse:collapse;font-family:var(--font-mono);font-size:12.5px}
+.fitres td{padding:1px 10px 1px 0}
+.fitres .eq{font-family:var(--font-mono);font-size:12.5px;word-break:break-word}
+.fitres .bad{color:var(--bad)}
+.writes{display:flex;flex-wrap:wrap;gap:4px 12px}
+.writes label{display:inline-flex;align-items:center;gap:5px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="sppage">
+    <section class="card trials" id="trials" aria-label="Trials"></section>
+
+    <section class="card spfig" aria-label="The figure">
+      <div class="fbar">
+        <span class="dd"><button class="ib go" id="newbtn" title="Start a figure: from DataPad columns, or from a chart on Analysis or the DataPad">New figure ▾</button></span>
+        <span class="info" id="finfo"></span>
+        <span class="spacer"></span>
+        <button class="ib" id="grab" aria-pressed="true" title="Drag the plot to move what it shows; scroll over it to zoom where you point. X from / Y from follow">✋ Grab</button>
+        <button class="ib" id="zin" title="Zoom in on the middle of the plot">＋</button>
+        <button class="ib" id="zout" title="Zoom out">−</button>
+        <button class="ib" id="zfit" title="Back to automatic ranges: everything plotted, fitted">Fit view</button>
+        <span class="sep"></span>
+        <button class="ib" id="copy" title="Copy the figure as a picture, to paste in a document">Copy</button>
+        <span class="dd"><button class="ib" id="savebtn" title="Save this figure on its own">Save figure ▾</button>
+          <div class="menu right" id="savemenu" hidden>
+            <button data-fmt="pdf">PDF<span>Vector: sharp at any size</span></button>
+            <button data-fmt="svg">SVG<span>Vector, every line and label its own (Illustrator, Inkscape)</span></button>
+            <button data-fmt="png">PNG<span>A picture, 300 dpi</span></button>
+          </div></span>
+        <button class="ib go" id="tocanvas" title="Put this figure on the Plot Canvas, to lay out beside others">Send to Canvas</button>
+      </div>
+      <span class="problem" id="fproblem" hidden></span>
+      <div class="area grab" id="area">
+        <img id="figimg" alt="The figure" hidden>
+        <i class="busydot" id="busydot"></i>
+        <div class="maker" id="maker" hidden>
+          <div class="head"><h3>A figure of DataPad columns</h3><button class="ib" id="makerx" hidden>Close</button></div>
+          <div class="form">
+            <span>Kind</span><div class="seg" id="mkind"><button data-k="xy">Y against X</button><button data-k="bar">Bars by group</button></div>
+            <span>Y</span><div class="chips" id="mys"></div>
+            <span id="mxlab">Against</span><select class="t" id="mx"></select>
+          </div>
+          <div class="fbar"><span class="caption" id="mnote"></span><span class="spacer"></span><button class="ib go" id="mgo" disabled>Make the figure</button></div>
+          <h3>Or a chart, as it is</h3>
+          <div class="srcs" id="msrcs"></div>
+        </div>
+      </div>
+      <p class="caption">Changes here draw at once. Labels are written plainly: I_B comes out as I with a subscript B. Send to Canvas puts a copy on the Plot Canvas; double-click it there to come back and change it.</p>
+    </section>
+
+    <aside class="card spside" id="side" aria-label="Settings">
+      <div class="tabs" role="tablist"><button role="tab" data-tab="fig" aria-selected="true">Figure</button><button role="tab" data-tab="fit" aria-selected="false">Fit</button></div>
+
+      <div class="sbody" id="tab-fig">
+        <p class="shead" id="datahead">Data</p>
+        <div id="datapart">
+          <div class="form"><span>Kind</span><select class="t" data-k="kind"><option value="xy">Y against X</option><option value="bar">Bars by group</option></select></div>
+          <div id="serieslist" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+          <div class="fbar" style="margin-top:8px"><button class="ib" id="addseries" title="Another column on the same axes">+ Series</button></div>
+        </div>
+        <p class="caption" id="fromchart" hidden></p>
+
+        <p class="shead">Axes</p>
+        <div class="form">
+          <span>Title</span><input type="text" class="t" data-k="title" placeholder="none" title="Above the plot; blank: none. I_B gives I with a subscript B">
+          <span>X label</span><input type="text" class="t" data-k="xlabel" placeholder="automatic" title="x axis label; blank: the column's name and unit. I_B gives I with a subscript B">
+          <span>X from</span><div class="pair"><input type="number" data-k="xlim" data-i="0" placeholder="auto" step="any"> to <input type="number" data-k="xlim" data-i="1" placeholder="auto" step="any"><label class="lg"><input type="checkbox" data-k="xlog"> log</label></div>
+          <span>Y label</span><input type="text" class="t" data-k="ylabel" placeholder="automatic" title="y axis label; blank: the column's name and unit. I_B gives I with a subscript B">
+          <span>Y from</span><div class="pair"><input type="number" data-k="ylim" data-i="0" placeholder="auto" step="any"> to <input type="number" data-k="ylim" data-i="1" placeholder="auto" step="any"><label class="lg"><input type="checkbox" data-k="ylog"> log</label></div>
+        </div>
+
+        <p class="shead">Look</p>
+        <div class="presets" id="presets"></div>
+        <div class="presets">
+          <button id="copylook" title="Keep this figure's look (not its size) to paste on another">Copy look</button>
+          <button id="pastelook" title="Give this figure the look you copied; its size stays" disabled>Paste look</button>
+          <button id="every" title="Give every figure on the Plot Canvas this look (each keeps its size)">Apply to every figure</button>
+        </div>
+
+        <details class="sec" open><summary>Text<label title="The same text on every figure of the Plot Canvas: change it on one and the others follow"><input type="checkbox" data-link="text"> 🔗 every figure</label></summary>
+          <div class="form">
+            <span>Font</span><select class="t" data-k="family" title="The figure's typeface (every label, number and title)"></select>
+            <span>Labels</span><div class="num" data-num="font" data-lo="5" data-hi="96" data-step="0.5" data-unit="pt" title="The axis labels' size (and, on Auto, the others follow it)"></div>
+            <span>Numbers</span><div class="num" data-num="font_ticks" data-lo="0" data-hi="96" data-step="0.5" data-unit="pt" data-auto="Auto" title="The numbers along the axes; Auto: a little smaller than the labels"></div>
+            <span>Title</span><div class="num" data-num="font_title" data-lo="0" data-hi="120" data-step="0.5" data-unit="pt" data-auto="Auto" title="The title; Auto: a little bigger than the labels"></div>
+            <span>Legend</span><div class="num" data-num="font_legend" data-lo="0" data-hi="72" data-step="0.5" data-unit="pt" data-auto="Auto" title="The legend; Auto: a little smaller than the labels"></div>
+            <span>Bold</span><select class="t" data-k="bold" title="What's bold"><option value="none">None</option><option value="title">Title</option><option value="labels">Labels and title</option></select>
+          </div></details>
+        <details class="sec" open><summary>Lines and points<label title="The same lines and points on every figure of the Plot Canvas"><input type="checkbox" data-link="lines"> 🔗 every figure</label></summary>
+          <div class="form">
+            <span>Lines</span><div class="num" data-num="lw" data-lo="0.1" data-hi="24" data-step="0.1" data-unit="pt" title="How thick the lines print"></div>
+            <span>Axis lines</span><div class="num" data-num="axw" data-lo="0.1" data-hi="6" data-step="0.05" data-unit="pt" title="How thick the axis lines and tick marks print"></div>
+            <span>Points</span><div class="num" data-num="ms" data-lo="0.5" data-hi="60" data-step="0.5" data-unit="pt" title="How big the points are"></div>
+            <span>Point shape</span><select class="t" data-k="marker" title="The points' shape"><option value="circle">● Filled circle</option><option value="open">○ Open circle</option><option value="square">■ Square</option><option value="triangle">▲ Triangle</option><option value="diamond">◆ Diamond</option><option value="none">None</option></select>
+            <span>Error caps</span><div class="num" data-num="cap" data-lo="0" data-hi="20" data-step="0.5" data-unit="pt" data-auto="Auto" title="How wide the ends of the error bars are; Auto: from the points' size"></div>
+            <span>Error bars</span><select class="t" data-k="err_style" title="How the spread (± SEM or ± SD, set for each series) is drawn"><option value="bars">Bars</option><option value="band">Shaded band</option><option value="none">None</option></select>
+            <span>Smooth lines</span><div class="num" data-num="smooth" data-lo="0" data-hi="201" data-step="2" data-unit="points" data-auto="Off" data-int title="Smooth the lines: each point averaged with its neighbours, this many in all (points on their own stay put). Off: as measured"></div>
+          </div></details>
+        <details class="sec" open><summary>Axes<label title="The same axes on every figure of the Plot Canvas"><input type="checkbox" data-link="axes"> 🔗 every figure</label></summary>
+          <div class="form">
+            <span>Box</span><select class="t" data-k="box" title="The lines around the plot"><option value="open">Open (no top or right line)</option><option value="closed">Closed</option><option value="none">None (ticks only)</option></select>
+            <span>Ticks</span><select class="t" data-k="ticks" title="Which way the tick marks point from the axis"><option value="out">Outside</option><option value="in">Inside</option><option value="inout">Across</option></select>
+            <span>Tick length</span><div class="num" data-num="tick_len" data-lo="0" data-hi="40" data-step="0.5" data-unit="pt" title="How long the tick marks are (0: none)"></div>
+            <span>About ticks</span><div class="num" data-num="nticks" data-lo="0" data-hi="12" data-step="1" data-auto="Auto" data-int title="About how many numbers along each axis; Auto: as many as fit"></div>
+            <span>Grid</span><select class="t" data-k="grid" title="Grid lines"><option value="none">None</option><option value="y">Across (y only)</option><option value="xy">Both ways</option></select>
+            <label class="full"><input type="checkbox" data-k="zero"> Lines at zero</label>
+            <label class="full"><input type="checkbox" data-k="points"> Each trial's point on the bars</label>
+          </div></details>
+        <details class="sec"><summary>Colors<label title="The same colors on every figure of the Plot Canvas"><input type="checkbox" data-link="colors"> 🔗 every figure</label></summary>
+          <div class="form">
+            <span>Palette</span><select class="t" data-k="palette" title="The series' colors, unless you gave one its own (Data, above)"><option value="">The groups' own</option><option value="safe">Colorblind-safe</option><option value="gray">Grays</option><option value="viridis">Viridis</option><option value="bold">Bold</option></select>
+          </div></details>
+        <details class="sec"><summary>Legend<label title="The same legend on every figure of the Plot Canvas"><input type="checkbox" data-link="legend"> 🔗 every figure</label></summary>
+          <div class="form">
+            <span>Where</span><select class="t" data-k="legend"></select>
+            <label class="full"><input type="checkbox" data-k="legend_frame"> Box around it</label>
+          </div></details>
+        <details class="sec" open><summary>Size</summary>
+          <div class="form">
+            <span>Width</span><div class="num" data-num="w_mm" data-lo="20" data-hi="400" data-step="1" data-unit="mm" title="How wide the figure prints"></div>
+            <span>Height</span><div class="num" data-num="h_mm" data-lo="20" data-hi="400" data-step="1" data-unit="mm" title="How tall the figure prints"></div>
+          </div></details>
+      </div>
+
+      <div class="sbody" id="tab-fit" hidden>
+        <div class="form">
+          <span>Fit</span><select class="t" data-k="fit" title="The curve to fit. Polynomial (degree 1: a straight line), exponential decay or rise (time constants), Boltzmann (activation curves), power and log laws"></select>
+          <span>Degree</span><input type="number" data-k="fit_degree" min="0" max="9" step="1" title="The polynomial's degree: 1 a straight line, 2 a parabola…">
+          <span>Through</span><select class="t" id="fitline" title="Which line (or series) to fit"></select>
+          <span>x from</span><div class="pair"><input type="number" data-k="fit_x" data-i="0" placeholder="all" step="any"> to <input type="number" data-k="fit_x" data-i="1" placeholder="all" step="any"></div>
+          <span></span><div><button class="ib" id="fitview" title="Fit just what the figure's x axis shows">Use the x axis's range</button></div>
+          <span>Line</span><div class="pair"><input type="color" data-k="fit_color" title="The fitted curve's color (and its text's)"><input type="number" data-k="fit_width" min="0.25" max="6" step="0.25" title="How thick the fitted curve is (pt)"><select class="t" data-k="fit_style" style="width:auto"></select></div>
+          <span>Across</span><select class="t" data-k="fit_span" title="Draw the fitted curve across the whole plot, or only between the first and last points it went through (a curve can run off far past the data)"></select>
+          <span>Write</span><div class="writes" id="fitshow"></div>
+          <span>In the</span><select class="t" data-k="fit_where" title="Which corner of the plot the text goes in"></select>
+        </div>
+        <div class="fitres" id="fitres"></div>
+        <div><button class="ib" id="fitcopy">Copy the results</button></div>
+      </div>
+    </aside>
+  </div>
+</div>
+<input type="color" id="colorpick" hidden>
+<script src="/static/nav.js"></script>
+<script src="/static/analysis.js"></script>
+<script src="/static/figs.js"></script>
+<script src="/static/singleplot.js"></script>
+</body>
+</html>

@@ -65,9 +65,14 @@ def read_state(folder: str | Path) -> dict:
 def save_part(folder: str | Path, key: str, value) -> None:
     """Change one part of the saved settings (as the HTML front end saves its charts),
     leaving the rest, and the spikes, as they are."""
+    save_parts(folder, {key: value})
+
+
+def save_parts(folder: str | Path, parts: dict) -> None:
+    """Change some parts of the saved settings at once, leaving the rest as they are."""
     folder = Path(folder)
     state = read_state(folder)
-    state[key] = value
+    state.update(parts)
     tmp = folder / (FILE + ".tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
     tmp.replace(folder / FILE)

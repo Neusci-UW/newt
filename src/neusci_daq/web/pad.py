@@ -589,6 +589,39 @@ class Pad:
             lines.append([ch, out])
         return {"where": q.label(), "missing": False, "lines": lines}
 
+    # -- for figures (web/figures.py) --------------------------------------------------------------
+    def snapshot(self, cols: list[str]) -> dict:
+        """The numbers a figure plots, as the Qt DataPad gives them (padpage.snapshot): these
+        columns of the ticked rows, their groups and the groups' colors."""
+        with self._lock:
+            self._sync()
+            inc = self.table().without(self.v.get("hidden", set()))
+            return {"rows": [r.trial + 1 for r in inc.rows], "groups": [self.src.group(r.trial)[0] for r in inc.rows],
+                    "colors": dict(self.colors),
+                    "cols": {c: [float(v) for v in inc.column(c)] for c in cols if c in inc.values},
+                    "units": {c: inc.units.get(c, "") for c in cols}}
+
+    def fresh_version(self) -> int:
+        """The table's version, worked out again first if the Trials pane or a column changed."""
+        with self._lock:
+            self._sync()
+            self.table()
+            return self.version
+
+    def numbers(self) -> list[dict]:
+        """The columns of numbers a figure can plot: name, shown name, unit."""
+        with self._lock:
+            self._sync()
+            tab = self.table()
+            return [{"name": c.name, "shown": c.shown(), "unit": tab.units.get(c.name, "")}
+                    for c in self.pad.columns if c.name not in tab.text]
+
+    def chart_specs(self) -> list[dict]:
+        """The DataPad's charts (Y against X), as their settings."""
+        with self._lock:
+            self._sync()
+            return json.loads(json.dumps(self.charts))
+
     # -- charts of one column against another -----------------------------------------------------
     def _chart_cmd(self, cmd: str, d: dict) -> None:
         if cmd == "chart_add":

@@ -21,6 +21,16 @@ POST /pad/cmd         JSON {"cmd": ...}: add, set, what, name, fx, move, remove,
 POST /pad/preview     JSON {"trial" | "avg", "row", "col", "stim", "resp", "cols", "x0", "x1"}: a row's
                       trial, shrunk, packed as /charts/data packs a chart (see Pad.preview)
 POST /pad/chart       JSON {"id"}: a DataPad chart's dots (see Pad.chart)
+GET /fig/state        JSON: Single Plot's figure, the columns and charts to make one of (see Figures.state)
+POST /fig/cmd         JSON {"cmd": ...}: new, chart, set, series, look, copy_look, every, link, to_canvas,
+                      edit, clear (see Figures.command)
+POST /fig/png         JSON {"which": "single" | "panel", "id", "dpi", "w", "h"}: a figure drawn, as base64
+                      PNG, and where its plot sits (see Figures.picture)
+POST /fig/export      JSON {"what": "single" | "page", "fmt", "dpi"}: the file itself; with "dialog", saved
+                      where a window's Save dialog says (see Figures.export, save_as)
+GET /canvas/state     JSON: the Plot Canvas's page, figures and drawings (see Figures.canvas)
+POST /canvas/cmd      JSON {"cmd": ...}: paper, letters, text, move, resize, freeze, duplicate, remove,
+                      image, ann_add, ann_set (see Figures.canvas_command)
 
 Only 127.0.0.1 is served, and everything but the pages' files needs this launch's key
 (header X-Newt-Key): any program on the computer can reach a local server, and
@@ -38,6 +48,7 @@ from pathlib import Path
 
 from .charts import Charts
 from .design import Design
+from .figures import Figures
 from .live import Live
 from .pad import Pad
 from .record import COMMANDS as RECORD_COMMANDS, Recording
@@ -48,14 +59,17 @@ STATIC = Path(__file__).parent / "static"
 
 
 def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, recording: Recording,
-                charts: Charts, pad: Pad, key: str, port: int = 0) -> ThreadingHTTPServer:
+                charts: Charts, pad: Pad, figures: Figures, key: str,
+                port: int = 0) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
 
-        def _send(self, body: bytes, ctype: str, code: int = 200) -> None:
+        def _send(self, body: bytes, ctype: str, code: int = 200, extra: dict | None = None) -> None:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
@@ -92,6 +106,10 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 return self._json(charts.state())
             if path == "/pad/state":
                 return self._json(pad.state())
+            if path == "/fig/state":
+                return self._json(figures.state())
+            if path == "/canvas/state":
+                return self._json(figures.canvas())
             if path == "/stim/state":
                 return self._json(stimulator.state())
             if path == "/design/state":
@@ -105,7 +123,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
             d = {}
             state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state, "/charts/cmd": charts.state,
                      "/charts/data": dict, "/pad/cmd": pad.state, "/pad/chart": dict, "/pad/preview": dict,
-                     "/design/cmd": lambda: design.state(d.get("pic"))}.get(path, trials.state)
+                     "/design/cmd": lambda: design.state(d.get("pic")), "/fig/cmd": figures.state,
+                     "/fig/png": dict, "/fig/export": dict, "/canvas/cmd": figures.canvas}.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 out = {}
@@ -115,6 +134,13 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     return self._send(*pad.preview(d))
                 if path == "/pad/chart":
                     return self._json(pad.chart(d))
+                if path == "/fig/png":
+                    return self._json(figures.picture(d))
+                if path == "/fig/export":
+                    if d.get("dialog"):
+                        return self._json(figures.save_as(d))
+                    body, ctype, name = figures.export(d)
+                    return self._send(body, ctype, extra={"Content-Disposition": f'attachment; filename="{name}"'})
                 if path == "/live/cmd":
                     out = self._live(d)
                 elif path == "/trials/cmd":
@@ -123,6 +149,10 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     charts.command(d)
                 elif path == "/pad/cmd":
                     out = pad.command(d)
+                elif path == "/fig/cmd":
+                    out = figures.command(d)
+                elif path == "/canvas/cmd":
+                    out = figures.canvas_command(d)
                 elif path == "/stim/cmd":
                     self._stim(d)
                 elif path == "/design/cmd":

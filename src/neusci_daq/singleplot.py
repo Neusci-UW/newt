@@ -18,14 +18,13 @@ the whiteboard puts it back where it was.
 """
 from __future__ import annotations
 
-import io
-
 from matplotlib.figure import Figure
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import chartstyle as CS
+from . import figpage
 from . import figspec as F
 from .viewkit import scroll_column, with_slider
 
@@ -843,26 +842,10 @@ class SinglePlotPage(QtWidgets.QWidget):
         dpi = self.logicalDpiX() or 96
         zoom = min(1.6, max(0.4, min((avail.width() - 40) / (w_in * dpi), (avail.height() - 40) / (h_in * dpi))))
         ratio = self.devicePixelRatioF() or 1.0
-        fig = Figure(figsize=(w_in, h_in), dpi=dpi * zoom * ratio)
-        try:
-            F.draw(fig, self.spec, self.data)
-            fig.tight_layout()
-        except Exception as e:                      # a bad range or label: say so, don't crash
-            fig.clear()
-            fig.text(0.5, 0.5, f"Can't draw this: {e}", ha="center", va="center", wrap=True)
         W, H = int(w_in * dpi * zoom), int(h_in * dpi * zoom)
-        self._geo = None
-        if fig.axes and self.spec.get("kind") != "image":        # where the plot is, for grab and zoom
-            ax = fig.axes[0]
-            pos = ax.get_position()
-            self._geo = {"left": pos.x0 * W, "top": (1 - pos.y1) * H, "w": pos.width * W, "h": pos.height * H,
-                         "xlim": tuple(ax.get_xlim()), "ylim": tuple(ax.get_ylim()),
-                         "xlog": ax.get_xscale() == "log", "ylog": ax.get_yscale() == "log",
-                         "x_moves": self.spec.get("kind") != "bar"}
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=dpi * zoom * ratio, facecolor="white")
+        png, self._geo = figpage.view_png(self.spec, self.data, dpi * zoom * ratio, (W, H))
         pix = QtGui.QPixmap()
-        pix.loadFromData(buf.getvalue())
+        pix.loadFromData(png)
         pix.setDevicePixelRatio(ratio)
         self.canvas.setFixedSize(int(w_in * dpi * zoom), int(h_in * dpi * zoom))
         self.canvas.setPixmap(pix)

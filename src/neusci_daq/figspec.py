@@ -332,29 +332,7 @@ def _draw(ax, spec: dict, data: dict) -> None:
     elif spec.get("kind") == "curves":
         _curves(ax, spec, data, lw)
         _marks_and_lines(ax, spec, data, lw)
-    if spec.get("fit") and spec.get("kind") != "bar":
-        got = do_fit(spec, data)
-        if got is not None:
-            _, f, x = got
-            xl, yl = ax.get_xlim(), ax.get_ylim()
-            lim = [v for v in (spec.get("xlim") or [None, None])]
-            lo, hi = (lim[0] if lim[0] is not None else xl[0], lim[1] if lim[1] is not None else xl[1]) \
-                if spec.get("fit_span", "plot") == "plot" else (np.nanmin(x), np.nanmax(x))
-            xs = np.geomspace(lo, hi, 300) if spec.get("xlog") and lo > 0 else np.linspace(lo, hi, 300)
-            color = spec.get("fit_color") or FIT_LOOK["fit_color"]
-            ax.plot(xs, f.predict(xs), _MPL_STYLE.get(spec.get("fit_style"), "--"), color=color,
-                    linewidth=float(spec.get("fit_width", FIT_LOOK["fit_width"])), zorder=8, label="fit")
-            ax.set_xlim(xl)                           # the curve doesn't move the axes
-            ax.set_ylim(yl)
-            text = fit_text(spec, f)
-            if text:
-                where = spec.get("fit_where", "tl")
-                ax.text(0.97 if "r" in where else 0.03, 0.03 if "b" in where else 0.97, "\n".join(text),
-                        transform=ax.transAxes, ha="right" if "r" in where else "left",
-                        va="bottom" if "b" in where else "top", color=color, zorder=9,
-                        fontsize=float(spec.get("font", 9) or 9) * 0.9,
-                        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.8, "pad": 2})
-    else:
+    else:                                             # Y against X: each series
         for s in series:
             x, y = _xy(data, s)
             for gname, m in _groups(data, len(y), s.get("by_group", True)):
@@ -384,8 +362,30 @@ def _draw(ax, spec: dict, data: dict) -> None:
                     kw = _marker_kw(spec, color, ms, lw) if st in ("markers", "both") else {"marker": None}
                     ax.plot(xs, ys, linestyle="-" if st in ("line", "both") else "none", linewidth=lw,
                             color=color, label=mathify(label), **kw)
-        if spec.get("xlog"):
-            ax.set_xscale("log")
+    if spec.get("xlog") and spec.get("kind") != "bar":
+        ax.set_xscale("log")
+    if spec.get("fit") and spec.get("kind") != "bar":     # after what it fits: the curve doesn't move the axes
+        got = do_fit(spec, data)
+        if got is not None:
+            _, f, x = got
+            xl, yl = ax.get_xlim(), ax.get_ylim()
+            lim = [v for v in (spec.get("xlim") or [None, None])]
+            lo, hi = (lim[0] if lim[0] is not None else xl[0], lim[1] if lim[1] is not None else xl[1]) \
+                if spec.get("fit_span", "plot") == "plot" else (np.nanmin(x), np.nanmax(x))
+            xs = np.geomspace(lo, hi, 300) if spec.get("xlog") and lo > 0 else np.linspace(lo, hi, 300)
+            color = spec.get("fit_color") or FIT_LOOK["fit_color"]
+            ax.plot(xs, f.predict(xs), _MPL_STYLE.get(spec.get("fit_style"), "--"), color=color,
+                    linewidth=float(spec.get("fit_width", FIT_LOOK["fit_width"])), zorder=8, label="fit")
+            ax.set_xlim(xl)                           # the curve doesn't move the axes
+            ax.set_ylim(yl)
+            text = fit_text(spec, f)
+            if text:
+                where = spec.get("fit_where", "tl")
+                ax.text(0.97 if "r" in where else 0.03, 0.03 if "b" in where else 0.97, "\n".join(text),
+                        transform=ax.transAxes, ha="right" if "r" in where else "left",
+                        va="bottom" if "b" in where else "top", color=color, zorder=9,
+                        fontsize=float(spec.get("font", 9) or 9) * 0.9,
+                        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.8, "pad": 2})
     if spec.get("ylog"):
         ax.set_yscale("log")
     if spec.get("zero"):
@@ -540,6 +540,13 @@ def _marks_and_lines(ax, spec, data, lw):
             rgba = [to_rgba(cols[i] if i < len(cols) else "#d9822b", alphas[i] if i < len(alphas) else 1.0)
                     for i in k]
             ax.scatter(x[k], y[k], s=size ** 2, c=rgba, marker=_SYMBOLS.get(s_, "o"), linewidths=0, zorder=5)
+    for e in data.get("errorbars", []):              # a group's average, ± its spread both ways (the HTML
+        size = float(e.get("size", 12.0)) * float(data.get("pt_px", 0.75))   # front end's measure charts)
+        ex = [float(v) for v in e["ex"]] if any(e.get("ex") or []) else None
+        ey = [float(v) for v in e["ey"]] if any(e.get("ey") or []) else None
+        ax.errorbar(e["x"], e["y"], xerr=ex, yerr=ey, fmt="o", color=e.get("color") or "#333333",
+                    markersize=size, markeredgewidth=0, elinewidth=lw * 0.8,
+                    capsize=float(spec.get("cap") or size * 0.4), zorder=6, label=mathify(e.get("name", "")) or None)
     lo, hi = spec.get("ylim") or [None, None]
     if lo is None or hi is None:                      # automatic: a level off the traces doesn't stretch the axis
         d0, d1 = ax.get_ylim()

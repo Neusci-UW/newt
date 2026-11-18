@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .charts import Charts
 from .design import Design
+from .figures import Figures
 from .live import Live
 from .pad import Pad
 from .record import Recording
@@ -45,7 +46,9 @@ def main() -> None:
     if first is not None:           # read while the window opens
         threading.Thread(target=trials.open, args=(first,), daemon=True, name="web-open").start()
     key = args.key or secrets.token_urlsafe(16)
-    srv = make_server(live, trials, stimulator, design, recording, Charts(trials), Pad(trials), key, args.port)
+    charts, pad = Charts(trials), Pad(trials)
+    figures = Figures(trials, pad, charts)
+    srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, args.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
     print(f"serving {url}", flush=True)
     try:
@@ -56,8 +59,16 @@ def main() -> None:
         else:
             import webview
             threading.Thread(target=srv.serve_forever, daemon=True, name="web-server").start()
-            webview.create_window("Newt (HTML)", url, width=1440, height=980,
-                                  min_size=(900, 640), background_color="#f3f4f1")
+            window = webview.create_window("Newt (HTML)", url, width=1440, height=980,
+                                           min_size=(900, 640), background_color="#f3f4f1")
+
+            def ask_path(name: str, fmt: str):           # Save figure… and Export…: the window's own dialog
+                got = window.create_file_dialog(webview.FileDialog.SAVE, save_filename=name,
+                                                file_types=(f"{fmt.upper()} (*.{fmt})",))
+                if isinstance(got, (list, tuple)):
+                    got = got[0] if got else None
+                return got
+            figures.ask_path = ask_path
             webview.start()
     except KeyboardInterrupt:
         pass

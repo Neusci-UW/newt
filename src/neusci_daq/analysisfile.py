@@ -13,6 +13,8 @@ from . import analysis as A
 
 FILE, SPIKES = "analysis.json", "analysis_spikes.npz"
 BOARD = "board"         # the HTML front end's charts (web/charts.py): kept when the Qt app saves
+PAD_CHARTS = "pad_charts"   # the HTML DataPad's charts of one column against another (web/pad.py): kept too
+KEPT = (BOARD, PAD_CHARTS)
 
 
 def exists(folder: str | Path) -> bool:
@@ -21,9 +23,8 @@ def exists(folder: str | Path) -> bool:
 
 def save(folder: str | Path, state: dict, events: A.Events | None, stems: list[str]) -> None:
     folder = Path(folder)
-    kept = read_state(folder).get(BOARD)
-    if kept is not None and BOARD not in state:
-        state = {**state, BOARD: kept}
+    saved = read_state(folder)
+    state = {**{k: saved[k] for k in KEPT if k in saved and k not in state}, **state}
     (folder / FILE).write_text(json.dumps(state, indent=2), encoding="utf-8")
     spikes = folder / SPIKES
     if events is None:

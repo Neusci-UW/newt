@@ -1,0 +1,52 @@
+/* The Trials pane (analysis.js), on Analysis and the DataPad. */
+.trials{display:flex;flex-direction:column;gap:12px}
+.thead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.thead h2{font-size:18px;font-weight:600;margin:0}
+.count{font-size:13px;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+select{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px;max-width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12.5px;padding:3px 10px;border-radius:999px;color:var(--muted)}
+.chip[data-way]{border-color:var(--accent);color:var(--accent);font-weight:500}
+.chip[data-way="1"]::after{content:" ↑"}
+.chip[data-way="-1"]::after{content:" ↓"}
+.chip .n{font-family:var(--font-mono);font-size:11px;margin-right:4px}
+.busy{font-size:13px;color:var(--accent)}
+.problem{font-size:13px;color:var(--bad)}
+
+.groups{display:flex;flex-direction:column;gap:6px;max-height:calc(100vh - 330px);min-height:200px;overflow:auto;padding:2px}
+.group{border:1px solid var(--line);border-radius:9px;background:var(--surface);flex:none}
+.group.lit{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.group.dragging{opacity:.4}
+.group.over{box-shadow:0 -3px 0 var(--accent)}
+.group.drop{border-color:var(--accent);background:color-mix(in srgb, var(--accent) 8%, var(--surface))}
+.ghead{display:grid;grid-template-columns:12px 16px 14px minmax(0,1fr) auto 14px;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;user-select:none;border-radius:9px}
+.ghead:hover{background:var(--bg)}
+.grip{color:var(--muted);cursor:grab;font-size:13px;line-height:1;opacity:.6}
+.fixed .grip{visibility:hidden}
+.swatch{width:14px;height:14px;border-radius:4px;border:0;padding:0;cursor:pointer}
+.gname{font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gname[contenteditable=true]{outline:1px solid var(--accent);border-radius:4px;padding:0 4px;white-space:normal;cursor:text;background:var(--surface)}
+.gmeta{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
+.chev{color:var(--muted);transition:transform .15s;text-align:center}
+.group.open .chev{transform:rotate(90deg)}
+.tlist{border-top:1px solid var(--line);padding:4px 0}
+.trial{display:grid;grid-template-columns:16px minmax(0,1fr) 84px 46px;align-items:center;gap:8px;padding:3px 10px 3px 30px;font-size:13px;cursor:pointer}
+.trial:hover{background:var(--bg)}
+.trial.lit{background:color-mix(in srgb, var(--accent) 13%, transparent)}
+.tname{font-family:var(--font-mono);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tnote{color:var(--muted);font-family:var(--font-body)}
+.dur{font-family:var(--font-mono);font-size:12px;color:var(--muted);text-align:right}
+.trial svg{display:block;width:84px;height:18px}
+.group.off .gname,.trial.off .tname{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+.actions[hidden],.mover[hidden]{display:none}
+.actions .what{font-size:13px;font-weight:500;margin-right:auto}
+.actions button,.foot button,.mover button{font-size:13px;padding:4px 10px}
+.mover{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.mover .to{display:flex;flex-wrap:wrap;gap:6px}
+.mover input{font:inherit;font-size:13px;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);flex:1;min-width:120px}
+.foot{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.foot .warn{border-color:var(--bad);color:var(--bad)}

@@ -35,6 +35,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from . import analysis as A
 from . import datapad as D
 from . import fitting
 from . import stim as stimmod
@@ -491,6 +492,112 @@ def math_name(name: str) -> str:
     return f"${base}_{{{sub}}}$" if sub else name
 
 
+def rename_in(expr: str, old: str, new: str) -> str:
+    """A formula (or Python) with the name `old` written `new`."""
+    return re.sub(rf"(?<![\w.]){re.escape(old)}(?!\w)", new, expr)
+
+
+def retitle(columns: list[Column], src: "Source") -> None:
+    """Columns not named by hand take a name from what they measure; two the same get
+    where they measure added (Mean Voltage (B))."""
+    used: dict[str, int] = {}
+    for c in columns:
+        if not c.title_auto:
+            continue
+        ch = src.spike_channel() if c.kind == "measure" and c.key in D.SPIKE_KEYS else c.channel
+        t = auto_title(c, src.unit(ch) if ch else "")
+        if t and c.kind in ("measure", "duration", "level") and not (c.kind == "measure" and c.over == "row") \
+                and not c.sel.is_point():
+            same = [o for o in columns if o is not c and o.title_auto and o.kind == c.kind
+                    and auto_title(o, src.unit(o.channel) if o.channel else "") == t]
+            if same:
+                t += f" ({c.sel.label()})"
+        if t in used:
+            used[t] += 1
+            t += f" {used[t]}"
+        else:
+            used[t] = 1
+        c.title = t
+
+
+def new_column(kind: str, key: str, taken: list[str], sel: Selection, over: str, channel: str = "",
+               unit: str = "", spike_channel: str = "", stim_unit: str = "") -> Column:
+    """A column added from the + Column menu, named for what it measures (V, n, I_B, t_B…).
+    sel: where it measures; channel and unit: the response channel's."""
+    if kind == "measure":
+        key = key or "mean"
+        spiky = key in D.SPIKE_KEYS
+        base = ("rate" if key == "rate" else "n") if spiky else ("V" if unit in ("V", "mV") else "y")
+        return Column(free_name(base, taken), "measure", key, spike_channel if spiky else channel, sel, over=over)
+    if kind == "level":
+        base = "I" if stim_unit.endswith("A") else "L"
+        return Column(free_name(f"{base}_{sel.first or 'A'}", taken), "level", sel=Selection.seg(sel.first or "A"))
+    if kind == "duration":
+        return Column(free_name(f"t_{sel.first or 'x'}", taken), "duration", sel=sel)
+    if kind == "info":
+        key = key or "trial"
+        return Column(free_name({"start": "t_start"}.get(key, key), taken), "info", key)
+    if kind == "python":
+        return Column(free_name("p", taken), "python")
+    return Column(free_name("f", taken), "formula")
+
+
+def quick_column(key: str, channel: str, unit: str, q: Selection, taken: list[str]) -> Column:
+    """A column of one of the quick values (a measurement of what was clicked or dragged on
+    the preview), measured over the same place in every trial."""
+    base = {"spikes": "n", "slope": "slope", "area": "area", "p2p": "pp"}.get(key, "V" if unit in ("V", "mV") else "y")
+    where = (q.first if q.first == q.last else f"{q.first}{q.last}") if not q.is_time() else ""
+    name = free_name(f"{base}_{where}" if where else base, taken)
+    return Column(name, "measure", key, channel, Selection.from_dict(q.to_dict()), over="window")
+
+
+def window_to_segment(c: Column, letter: str, extend: bool, segs: list) -> None:
+    """Column c measures over segment `letter` (extend: from its first segment to it, B–D),
+    keeping its part (last 50 ms…); a point's value becomes the mean."""
+    if c.kind == "level":
+        c.sel = Selection.seg(letter)
+    elif extend and not c.sel.is_time():
+        order = [x[0] for x in segs]
+        a, b = c.sel.first, letter
+        if a in order and b in order and order.index(b) < order.index(a):
+            a, b = b, a                       # B–D, however you clicked them
+        c.sel = Selection(a, b)
+    else:
+        old = c.sel
+        c.sel = Selection(letter, letter, old.mode if not old.is_time() else "all", old.a_ms, old.b_ms,
+                          ph0=old.ph0, ph1=old.ph1)
+        if c.sel.is_phase() and not cycles(c.sel, segs):
+            c.sel.mode = "all"                # this segment doesn't repeat: all of it
+    if c.sel.first != c.sel.last and c.sel.mode == "range":
+        c.sel.mode = "all"
+    if c.kind == "measure":
+        c.over = "window"
+        if c.key == "value":                  # a point's value, now over a stretch: its mean
+            c.key = "mean"
+
+
+def window_to_point(c: Column, t: float) -> bool:
+    """A measurement column becomes the value at moment t (s) in every trial. False: c isn't one."""
+    if c.kind != "measure":
+        return False
+    c.sel, c.over = Selection.point(t), "window"
+    if c.key in D.SPIKE_KEYS or c.key not in ("value", "start", "end"):
+        c.key = "value"
+    return True
+
+
+def window_to_time(c: Column, t0: float, t1: float) -> bool:
+    """Column c measures over t0 to t1 (s). False: it can't (a level, or no stretch)."""
+    if c.kind == "level" or t1 - t0 <= 1e-4:
+        return False
+    c.sel = Selection.time(t0, t1)
+    if c.kind == "measure":
+        c.over = "window"
+        if c.key == "value":
+            c.key = "mean"
+    return True
+
+
 # ------------------------------------------------------------------------------- the trials
 class Source:
     """What the table reads from the trials (padpage.PageSource; tests give a fake)."""
@@ -583,6 +690,35 @@ def found_segments(y, fs: float, min_ms: float = 1.0) -> list[tuple[str, float, 
                 "dur": (b - a) / fs * 1000, "found": True}
         out.append((stimmod.letter(k), a / fs, b / fs, part))
     return out
+
+
+def send_onsets(stimuli: list[dict] | None, y, fs: float) -> list[float | None]:
+    """Where each stimulus sent during a trial really started (s), found on the stimulus
+    channel y: its note can be up to analysis.SEARCH_S off. None for one not found there, or
+    for all of them with no stimulus channel (y None: their notes are used)."""
+    stimuli = stimuli or []
+    if y is None:
+        return [None] * len(stimuli)
+    notes = [float(s.get("t", 0.0)) for s in stimuli]
+    out = []
+    for k, s in enumerate(stimuli):
+        try:
+            stimulus = stimmod.Stimulus.from_dict(s["settings"])
+            sent = A.Sent(notes[k], stimulus.waveform(s["rate"]), s["rate"])
+        except (ValueError, KeyError, TypeError, OSError):
+            out.append(None)
+            continue
+        out.append(A.sent_onset(np.asarray(y, float), fs, sent, notes[k + 1] if k + 1 < len(notes) else None))
+    return out
+
+
+def trial_segments(stimuli: list[dict] | None, onsets, y, fs: float) -> list[tuple[str, float, float, dict]]:
+    """A trial's segments: those of the stimuli it saved it sent (sent_segments), else, with
+    none saved, read off its stimulus channel y (found_segments; None: no channel)."""
+    got = sent_segments(stimuli, onsets)
+    if got or y is None:
+        return got
+    return found_segments(y, fs)
 
 
 _SENT_KEY = re.compile(r"^(\d+)([A-Z]+)$")
@@ -696,6 +832,15 @@ class Table:
     def trials(self) -> list[int]:
         return [r.trial for r in self.rows]
 
+    def without(self, trials: set[int]) -> "Table":
+        """The table without the rows of these trials (the unticked ones)."""
+        keep = [k for k, r in enumerate(self.rows) if r.trial not in trials]
+        out = Table([self.rows[k] for k in keep])
+        out.values = {n: v[keep] for n, v in self.values.items()}
+        out.text = {n: [v[k] for k in keep] for n, v in self.text.items()}
+        out.units = dict(self.units)
+        return out
+
 
 class Pad:
     """The DataPad's rows, columns and how to work them out."""
@@ -717,6 +862,15 @@ class Pad:
 
     def data_changed(self) -> None:
         self.version += 1
+
+    def rename(self, c: Column, new: str) -> None:
+        """Give column c the formula name `new`, in the formulas and Python that use it too."""
+        old = c.name
+        c.name = new
+        for other in self.columns:
+            if other.kind in ("formula", "python"):
+                other.expr = rename_in(other.expr, old, new)
+        self._cache.pop(old, None)
 
     # -- the recipe -----------------------------------------------------------------------
     def state(self) -> dict:
@@ -1039,17 +1193,21 @@ def _why(e: Exception) -> str:
 
 
 # ------------------------------------------------------------------------------- summaries
+def summary_keys(tab: Table, src: Source, by: str) -> list[str]:
+    """Which summary row each row counts in (see summarize)."""
+    if by == "group":
+        return [src.group(r.trial)[0] for r in tab.rows]
+    if by in tab.values:
+        return [fmt(v) for v in tab.values[by]]
+    if by in tab.text:
+        return list(tab.text[by])
+    return ["all" for _ in tab.rows]
+
+
 def summarize(tab: Table, src: Source, by: str) -> list[tuple[str, dict[str, tuple[float, float, int]]]]:
     """Mean, SEM and n of every number column, for all rows ("all"), each group ("group") or
     each value of a column (its name: "I_B" gives the I–V points)."""
-    if by == "group":
-        keys = [src.group(r.trial)[0] for r in tab.rows]
-    elif by in tab.values:
-        keys = [fmt(v) for v in tab.values[by]]
-    elif by in tab.text:
-        keys = list(tab.text[by])
-    else:
-        keys = ["all" for _ in tab.rows]
+    keys = summary_keys(tab, src, by)
     names = list(dict.fromkeys(keys))
     if by in tab.values:
         names.sort(key=lambda k: float(k) if k else math.inf)

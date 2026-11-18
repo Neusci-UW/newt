@@ -1,8 +1,45 @@
-// The Analysis page's Trials pane: the session's groups from /trials/state, and every change
-// sent to /trials/cmd, which saves it (pages.json) and answers with the new state.
+// The Trials pane, on Analysis and the DataPad: the session's groups from /trials/state, and
+// every change sent to /trials/cmd, which saves it (pages.json) and answers with the new state.
+// It fills <section id="trials">; a page with a Colors panel (#page_map…) gets that too, and
+// window.boardTrials(state), if the page has one, hears of every change.
 'use strict';
 
 const $ = (id) => document.getElementById(id);
+$('trials').innerHTML = `
+    <div class="thead"><h2>Trials</h2><span class="count" id="count"></span><span class="spacer"></span>
+      <div class="seg" id="organize"><button data-k="" title="A group for each different stimulus">By stimulus</button><button data-k="time" title="One list, in the order they were recorded">By time</button></div>
+    </div>
+    <label class="field">Session <select id="session"></select></label>
+    <label class="field">Stimulus channel <select id="how"></select></label>
+    <div class="field">Sort groups by <span class="chips" id="sorts"></span></div>
+    <span class="busy" id="busy" hidden></span>
+    <span class="problem" id="problem" hidden></span>
+
+    <div class="actions" id="actions" hidden>
+      <span class="what" id="what"></span>
+      <button data-a="only" title="Tick these and untick everything else">Only these</button>
+      <button data-a="tick" title="Tick these, leaving the rest as they are">Tick</button>
+      <button data-a="combine" title="Make these groups one group">Combine</button>
+      <button data-a="split" title="Back into the stimuli it was made of">Split</button>
+      <button data-a="move" title="Put these trials in another group">Move to…</button>
+      <button data-a="uncolor" title="Back to the color from the Colors setting">Default color</button>
+    </div>
+    <div class="mover" id="mover" hidden>
+      <span class="caption">Move to:</span>
+      <div class="to" id="moveto"></div>
+      <div class="to"><input id="newgroup" placeholder="A new group's name"><button id="newgo">Move</button></div>
+    </div>
+
+    <div class="groups" id="groups"></div>
+
+    <div class="foot">
+      <button id="tickall">Tick all</button><button id="untickall">Untick all</button><span class="spacer"></span>
+      <button id="regroup" title="Sort every trial into groups again from scratch: each stimulus is measured again. Names and moves stay">Regroup</button>
+      <button id="reset" title="Forget the group names you gave and the trials you moved">Reset…</button>
+    </div>
+    <p class="caption" id="summary"></p>
+    <p class="caption">Click to highlight; Shift or ⌘ adds more. Double-click a name to rename it. Drag ⠿ to reorder, or a trial onto a group to move it. Unticked trials are left out of every chart and measurement.</p>
+`;
 const H = {'X-Newt-Key': new URLSearchParams(location.hash.slice(1)).get('k') || ''};
 let S = null;                       // the last state
 let lit = new Set();                // highlighted: 'g:' + group name, or 't:' + trial index
@@ -77,7 +114,10 @@ function fillControls() {
   $('summary').textContent = !S.folder ? '' : !S.how ? 'No stimulus channel: pick the channel that recorded the stimulus.'
     : n ? `${n} different stimul${n === 1 ? 'us' : 'i'}` + (none ? `, and ${none} trial${none === 1 ? '' : 's'} with none.` : '.')
     : `No stimulus pulses found on ${S.how}: is it the right channel?`;
-  // colors
+  if ($('page_map')) fillColors();
+}
+
+function fillColors() {
   const L = S.looks;
   $('page_map').innerHTML = S.page_styles.map((s) => `<option${s === (L.page_map || 'Palette') ? ' selected' : ''}>${s}</option>`).join('');
   $('trial_map').innerHTML = S.trial_styles.map((s) => `<option${s === (L.trial_map || 'Solid') ? ' selected' : ''}>${s}</option>`).join('');
@@ -268,11 +308,13 @@ $('reset').onclick = (e) => {                              // asks once, on the 
   b.textContent = 'Reset…';
   cmd({cmd: 'reset'});
 };
-$('page_map').onchange = (e) => cmd({cmd: 'looks', page_map: e.target.value === 'Palette' ? '' : e.target.value});
-$('trial_map').onchange = (e) => cmd({cmd: 'looks', trial_map: e.target.value === 'Solid' ? '' : e.target.value});
-$('picks').onchange = (e) => { if (e.target.dataset.k) cmd({cmd: 'looks', [e.target.dataset.k]: e.target.value}); };
-$('op').oninput = () => { $('opout').textContent = +$('op').value ? $('op').value + '%' : 'Auto'; };
-$('op').onchange = () => cmd({cmd: 'looks', trial_opacity: +$('op').value});
+if ($('page_map')) {
+  $('page_map').onchange = (e) => cmd({cmd: 'looks', page_map: e.target.value === 'Palette' ? '' : e.target.value});
+  $('trial_map').onchange = (e) => cmd({cmd: 'looks', trial_map: e.target.value === 'Solid' ? '' : e.target.value});
+  $('picks').onchange = (e) => { if (e.target.dataset.k) cmd({cmd: 'looks', [e.target.dataset.k]: e.target.value}); };
+  $('op').oninput = () => { $('opout').textContent = +$('op').value ? $('op').value + '%' : 'Auto'; };
+  $('op').onchange = () => cmd({cmd: 'looks', trial_opacity: +$('op').value});
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !e.target.isContentEditable && e.target.tagName !== 'INPUT') { lit.clear(); $('mover').hidden = true; renderGroups(); }
 });

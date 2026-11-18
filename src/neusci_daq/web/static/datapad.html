@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DataPad</title>
+<link rel="stylesheet" href="/static/newt.css">
+<link rel="stylesheet" href="/static/trials.css">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<style>
+.padpage{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:980px){.padpage{grid-template-columns:minmax(0,1fr)}}
+.padmain{display:flex;flex-direction:column;gap:16px;min-width:0}
+.padmain .card{display:flex;flex-direction:column;gap:10px;min-width:0}
+.pbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.pbar h2{font-size:18px;font-weight:600;margin:0}
+.pbar label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.pbar select{font-size:13px;padding:4px 6px}
+.info{font-size:13px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ib{font-size:13px;padding:4px 10px;line-height:1.3}
+.dd{position:relative}
+
+/* the preview */
+.pplots{position:relative;min-height:120px}
+.pplots .u-over{cursor:crosshair}
+.pplots .plab{font-size:12px;color:var(--muted);padding-left:78px;display:flex;gap:8px}
+.pplots .plab b{color:var(--ink);font-weight:500}
+.pvalue{position:absolute;transform:translateX(-50%);font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--dim);white-space:nowrap;pointer-events:none;background:color-mix(in srgb, var(--surface) 80%, transparent);padding:0 4px;border-radius:4px}
+.strip{position:relative;height:28px;margin-top:2px}
+.strip button{position:absolute;top:2px;height:24px;padding:0 6px;font-size:12.5px;font-weight:600;transform:translateX(-50%);min-width:24px;border-radius:6px}
+.strip button.lit{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.strip .none{font-size:12.5px;color:var(--muted);padding:4px 0 0 78px}
+.quick{display:flex;flex-direction:column;gap:5px;font-size:13px}
+.quick .where{color:var(--muted)}
+.quick .where b{color:var(--ink);font-weight:600}
+.qline{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.qline .ch{color:var(--muted);min-width:76px}
+.qv{font-size:12.5px;padding:2px 9px;border-radius:999px;font-family:var(--font-mono)}
+.qv span{font-family:var(--font-body);color:var(--muted);margin-right:4px}
+.qv:hover{background:color-mix(in srgb, var(--accent) 8%, var(--surface))}
+.picking{font-size:12.5px;color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:2px 9px;background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+
+/* the fx bar and the table */
+.fxbar{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:3px 8px;background:var(--surface);flex:1;min-width:280px}
+.fxbar .fxn{font-weight:600;font-size:14px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.fxbar i{color:var(--accent);font-weight:700}
+.fxbar input{flex:1;min-width:120px;border:0;background:transparent;color:var(--ink);font-family:var(--font-mono);font-size:13px;padding:4px 0;outline:none}
+.fxerr{font-size:12.5px;color:var(--bad)}
+.addcol{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb, var(--accent) 8%, var(--surface));font-weight:600;font-size:13.5px;padding:5px 12px}
+.tgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start}
+.tgrid.with{grid-template-columns:minmax(0,1fr) 400px}
+@media (max-width:1300px){.tgrid.with{grid-template-columns:minmax(0,1fr)}}
+.twrap{overflow:auto;max-height:calc(100vh - 220px);min-height:180px;border:1px solid var(--line);border-radius:8px}
+table.pad{border-collapse:separate;border-spacing:0;font-size:13px;font-variant-numeric:tabular-nums;width:max-content;min-width:100%}
+.pad th{position:sticky;top:0;z-index:1;background:var(--bg);font-weight:500;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;color:var(--muted)}
+.pad th.col{color:var(--ink);cursor:pointer;text-align:right}
+.pad th.col:hover{background:color-mix(in srgb, var(--accent) 6%, var(--bg))}
+.pad th.col.pk{background:color-mix(in srgb, var(--accent) 16%, var(--bg));color:var(--accent)}
+.pad th .cu{color:var(--muted);font-weight:400;margin-left:5px;font-size:12px}
+.pad th .ed{border:0;background:none;padding:0 2px 0 6px;font-size:12px;color:var(--muted)}
+.pad th .ed:hover{color:var(--accent)}
+.pad th.plus button{font-size:13px;padding:1px 8px;color:var(--accent);border-color:var(--accent)}
+.pad td{padding:3px 8px;border-bottom:1px solid color-mix(in srgb, var(--line) 55%, transparent);white-space:nowrap;cursor:pointer}
+.pad td.v{text-align:right;font-family:var(--font-mono);font-size:12.5px}
+.pad td.v.err{color:var(--bad)}
+.pad td.pk{background:color-mix(in srgb, var(--accent) 6%, transparent)}
+.pad tr.cur td{background:color-mix(in srgb, var(--accent) 13%, transparent)}
+.pad tr.cur td.pk{background:color-mix(in srgb, var(--accent) 24%, transparent)}
+.pad tr:hover td{background:color-mix(in srgb, var(--accent) 5%, transparent)}
+.pad tr.off td{color:var(--muted)}
+.pad tr.off td.n,.pad tr.off td.g{text-decoration:line-through;text-decoration-color:var(--line)}
+.pad td.tk{width:26px;padding-right:0}
+.pad td.n{font-family:var(--font-mono);font-size:12.5px}
+.pad td.g{max-width:210px;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.pad td.g .dot{width:9px;height:9px;margin-right:6px;vertical-align:baseline}
+.pad tr.sum td{background:var(--bg);color:var(--muted);border-bottom-color:var(--line)}
+.pad tr.sum td.v{color:var(--ink)}
+.pad tr.sum.cur td{background:color-mix(in srgb, var(--accent) 13%, var(--bg))}
+.pad tr.sum.first td{border-top:2px solid var(--line)}
+.tempty{padding:36px 16px;text-align:center;color:var(--muted);font-size:14px}
+.tempty b{display:block;color:var(--ink);font-size:16px;font-weight:600;margin-bottom:6px}
+
+/* menus and the column editor */
+.menu{position:absolute;z-index:20;min-width:240px;max-height:70vh;overflow:auto;display:flex;flex-direction:column;padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16)}
+.menu[hidden],.editor[hidden]{display:none}
+.menu .mh{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px 10px 3px}
+.menu button{border:0;text-align:left;padding:6px 10px;border-radius:7px;font-size:13.5px;display:flex;flex-direction:column;gap:1px}
+.menu button span{font-size:12px;color:var(--muted)}
+.menu button:hover{background:var(--bg)}
+.menu button.on{color:var(--accent);font-weight:600}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.editor{position:absolute;z-index:15;width:360px;max-height:80vh;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--surface);border:1px solid var(--accent);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.ehead{display:flex;align-items:center;gap:6px}
+.ehead b{font-size:15px;margin-right:auto}
+.ehead button{font-size:13px;padding:2px 8px}
+.ef{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px;align-items:center;font-size:13px}
+.ef>span{color:var(--muted)}
+.ef input[type=text],.ef select,.ef textarea{font:inherit;font-size:13.5px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 8px;width:100%}
+.ef input.mono,.ef textarea{font-family:var(--font-mono);font-size:12.5px}
+.ef textarea{min-height:120px;resize:vertical}
+.ef .segs{display:flex;flex-wrap:wrap;gap:4px}
+.ef .segs button{font-size:12.5px;padding:2px 9px;font-weight:600}
+.ef .segs button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.ef .part{display:flex;gap:6px;align-items:center}
+.ef .part input[type=number]{width:80px}
+.ef .ins{display:flex;flex-wrap:wrap;gap:4px}
+.ef .ins button{font-size:12px;padding:2px 7px;font-family:var(--font-mono)}
+.enote{font-size:12.5px;color:var(--muted);margin:0}
+.eerr{font-size:12.5px;color:var(--bad);margin:0}
+
+/* the charts of one column against another */
+.padcharts{display:flex;flex-direction:column;gap:14px;min-width:0}
+.pchart{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pchart .chead{display:flex;align-items:center;gap:8px}
+.pchart .chead b{font-size:15px;font-weight:600}
+.pchart .csets{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:13px;color:var(--muted)}
+.pchart .csets label{display:inline-flex;align-items:center;gap:5px}
+.pchart .csets select{font-size:13px;padding:3px 6px;max-width:220px}
+.pchart .chips{display:inline-flex;flex-wrap:wrap;gap:4px}
+.pchart .chip{font-size:12.5px;padding:2px 10px}
+.pchart .chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.pchart .prompt{border:1.5px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center;padding:36px 16px;font-size:14px}
+.scatter{display:block;max-width:100%;height:auto;font-family:var(--font-mono)}
+.scatter .grid{stroke:var(--line);stroke-width:1}
+.scatter .frame{fill:none;stroke:var(--line)}
+.scatter .tick{fill:var(--muted);font-size:11.5px}
+.scatter .alab{fill:var(--ink);font-family:var(--font-body);font-size:13px}
+.scatter circle{stroke:var(--surface);stroke-width:.8;cursor:pointer}
+.scatter circle.cur{stroke:var(--ink);stroke-width:2}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="padpage">
+    <section class="card trials" id="trials" aria-label="Trials"></section>
+    <div class="padmain">
+      <section class="card" aria-label="Preview">
+        <div class="pbar"><h2>Preview</h2><span class="info" id="pinfo"></span><span class="spacer"></span>
+          <span class="picking" id="picking" hidden></span>
+          <button class="ib" id="paddrow" hidden title="Add the stretch you dragged as a row of the table">Add as a row</button>
+          <label>Stimulus <select id="pstim" title="The channel drawn on top: the stimulus"></select></label>
+          <label>Response <select id="presp" title="The channel drawn below: the response"></select></label>
+          <span class="dd"><button class="ib" id="pbase" title="Baseline correction: each trial's mean over a window you pick is taken off its traces, here and in every measurement (not the stimulus channel). The recordings never change">Baseline: off ▾</button><div class="menu" id="basemenu" hidden></div></span>
+          <button class="ib" id="pwhole" title="Show the whole trial">Whole trial</button>
+        </div>
+        <div class="pplots" id="pplots"></div>
+        <div class="strip" id="pstrip"></div>
+        <div class="quick" id="pquick"></div>
+        <p class="caption">Click the trace for the value at that moment, a segment's letter for all of it (Shift adds a run), or drag across a stretch. With a column picked, it measures there in every trial. Scroll to zoom; Shift-scroll moves along.</p>
+      </section>
+
+      <section class="card" aria-label="DataPad">
+        <div class="pbar">
+          <div class="fxbar"><span class="fxn" id="fxname"></span><i>fx</i><input id="fx" spellcheck="false" placeholder="Pick a column, or add one"
+            title="The picked column, written out: change it and press Enter.&#10;mean(Channel 1, B) · max(Channel 1, B, first 20 ms) · slope(Channel 1, 100-200 ms) · mean(Channel 1, row)&#10;level(B) · length(B) · = dV / I_B * 1000"></div>
+          <span class="dd"><button class="addcol" id="addcol">+ Column</button><div class="menu" id="colmenu" hidden></div></span>
+        </div>
+        <span class="fxerr" id="fxerr" hidden></span>
+        <div class="pbar">
+          <label>Rows <select id="rowsmode" title="What makes a row: each trial; each segment of each trial (or just one letter); each pulse of a train; or stretches you add by hand (drag on the preview, then Add as a row)"></select></label>
+          <select id="rowsseg" hidden title="Which segment's rows: every one, or one letter"></select>
+          <label>Mean ± SEM of <select id="by" title="Rows under the table: each column's mean ± SEM (n in the tooltip), of all rows, each group, or each value of a column (by I_B: an I–V curve's points)"></select></label>
+          <label><input type="checkbox" id="showoff" checked> Unticked trials</label>
+          <span class="spacer"></span>
+          <button class="ib" id="plot" title="A chart of one column against another, one dot per ticked row">Plot Y against X</button>
+          <span class="dd"><button class="ib" id="more">More ▾</button><div class="menu" id="moremenu" hidden>
+            <button data-m="copy">Copy table<span>As tab-separated text, to paste in a spreadsheet</span></button>
+            <button data-m="clear_rows">Clear rows added by hand</button>
+            <hr><button data-m="clear">Take every column out…</button></div></span>
+        </div>
+        <span class="problem" id="pproblem" hidden></span>
+        <div class="tgrid" id="tgrid">
+          <div class="twrap" id="twrap"><table class="pad" id="tab"></table></div>
+          <div class="padcharts" id="padcharts"></div>
+        </div>
+        <p class="caption">Click a column's name to pick it, then the preview to choose where it measures; ▾ changes it. Click a row to see its trial (↑ ↓ move along). Untick a trial to leave it out.</p>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="editor" id="editor" hidden></div>
+<input type="color" id="colorpick" hidden>
+<script src="/static/nav.js"></script>
+<script src="/static/analysis.js"></script>
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/datapad.js"></script>
+</body>
+</html>

@@ -1428,26 +1428,8 @@ class PadView(QtWidgets.QWidget):
             self._timer.start()
 
     def _retitle(self) -> None:
-        """Columns not named by hand take a name from what they measure; two the same get
-        where they measure added (Mean Voltage (B))."""
-        used: dict[str, int] = {}
-        for c in self.pad.columns:
-            if not c.title_auto:
-                continue
-            ch = self.src.spike_channel() if c.kind == "measure" and c.key in D.SPIKE_KEYS else c.channel
-            t = P.auto_title(c, self.src.unit(ch) if ch else "")
-            if t and c.kind in ("measure", "duration", "level") and not (c.kind == "measure" and c.over == "row") \
-                    and not c.sel.is_point():
-                same = [o for o in self.pad.columns if o is not c and o.title_auto and o.kind == c.kind
-                        and P.auto_title(o, self.src.unit(o.channel) if o.channel else "") == t]
-                if same:
-                    t += f" ({c.sel.label()})"
-            if t in used:
-                used[t] += 1
-                t += f" {used[t]}"
-            else:
-                used[t] = 1
-            c.title = t
+        """Columns not named by hand take a name from what they measure (padmodel.retitle)."""
+        P.retitle(self.pad.columns, self.src)
 
     def _recompute(self) -> None:
         self._stale = False
@@ -1691,10 +1673,7 @@ class PadView(QtWidgets.QWidget):
         t = round(t * fs) / fs                     # on a sample
         self.quick_sel = P.Selection.point(t)
         c = self._target()
-        if c is not None and c.kind == "measure":
-            c.sel, c.over = P.Selection.point(t), "window"
-            if c.key in D.SPIKE_KEYS or c.key not in ("value", "start", "end"):
-                c.key = "value"
+        if c is not None and P.window_to_point(c, t):
             self.column_edited()
         else:
             self._preview_window()
@@ -1710,12 +1689,7 @@ class PadView(QtWidgets.QWidget):
             self._show_quick()
             return
         c = self._target()
-        if c is not None and c.kind != "level" and t1 - t0 > 1e-4:
-            c.sel = P.Selection.time(t0, t1)
-            if c.kind == "measure":
-                c.over = "window"
-                if c.key == "value":
-                    c.key = "mean"
+        if c is not None and P.window_to_time(c, t0, t1):
             self.column_edited()
         self.preview.clear_drag()
         self.stop_setting()
@@ -1750,26 +1724,7 @@ class PadView(QtWidgets.QWidget):
             self._show_fx()
 
     def set_segment(self, c: P.Column, letter: str, extend: bool) -> None:
-        if c.kind == "level":
-            c.sel = P.Selection.seg(letter)
-        elif extend and not c.sel.is_time():
-            order = [x[0] for x in self.src.segments(self.preview_trial())]
-            a, b = c.sel.first, letter
-            if a in order and b in order and order.index(b) < order.index(a):
-                a, b = b, a                       # B–D, however you clicked them
-            c.sel = P.Selection(a, b)
-        else:
-            old = c.sel
-            c.sel = P.Selection(letter, letter, old.mode if not old.is_time() else "all", old.a_ms, old.b_ms,
-                                ph0=old.ph0, ph1=old.ph1)
-            if c.sel.is_phase() and not P.cycles(c.sel, self.src.segments(self.preview_trial())):
-                c.sel.mode = "all"                # this segment doesn't repeat: all of it
-        if c.sel.first != c.sel.last and c.sel.mode == "range":
-            c.sel.mode = "all"
-        if c.kind == "measure":
-            c.over = "window"
-            if c.key == "value":                  # a point's value, now over a stretch: its mean
-                c.key = "mean"
+        P.window_to_segment(c, letter, extend, self.src.segments(self.preview_trial()))
         self.column_edited()
 
     # -- rows -------------------------------------------------------------------------------
@@ -1841,13 +1796,8 @@ class PadView(QtWidgets.QWidget):
         q = self.quick_sel
         if q is None:
             return
-        names = self.pad.names()
         ch = ch or (self.src.spike_channel() if key in D.SPIKE_KEYS else self.resp_channel())
-        base = {"spikes": "n", "slope": "slope", "area": "area", "p2p": "pp"}.get(
-            key, "V" if self.src.unit(ch) in ("V", "mV") else "y")
-        where = (q.first if q.first == q.last else f"{q.first}{q.last}") if not q.is_time() else ""
-        name = P.free_name(f"{base}_{where}" if where else base, names)
-        c = P.Column(name, "measure", key, ch, P.Selection.from_dict(q.to_dict()), over="window")
+        c = P.quick_column(key, ch, self.src.unit(ch), q, self.pad.names())
         self.pad.columns.append(c)
         self.picked = len(self.pad.columns) - 1
         self.column_edited()
@@ -1883,25 +1833,8 @@ class PadView(QtWidgets.QWidget):
         resp = self.resp_channel()
         # trials without Complex Stimulus segments: measure the whole row (the trial) at first
         over = "row" if self.pad.rows_mode != "trial" or not segs else "window"
-        if kind == "measure":
-            key = key or "mean"
-            spiky = key in D.SPIKE_KEYS
-            base = ("rate" if key == "rate" else "n") if spiky else ("V" if self.src.unit(resp) in ("V", "mV") else "y")
-            c = P.Column(P.free_name(base, names), "measure", key, self.src.spike_channel() if spiky else resp,
-                         sel, over=over)
-        elif kind == "level":
-            base = "I" if self.src.stim_units()[0].endswith("A") else "L"
-            c = P.Column(P.free_name(f"{base}_{sel.first or 'A'}", names), "level", sel=P.Selection.seg(sel.first or "A"))
-        elif kind == "duration":
-            c = P.Column(P.free_name(f"t_{sel.first or 'x'}", names), "duration", sel=sel)
-        elif kind == "info":
-            key = key or "trial"
-            c = P.Column(P.free_name({"trial": "trial", "group": "group", "n_in_group": "n_in_group",
-                                      "start": "t_start"}.get(key, key), names), "info", key)
-        elif kind == "python":
-            c = P.Column(P.free_name("p", names), "python")
-        else:
-            c = P.Column(P.free_name("f", names), "formula")
+        c = P.new_column(kind, key, names, sel, over, resp, self.src.unit(resp), self.src.spike_channel(),
+                         self.src.stim_units()[0])
         self.pad.columns.append(c)
         self.picked = len(self.pad.columns) - 1
         self.columns_changed.emit()
@@ -1998,12 +1931,7 @@ class PadView(QtWidgets.QWidget):
         self.page.single_plot.focus(chart)
 
     def rename(self, c: P.Column, new: str) -> None:
-        old = c.name
-        c.name = new
-        for other in self.pad.columns:
-            if other.kind in ("formula", "python"):
-                other.expr = _rename(other.expr, old, new)
-        self.pad._cache.pop(old, None)
+        self.pad.rename(c, new)
         self.column_edited()
 
     def move_column(self, k: int, d: int) -> bool:
@@ -2161,14 +2089,7 @@ class PadView(QtWidgets.QWidget):
 
     def _summary_trials(self, tab: P.Table, by, sums: list) -> list[tuple[str, list[int]]]:
         """Each summary row's (title, trials), keyed as P.summarize keys them."""
-        if by == "group":
-            keys = [self.src.group(r.trial)[0] for r in tab.rows]
-        elif by in tab.values:
-            keys = [P.fmt(v) for v in tab.values[by]]
-        elif by in tab.text:
-            keys = list(tab.text[by])
-        else:
-            keys = ["all" for _ in tab.rows]
+        keys = P.summary_keys(tab, self.src, by)
         out = []
         for g, _ in sums:
             trials = list(dict.fromkeys(r.trial for r, k in zip(tab.rows, keys) if k == g))
@@ -2250,13 +2171,7 @@ class PadView(QtWidgets.QWidget):
             self.page.set_hidden(("block", int(trial)), hidden)     # the Trials list follows
 
     def _included_table(self) -> P.Table:
-        excl = self.excluded()
-        keep = [k for k, r in enumerate(self.tab.rows) if r.trial not in excl]
-        out = P.Table([self.tab.rows[k] for k in keep])
-        out.values = {n: v[keep] for n, v in self.tab.values.items()}
-        out.text = {n: [v[k] for k in keep] for n, v in self.tab.text.items()}
-        out.units = dict(self.tab.units)
-        return out
+        return self.tab.without(self.excluded())
 
     # -- recipes ----------------------------------------------------------------------------
     def save_recipe(self) -> None:
@@ -2361,5 +2276,4 @@ class PadView(QtWidgets.QWidget):
             self._open_chart("Scatter", x.currentData(), picked)
 
 
-def _rename(expr: str, old: str, new: str) -> str:
-    return re.sub(rf"(?<![\w.]){re.escape(old)}(?!\w)", new, expr)
+_rename = P.rename_in

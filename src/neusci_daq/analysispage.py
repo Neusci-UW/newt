@@ -27,6 +27,7 @@ from . import analysisfile, chartplan
 from . import colors
 from . import dsp
 from . import groupsfile
+from . import padmodel
 from . import grouping
 from . import stimmeasures as SM
 from . import style
@@ -878,23 +879,9 @@ class AnalysisPage(QtWidgets.QWidget):
         """Where each stimulus sent during block i really started (s), found on the stimulus
         channel: its note can be up to A.SEARCH_S off. None for one not found there, or for
         all of them without a stimulus channel (their notes are used)."""
-        stimuli = self.blocks[i].get("stimuli") or []
         name = self.stim_channel.currentData() or ""
         y = self.recorded(i, name) if name else None
-        if y is None:
-            return [None] * len(stimuli)
-        fs = float(self.blocks[i]["sample_rate"])
-        notes = [float(s.get("t", 0.0)) for s in stimuli]
-        out = []
-        for k, s in enumerate(stimuli):
-            try:
-                stimulus = Stimulus.from_dict(s["settings"])
-                sent = A.Sent(notes[k], stimulus.waveform(s["rate"]), s["rate"])
-            except (ValueError, KeyError, TypeError, OSError):
-                out.append(None)
-                continue
-            out.append(A.sent_onset(np.asarray(y, float), fs, sent, notes[k + 1] if k + 1 < len(notes) else None))
-        return out
+        return padmodel.send_onsets(self.blocks[i].get("stimuli"), y, float(self.blocks[i]["sample_rate"]))
 
     def _show_gain(self) -> None:
         self.gain.blockSignals(True)

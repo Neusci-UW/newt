@@ -15,6 +15,12 @@ POST /trials/cmd      JSON {"cmd": ...}: open, channel, tick, rename, combine, .
 GET /charts/state     JSON: the Analysis board's charts, and what they can show (see Charts.state)
 POST /charts/cmd      JSON {"cmd": ...}: add, remove, set, move, spread (see Charts.command)
 POST /charts/data     JSON {"id", "x0", "x1", "cols"}: what a chart draws, shrunk (see Charts.data)
+GET /pad/state        JSON: the DataPad's columns, rows and their numbers, summary rows (see Pad.state)
+POST /pad/cmd         JSON {"cmd": ...}: add, set, what, name, fx, move, remove, rows, segment, point,
+                      stretch, baseline, by, chart_add, chart_set, chart_remove... (see Pad.command)
+POST /pad/preview     JSON {"trial" | "avg", "row", "col", "stim", "resp", "cols", "x0", "x1"}: a row's
+                      trial, shrunk, packed as /charts/data packs a chart (see Pad.preview)
+POST /pad/chart       JSON {"id"}: a DataPad chart's dots (see Pad.chart)
 
 Only 127.0.0.1 is served, and everything but the pages' files needs this launch's key
 (header X-Newt-Key): any program on the computer can reach a local server, and
@@ -33,6 +39,7 @@ from pathlib import Path
 from .charts import Charts
 from .design import Design
 from .live import Live
+from .pad import Pad
 from .record import COMMANDS as RECORD_COMMANDS, Recording
 from .stimulator import Stimulator
 from .trials import Trials
@@ -41,7 +48,7 @@ STATIC = Path(__file__).parent / "static"
 
 
 def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, recording: Recording,
-                charts: Charts, key: str, port: int = 0) -> ThreadingHTTPServer:
+                charts: Charts, pad: Pad, key: str, port: int = 0) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
@@ -83,6 +90,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 return self._json(trials.state())
             if path == "/charts/state":
                 return self._json(charts.state())
+            if path == "/pad/state":
+                return self._json(pad.state())
             if path == "/stim/state":
                 return self._json(stimulator.state())
             if path == "/design/state":
@@ -95,18 +104,25 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
             path = self.path.split("?")[0]
             d = {}
             state = {"/live/cmd": live.state, "/stim/cmd": stimulator.state, "/charts/cmd": charts.state,
-                     "/charts/data": dict, "/design/cmd": lambda: design.state(d.get("pic"))}.get(path, trials.state)
+                     "/charts/data": dict, "/pad/cmd": pad.state, "/pad/chart": dict, "/pad/preview": dict,
+                     "/design/cmd": lambda: design.state(d.get("pic"))}.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 out = {}
                 if path == "/charts/data":
                     return self._send(*charts.data(d))
+                if path == "/pad/preview":
+                    return self._send(*pad.preview(d))
+                if path == "/pad/chart":
+                    return self._json(pad.chart(d))
                 if path == "/live/cmd":
                     out = self._live(d)
                 elif path == "/trials/cmd":
                     trials.command(d)
                 elif path == "/charts/cmd":
                     charts.command(d)
+                elif path == "/pad/cmd":
+                    out = pad.command(d)
                 elif path == "/stim/cmd":
                     self._stim(d)
                 elif path == "/design/cmd":

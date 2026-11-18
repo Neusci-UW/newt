@@ -2,7 +2,7 @@
 'use strict';
 (function () {
   const TABS = [['Record', 'live.html'], ['Stimulator', 'stimulator.html'], ['Analysis', 'analysis.html'],
-                ['DataPad'], ['Plot Canvas'], ['Simulators'], ['Lessons']];
+                ['DataPad', 'datapad.html'], ['Plot Canvas'], ['Simulators'], ['Lessons']];
   const here = location.pathname.split('/').pop();
   const nav = document.createElement('nav');
   nav.className = 'apptabs';

@@ -19,26 +19,9 @@ from .viewkit import scroll_column
 from . import colors
 
 # Cells table: (heading, Cell field, unit, tooltip)
-_CELL_COLUMNS = (
-    ("Rest", "rest_mv", "mV", "Resting membrane potential"),
-    ("Threshold", "threshold_mv", "mV", "The cell fires when its membrane potential reaches this"),
-    ("Reset", "reset_mv", "mV", "Where the membrane potential goes after a spike (below threshold)"),
-    ("Time const.", "tau_ms", "ms", "Membrane time constant: how quickly PSPs fade"),
-    ("Refractory", "refractory_ms", "ms", "No spikes for this long after one"),
-    ("Adaptation", "adapt_mv", "mV", "Spike-frequency adaptation: each spike pulls the cell this much further "
-                                     "from threshold, so a steady drive makes it fire fast at first, then "
-                                     "slow down; 0 = none"),
-    ("Adapt. time", "adapt_tau_ms", "ms", "How long the adaptation from a spike takes to wear off"),
-    ("Drive", "drive_mv", "mV", "Steady depolarization above rest; with noise, sets how often it fires on its own"),
-    ("Noise", "noise_mv", "mV", "Membrane potential fluctuation (SD)"),
-    ("Stimulus", "stimulus", "mV", "How strongly the stimulus drives this cell: the depolarization from a 1 V, "
-                                   "1 ms pulse. The stimulus is injected as a current, so longer or stronger "
-                                   "pulses depolarize more; 0 = not driven"),
-    ("Spike size", "spike_depth_v", "V", "Extracellular recordings: depth of this cell's spike trough"),
-    ("Spike width", "spike_width_ms", "ms", "Extracellular recordings: spike trough to repolarization peak"),
-)
+_CELL_COLUMNS = sim.CELL_COLUMNS
 _LIVE_COL = len(_CELL_COLUMNS)
-_KINDS = (("Intracellular", "intracellular"), ("Extracellular", "extracellular"))
+_KINDS = sim.KINDS
 
 
 def _fmt(v: float, unit: str) -> str:
@@ -138,11 +121,8 @@ class SimPage(QtWidgets.QWidget):
         box = QtWidgets.QGroupBox("Recordings: the cell each input records")
         v = QtWidgets.QVBoxLayout(box)
         self.recs = QtWidgets.QTableWidget(0, 6)
-        self.recs.setHorizontalHeaderLabels(["Cell", "Recording", "Gain", "Noise", "Sine", "Sine freq."])
-        tips = ("Which cell this input records", "Intracellular: membrane potential with PSPs and action "
-                "potentials. Extracellular: just the spikes", "Intracellular: trace V per V of membrane "
-                "potential (10 shows -70 mV as -0.7 V)", "Recording noise on the trace (RMS)",
-                "Amplitude of a sine added to the trace, e.g. mains hum; 0 = none", "Frequency of that sine")
+        self.recs.setHorizontalHeaderLabels([c[0] for c in sim.REC_COLUMNS])
+        tips = [c[3] for c in sim.REC_COLUMNS]
         for i, tip in enumerate(tips):
             self.recs.horizontalHeaderItem(i).setToolTip(tip)
         self.recs.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)

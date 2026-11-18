@@ -3,7 +3,7 @@
 (function () {
   const TABS = [['Record', 'live.html'], ['Stimulator', 'stimulator.html'], ['Analysis', 'analysis.html'],
                 ['DataPad', 'datapad.html'], ['Single Plot', 'singleplot.html'], ['Plot Canvas', 'plotcanvas.html'],
-                ['Simulators'], ['Lessons']];
+                ['Simulators'], ['Lessons', 'lessons.html']];
   const here = location.pathname.split('/').pop();
   const nav = document.createElement('nav');
   nav.className = 'apptabs';

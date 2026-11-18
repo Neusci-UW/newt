@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lessons</title>
+<link rel="stylesheet" href="/static/newt.css">
+<style>
+/* the lesson fills the window below the tabs */
+html,body{height:100%}
+body{display:flex;flex-direction:column;padding-bottom:0}
+.wrap{flex:1;min-height:0;width:100%;gap:0}
+.subtabs{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;padding:12px 0}
+.subtabs a{font-size:13.5px;color:var(--muted);text-decoration:none;padding:4px 12px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+.subtabs a:hover{color:var(--ink);border-color:var(--accent)}
+.subtabs a[aria-current=page]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.subtabs button{font-size:13px;padding:4px 12px}
+.subtabs button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+#frame{flex:1;min-height:0;width:100%;border:0;border-top:1px solid var(--line);background:var(--bg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="subtabs" id="subtabs">
+    <span class="spacer"></span>
+    <button id="edit" type="button" aria-pressed="false" hidden
+            title="Write or change this page's lesson: right-click the page to insert a question or to make a part of it a region that stays locked until questions are answered">Edit lesson</button>
+    <button id="refresh" type="button" title="Reload the simulation from the start, with every setting back to its default">Refresh</button>
+  </div>
+  <iframe id="frame" title="Lesson"></iframe>
+</div>
+<script src="/static/nav.js"></script>
+<script>
+'use strict';
+// The Lessons tab: the lesson pages (served from the lessons submodule at /static/lessons/, see
+// web/lessons.py), one at a time in the frame. The same lessons as the Qt app's Lessons tabs.
+(function () {
+  const PAGES = [['All lessons', 'index.html'], ['Membrane potential', 'membrane_potential.html'],
+                 ['Passive properties: time', 'rc_membrane.html'], ['Passive properties: space', 'passive_space.html'],
+                 ['Action potential', 'action_potential.html'], ['Synapse', 'synapse.html'],
+                 ['Summation', 'summation.html'], ['Plasticity', 'plasticity.html'],
+                 ['Hodgkin–Huxley', 'hodgkin_huxley.html']];
+  const DIR = '/static/lessons/', REMEMBER = 'newt.lessons.page';
+  const frame = document.getElementById('frame'), edit = document.getElementById('edit');
+  const bar = document.getElementById('subtabs'), spacer = bar.querySelector('.spacer');
+  const links = PAGES.map(([name, file]) => {
+    const a = document.createElement('a');
+    a.textContent = name;
+    a.href = DIR + file;
+    a.dataset.file = file;
+    a.addEventListener('click', (e) => { e.preventDefault(); show(file); });
+    bar.insertBefore(a, spacer);
+    return a;
+  });
+  const recall = () => { try { return localStorage.getItem(REMEMBER); } catch (e) { return null; } };
+  const remember = (f) => { try { localStorage.setItem(REMEMBER, f); } catch (e) { /* private window */ } };
+  const valid = (f) => /^[\w-]+\.html$/.test(f || '');
+
+  function show(file) { frame.src = DIR + file; }
+
+  function setEdit(on) {
+    edit.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  // the lesson page opened or closed its editor itself (lessonbridge.js setEditing)
+  window.NewtLessons = {editing: setEdit};
+
+  frame.addEventListener('load', () => {
+    let win = null, file = '';
+    try { win = frame.contentWindow; file = win.location.pathname.split('/').pop(); } catch (e) { /* elsewhere */ }
+    for (const a of links) {
+      if (a.dataset.file === file) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    }
+    if (valid(file)) remember(file);
+    const theme = document.documentElement.getAttribute('data-theme');
+    if (theme && win) win.document.documentElement.setAttribute('data-theme', theme);
+    setEdit(false);                          // a page starts outside the editor
+    edit.hidden = !(win && win.ArgusLesson);  // offered only on pages that have lessons
+    if (win) document.title = (win.document.title || 'Lessons');
+  });
+  edit.addEventListener('click', () => {
+    const on = edit.getAttribute('aria-pressed') !== 'true';
+    setEdit(on);
+    try { frame.contentWindow.ArgusLesson.setEdit(on); } catch (e) { setEdit(false); }
+  });
+  document.getElementById('refresh').addEventListener('click', () => {
+    try { frame.contentWindow.location.reload(); } catch (e) { frame.src = frame.src; }
+  });
+
+  const asked = new URLSearchParams(location.search).get('p');
+  show(valid(asked) ? asked : valid(recall()) ? recall() : 'index.html');
+})();
+</script>
+</body>
+</html>

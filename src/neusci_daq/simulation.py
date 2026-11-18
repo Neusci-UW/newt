@@ -370,3 +370,36 @@ def network_from_dict(d: dict) -> Network:
 
 
 CELL_FIELDS = [f.name for f in fields(Cell)]
+
+
+# -- what the Neural network simulator page shows (simpage.py, web/networkui.js) -------------------
+# Cells table: (heading, Cell field, unit, tooltip)
+CELL_COLUMNS = (
+    ("Rest", "rest_mv", "mV", "Resting membrane potential"),
+    ("Threshold", "threshold_mv", "mV", "The cell fires when its membrane potential reaches this"),
+    ("Reset", "reset_mv", "mV", "Where the membrane potential goes after a spike (below threshold)"),
+    ("Time const.", "tau_ms", "ms", "Membrane time constant: how quickly PSPs fade"),
+    ("Refractory", "refractory_ms", "ms", "No spikes for this long after one"),
+    ("Adaptation", "adapt_mv", "mV", "Spike-frequency adaptation: each spike pulls the cell this much further "
+                                     "from threshold, so a steady drive makes it fire fast at first, then "
+                                     "slow down; 0 = none"),
+    ("Adapt. time", "adapt_tau_ms", "ms", "How long the adaptation from a spike takes to wear off"),
+    ("Drive", "drive_mv", "mV", "Steady depolarization above rest; with noise, sets how often it fires on its own"),
+    ("Noise", "noise_mv", "mV", "Membrane potential fluctuation (SD)"),
+    ("Stimulus", "stimulus", "mV", "How strongly the stimulus drives this cell: the depolarization from a 1 V, "
+                                   "1 ms pulse. The stimulus is injected as a current, so longer or stronger "
+                                   "pulses depolarize more; 0 = not driven"),
+    ("Spike size", "spike_depth_v", "V", "Extracellular recordings: depth of this cell's spike trough"),
+    ("Spike width", "spike_width_ms", "ms", "Extracellular recordings: spike trough to repolarization peak"),
+)
+# Recordings table: (heading, Recording field, unit, tooltip)
+REC_COLUMNS = (
+    ("Cell", "cell", "", "Which cell this input records"),
+    ("Recording", "kind", "", "Intracellular: membrane potential with PSPs and action potentials. "
+                              "Extracellular: just the spikes"),
+    ("Gain", "gain", "", "Intracellular: trace V per V of membrane potential (10 shows -70 mV as -0.7 V)"),
+    ("Noise", "noise_v", "V", "Recording noise on the trace (RMS)"),
+    ("Sine", "sine_v", "V", "Amplitude of a sine added to the trace, e.g. mains hum; 0 = none"),
+    ("Sine freq.", "sine_hz", "Hz", "Frequency of that sine"),
+)
+KINDS = (("Intracellular", "intracellular"), ("Extracellular", "extracellular"))

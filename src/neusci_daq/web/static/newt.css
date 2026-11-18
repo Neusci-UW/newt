@@ -58,3 +58,9 @@ input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
 .vrow{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .vrow b{color:var(--ink);font-family:var(--font-mono);font-weight:500;white-space:nowrap}
 .uplot{font-family:var(--font-mono)}
+/* the tabs across the top of every page (nav.js) */
+.apptabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:-8px 0 0;overflow-x:auto;scrollbar-width:none}
+.apptabs a,.apptabs span{border-bottom:2px solid transparent;color:var(--muted);font-weight:500;font-size:15px;padding:8px 14px;margin-bottom:-1px;text-decoration:none;white-space:nowrap}
+.apptabs a:hover{color:var(--ink)}
+.apptabs span{opacity:.45;cursor:default}
+.apptabs [aria-current=page]{color:var(--accent);border-bottom-color:var(--accent)}

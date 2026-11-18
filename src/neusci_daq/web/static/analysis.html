@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis</title>
+<link rel="stylesheet" href="/static/newt.css">
+<style>
+.analysis{display:grid;grid-template-columns:360px minmax(0,1fr) 280px;gap:20px;align-items:start}
+@media (max-width:1250px){.analysis{grid-template-columns:340px minmax(0,1fr)}.analysis .looks{grid-column:1 / -1}}
+@media (max-width:820px){.analysis{grid-template-columns:minmax(0,1fr)}}
+
+/* the Trials pane */
+.trials{display:flex;flex-direction:column;gap:12px}
+.thead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.thead h2{font-size:18px;font-weight:600;margin:0}
+.count{font-size:13px;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+select{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px;max-width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12.5px;padding:3px 10px;border-radius:999px;color:var(--muted)}
+.chip[data-way]{border-color:var(--accent);color:var(--accent);font-weight:500}
+.chip[data-way="1"]::after{content:" ↑"}
+.chip[data-way="-1"]::after{content:" ↓"}
+.chip .n{font-family:var(--font-mono);font-size:11px;margin-right:4px}
+.busy{font-size:13px;color:var(--accent)}
+.problem{font-size:13px;color:var(--bad)}
+
+.groups{display:flex;flex-direction:column;gap:6px;max-height:calc(100vh - 330px);min-height:200px;overflow:auto;padding:2px}
+.group{border:1px solid var(--line);border-radius:9px;background:var(--surface);flex:none}
+.group.lit{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.group.dragging{opacity:.4}
+.group.over{box-shadow:0 -3px 0 var(--accent)}
+.group.drop{border-color:var(--accent);background:color-mix(in srgb, var(--accent) 8%, var(--surface))}
+.ghead{display:grid;grid-template-columns:12px 16px 14px minmax(0,1fr) auto 14px;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;user-select:none;border-radius:9px}
+.ghead:hover{background:var(--bg)}
+.grip{color:var(--muted);cursor:grab;font-size:13px;line-height:1;opacity:.6}
+.fixed .grip{visibility:hidden}
+.swatch{width:14px;height:14px;border-radius:4px;border:0;padding:0;cursor:pointer}
+.gname{font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gname[contenteditable=true]{outline:1px solid var(--accent);border-radius:4px;padding:0 4px;white-space:normal;cursor:text;background:var(--surface)}
+.gmeta{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
+.chev{color:var(--muted);transition:transform .15s;text-align:center}
+.group.open .chev{transform:rotate(90deg)}
+.tlist{border-top:1px solid var(--line);padding:4px 0}
+.trial{display:grid;grid-template-columns:16px minmax(0,1fr) 84px 46px;align-items:center;gap:8px;padding:3px 10px 3px 30px;font-size:13px;cursor:pointer}
+.trial:hover{background:var(--bg)}
+.trial.lit{background:color-mix(in srgb, var(--accent) 13%, transparent)}
+.tname{font-family:var(--font-mono);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tnote{color:var(--muted);font-family:var(--font-body)}
+.dur{font-family:var(--font-mono);font-size:12px;color:var(--muted);text-align:right}
+.trial svg{display:block;width:84px;height:18px}
+.group.off .gname,.trial.off .tname{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+.actions[hidden],.mover[hidden]{display:none}
+.actions .what{font-size:13px;font-weight:500;margin-right:auto}
+.actions button,.foot button,.mover button{font-size:13px;padding:4px 10px}
+.mover{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.mover .to{display:flex;flex-wrap:wrap;gap:6px}
+.mover input{font:inherit;font-size:13px;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);flex:1;min-width:120px}
+.foot{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.foot .warn{border-color:var(--bad);color:var(--bad)}
+
+/* the board, empty until a chart is added */
+.board{min-height:560px;display:flex;flex-direction:column;gap:12px}
+.empty{flex:1;border:1.5px dashed var(--line);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);text-align:center;padding:40px}
+.empty b{color:var(--ink);font-size:16px;font-weight:600}
+.looks .card{gap:12px}
+.picks{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.picks input[type=color]{width:34px;height:24px;border:1px solid var(--line);border-radius:6px;padding:0;background:none}
+.looks .row{grid-template-columns:62px minmax(0,1fr) 48px}
+.ramp{height:10px;border-radius:5px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="analysis">
+    <section class="card trials" aria-label="Trials">
+      <div class="thead"><h2>Trials</h2><span class="count" id="count"></span><span class="spacer"></span>
+        <div class="seg" id="organize"><button data-k="" title="A group for each different stimulus">By stimulus</button><button data-k="time" title="One list, in the order they were recorded">By time</button></div>
+      </div>
+      <label class="field">Session <select id="session"></select></label>
+      <label class="field">Stimulus channel <select id="how"></select></label>
+      <div class="field">Sort groups by <span class="chips" id="sorts"></span></div>
+      <span class="busy" id="busy" hidden></span>
+      <span class="problem" id="problem" hidden></span>
+
+      <div class="actions" id="actions" hidden>
+        <span class="what" id="what"></span>
+        <button data-a="only" title="Tick these and untick everything else">Only these</button>
+        <button data-a="tick" title="Tick these, leaving the rest as they are">Tick</button>
+        <button data-a="combine" title="Make these groups one group">Combine</button>
+        <button data-a="split" title="Back into the stimuli it was made of">Split</button>
+        <button data-a="move" title="Put these trials in another group">Move to…</button>
+        <button data-a="uncolor" title="Back to the color from the Colors setting">Default color</button>
+      </div>
+      <div class="mover" id="mover" hidden>
+        <span class="caption">Move to:</span>
+        <div class="to" id="moveto"></div>
+        <div class="to"><input id="newgroup" placeholder="A new group's name"><button id="newgo">Move</button></div>
+      </div>
+
+      <div class="groups" id="groups"></div>
+
+      <div class="foot">
+        <button id="tickall">Tick all</button><button id="untickall">Untick all</button><span class="spacer"></span>
+        <button id="regroup" title="Sort every trial into groups again from scratch: each stimulus is measured again. Names and moves stay">Regroup</button>
+        <button id="reset" title="Forget the group names you gave and the trials you moved">Reset…</button>
+      </div>
+      <p class="caption" id="summary"></p>
+      <p class="caption">Click to highlight; Shift or ⌘ adds more. Double-click a name to rename it. Drag ⠿ to reorder, or a trial onto a group to move it. Unticked trials are left out of every chart.</p>
+    </section>
+
+    <section class="card board">
+      <div class="runbar"><span class="runlab">Charts</span><span class="spacer"></span>
+        <button class="primary" disabled title="Charts come next in the HTML front end">Add a chart</button></div>
+      <div class="empty">
+        <b>No charts yet</b>
+        <span>Pick what to plot: the trials overlaid, a measure against the stimulus, spikes as dots…<br>
+          Charts will show the ticked groups in their colors.</span>
+      </div>
+    </section>
+
+    <aside class="panel looks">
+      <div class="card">
+        <p class="sect-title">Colors</p>
+        <label class="field">Groups <select id="page_map"></select></label>
+        <div class="picks" id="picks"></div>
+        <div class="ramp" id="ramp"></div>
+        <label class="field">Trials in a group <select id="trial_map"></select></label>
+        <div class="row"><label for="op">Opacity</label><input id="op" type="range" min="0" max="100" step="5"><output id="opout"></output></div>
+        <p class="caption">Click a group's square to give it its own color. Saved with the session, for the Qt app too.</p>
+      </div>
+    </aside>
+  </div>
+</div>
+<input type="color" id="colorpick" hidden>
+<script src="/static/nav.js"></script>
+<script src="/static/analysis.js"></script>
+</body>
+</html>

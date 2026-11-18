@@ -13,7 +13,7 @@ let lastBuild = 0;
 
 // the key this launch made (in the address after #): the server answers nothing without it
 const H = {'X-Newt-Key': new URLSearchParams(location.hash.slice(1)).get('k') || ''};
-const post = (d) => fetch('/cmd', {method: 'POST', headers: H, body: JSON.stringify(d)}).then((r) => r.json());
+const post = (d) => fetch('/live/cmd', {method: 'POST', headers: H, body: JSON.stringify(d)}).then((r) => r.json());
 const minus = (s) => s.replace('-', '−');
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const dark = () => matchMedia('(prefers-color-scheme: dark)').matches;
@@ -145,7 +145,7 @@ function draw(f) {
 async function stream() {
   for (;;) {
     try {
-      const r = await fetch('/stream', {cache: 'no-store', headers: H});
+      const r = await fetch('/live/stream', {cache: 'no-store', headers: H});
       const rd = r.body.getReader();
       let buf = new Uint8Array(0);
       for (;;) {
@@ -235,11 +235,11 @@ new ResizeObserver(() => {
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => S && buildStrips());
 
 (async () => {
-  showState(await (await fetch('/state', {headers: H})).json());
+  showState(await (await fetch('/live/state', {headers: H})).json());
   buildStrips();
   stream();
   setInterval(lag, 250);
-  setInterval(() => fetch('/state', {headers: H}).then((r) => r.json()).then(showState), 500);
+  setInterval(() => fetch('/live/state', {headers: H}).then((r) => r.json()).then(showState), 500);
   const engine = /Chrome\//.test(navigator.userAgent) ? 'Chromium' : 'WebKit';
   setInterval(() => { const l = lag(); if (S && S.running && isFinite(l.age_med)) post({cmd: 'lag', engine, ...l}); }, 5000);
 })();

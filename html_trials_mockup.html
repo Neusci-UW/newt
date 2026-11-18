@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trials and groups (HTML)</title>
+<link rel="stylesheet" href="src/neusci_daq/web/static/newt.css">
+<style>
+/* the app frame: tabs across the top, as on the Lessons pages */
+.apptabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:-8px 0 0}
+.apptabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--muted);font-weight:500;padding:8px 14px;margin-bottom:-1px}
+.apptabs button:hover{color:var(--ink)}
+.apptabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+.analysis{display:grid;grid-template-columns:340px minmax(0,1fr) 280px;gap:20px;align-items:start}
+@media (max-width:1250px){.analysis{grid-template-columns:320px minmax(0,1fr)}.analysis .looks{grid-column:1 / -1}}
+@media (max-width:820px){.analysis{grid-template-columns:minmax(0,1fr)}.trials{position:static}}
+.apptabs{overflow-x:auto;scrollbar-width:none}
+
+/* the Trials pane */
+.trials{display:flex;flex-direction:column;gap:12px;position:sticky;top:16px}
+.thead{display:flex;align-items:baseline;gap:8px}
+.thead h2{font-size:18px;font-weight:600;margin:0}
+.thead .count{font-size:13px;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.field select{font:inherit;font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted)}
+.chip[data-way]{border-color:var(--accent);color:var(--accent);font-weight:500}
+.chip[data-way="1"]::after{content:" ↑"}
+.chip[data-way="-1"]::after{content:" ↓"}
+.chip .n{font-family:var(--font-mono);font-size:11px;margin-right:4px}
+
+.groups{display:flex;flex-direction:column;gap:6px}
+.group{border:1px solid var(--line);border-radius:9px;background:var(--surface);overflow:hidden}
+.group.lit{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.group.dragging{opacity:.4}
+.group.over{border-top:3px solid var(--accent)}
+.ghead{display:grid;grid-template-columns:14px 18px 14px minmax(0,1fr) auto 18px;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;user-select:none}
+.ghead:hover{background:var(--bg)}
+.grip{color:var(--muted);cursor:grab;font-size:13px;line-height:1;opacity:.6}
+.sorted .grip{visibility:hidden}
+.swatch{width:14px;height:14px;border-radius:4px;border:0;padding:0;cursor:pointer}
+.gname{font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gname[contenteditable=true]{outline:1px solid var(--accent);border-radius:4px;padding:0 4px;white-space:normal;cursor:text}
+.gmeta{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
+.chev{color:var(--muted);transition:transform .15s;text-align:center}
+.group.open .chev{transform:rotate(90deg)}
+.tlist{display:none;border-top:1px solid var(--line);padding:4px 0}
+.group.open .tlist{display:block}
+.trial{display:grid;grid-template-columns:18px minmax(0,1fr) 84px 44px;align-items:center;gap:8px;padding:3px 10px 3px 32px;font-size:13px;cursor:pointer}
+.trial:hover{background:var(--bg)}
+.trial.lit{background:color-mix(in srgb, var(--accent) 12%, transparent)}
+.trial .tname{font-family:var(--font-mono);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trial .tnote{color:var(--muted);font-family:var(--font-body)}
+.trial .dur{font-family:var(--font-mono);font-size:12px;color:var(--muted);text-align:right}
+.trial svg{display:block;width:84px;height:18px}
+.off .gname,.trial.off .tname{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+
+.actions{display:none;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+.actions.show{display:flex}
+.actions .what{font-size:13px;font-weight:500;margin-right:auto}
+.actions button{font-size:13px;padding:4px 10px}
+.foot{display:flex;flex-wrap:wrap;gap:6px}
+.foot button{font-size:13px;padding:4px 10px}
+.foot .spacer{flex:1}
+
+/* the board, empty until a student adds a chart */
+.board{min-height:560px;display:flex;flex-direction:column;gap:12px}
+.empty{flex:1;border:1.5px dashed var(--line);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);text-align:center;padding:40px}
+.empty b{color:var(--ink);font-size:16px;font-weight:600}
+.looks .row{grid-template-columns:76px minmax(0,1fr) 48px}
+.ramp{height:10px;border-radius:5px;border:1px solid var(--line)}
+.notes{font-size:13.5px;color:var(--muted);max-width:110ch}
+.notes li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="apptabs" role="tablist">
+    <button role="tab">Record</button><button role="tab">Stimulator</button><button role="tab">Protocols</button>
+    <button role="tab" aria-selected="true">Analysis</button><button role="tab">DataPad</button>
+    <button role="tab">Plot Canvas</button><button role="tab">Simulators</button><button role="tab">Lessons</button>
+  </nav>
+
+  <div class="analysis">
+    <!-- ======================================================= Trials -->
+    <section class="card trials" aria-label="Trials">
+      <div class="thead"><h2>Trials</h2><span class="count" id="count"></span><span class="spacer"></span>
+        <div class="seg" id="organize"><button aria-pressed="true" title="A group for each different stimulus">By stimulus</button><button title="One list, in the order they were recorded">By time</button></div>
+      </div>
+      <label class="field">Stimulus channel
+        <select><option>Stimulus (ai3)</option><option>None</option></select></label>
+      <div class="field">Sort groups by <span class="chips" id="sorts">
+        <button class="chip" data-key="size">Size</button><button class="chip" data-key="width">Width</button>
+        <button class="chip" data-key="pulses">Pulses</button><button class="chip" data-key="map">Along the map</button>
+        <button class="chip" data-key="trials">Number of trials</button></span></div>
+
+      <div class="actions" id="actions">
+        <span class="what" id="what"></span>
+        <button data-a="only">Only these</button><button data-a="combine">Combine</button>
+        <button data-a="split">Split</button><button data-a="move">Move to…</button><button data-a="delete">Delete…</button>
+      </div>
+
+      <div class="groups" id="groups"></div>
+
+      <div class="foot">
+        <button id="tickall">Tick all</button><button id="untickall">Untick all</button><span class="spacer"></span>
+        <button title="Sort every trial into groups again from scratch">Regroup</button>
+        <button title="Forget names, moved trials and colors">Reset…</button>
+      </div>
+      <p class="caption">Click to highlight, Shift or ⌘ to add more. Double-click a name to rename it. Drag ⠿ to reorder. Untick to leave out of every chart.</p>
+    </section>
+
+    <!-- ======================================================= the board -->
+    <section class="card board">
+      <div class="runbar"><span class="runlab">Charts</span><span class="spacer"></span>
+        <button class="primary">Add a chart</button></div>
+      <div class="empty">
+        <b>No charts yet</b>
+        <span>Pick what to plot: the trials overlaid, a measure against the stimulus, spikes as dots…<br>
+          Charts show the ticked groups in their colors.</span>
+      </div>
+    </section>
+
+    <!-- ======================================================= colors -->
+    <aside class="panel looks">
+      <div class="card">
+        <p class="sect-title">Colors</p>
+        <label class="field">Groups
+          <select id="gstyle"><option>Palette</option><option>One color</option><option>Shades of one color</option>
+            <option>From one color to another</option><option>Viridis</option><option>Plasma</option></select></label>
+        <div class="ramp" id="ramp"></div>
+        <label class="field">Trials in a group
+          <select><option>Solid</option><option selected>Opacity</option><option>Shades</option></select></label>
+        <div class="row"><label for="op">Opacity</label><input id="op" type="range" min="0" max="100" value="0"><output>Auto</output></div>
+        <p class="caption">Click a group's square to give it its own color.</p>
+      </div>
+    </aside>
+  </div>
+
+  <ul class="notes">
+    <li><b>Mock-up:</b> made-up session, nothing is saved. The real one reads the session's groups (groupsfile.py) and colors (colors.py).</li>
+    <li><b>Versus the Qt panel:</b> wider, so names fit. A small picture of each trial's stimulus. The buttons appear only when something is highlighted. Sorting uses chips, not a menu. The Groups… window's colors sit beside the board.</li>
+  </ul>
+</div>
+
+<script>
+'use strict';
+const PAL = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#E69F00', '#56B4E9', '#F0E442', '#999999'];
+const VIRIDIS = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'];
+// made-up session: name, stimulus (size V, width ms, pulses), trials [stem, seconds, note, ticked]
+let groups = [
+  {name: 'Pulse 0.5 V, 1 ms', size: 0.5, width: 1, pulses: 1, trials: [1, 2, 3, 4, 5, 6]},
+  {name: 'Pulse 1 V, 1 ms', size: 1, width: 1, pulses: 1, trials: [7, 8, 9, 10, 11, 12]},
+  {name: 'Pulse 2 V, 1 ms', size: 2, width: 1, pulses: 1, trials: [13, 14, 15, 16, 17], off: [15]},
+  {name: 'Pulse 1 V, 1 ms ×5 every 20 ms', size: 1, width: 1, pulses: 5, trials: [18, 19, 20, 21]},
+  {name: 'Pulse 3–4 V, 1 ms', size: 3.5, width: 1, pulses: 1, trials: [22, 23, 24, 25, 26, 27], kind: 'alike'},
+  {name: 'Step 0.5 V for 100 ms', size: 0.5, width: 100, pulses: 1, trials: [28, 29, 30]},
+  {name: 'No stimulus', size: 0, width: 0, pulses: 0, trials: [31, 32], hidden: true},
+];
+groups.forEach((g, i) => { g.color = PAL[i % PAL.length]; g.off = new Set(g.off || []); g.open = i < 2; });
+const notes = {9: 'electrode moved', 20: 'TTX'};
+let lit = new Set();            // 'g:name' or 't:n'
+let sorts = [];                 // [[key, way]]
+let byTime = false;
+
+const stem = (n) => 'block_' + String(n).padStart(3, '0');
+function spark(g) {             // the stimulus, as a little picture
+  const w = 84, h = 18, base = h - 3, top = 3;
+  if (!g.pulses) return `<svg viewBox="0 0 ${w} ${h}"><path d="M2 ${base}H${w - 2}" stroke="${g.color}" fill="none" stroke-width="1.5"/></svg>`;
+  const amp = base - (base - top) * Math.min(1, g.size / 4);
+  let d = `M2 ${base}`, x = 14;
+  const pw = g.width >= 50 ? 40 : 3, gap = g.pulses > 1 ? 9 : 0;
+  for (let k = 0; k < g.pulses; k++) { d += `H${x}V${amp}H${x + pw}V${base}`; x += pw + gap; }
+  return `<svg viewBox="0 0 ${w} ${h}"><path d="${d}H${w - 2}" stroke="${g.color}" fill="none" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+}
+
+function shown() {
+  if (byTime) return [{name: 'All trials, in the order recorded', color: '#0072B2', trials: groups.flatMap((g) => g.trials).sort((a, b) => a - b),
+                       off: new Set(groups.flatMap((g) => [...g.off])), open: true, size: 1, width: 1, pulses: 1, time: true}];
+  if (!sorts.length) return groups;
+  const val = (g, k) => k === 'trials' ? g.trials.length : k === 'map' ? g.size + g.pulses : g[k];
+  return [...groups].sort((a, b) => { for (const [k, w] of sorts) { const d = (val(a, k) - val(b, k)) * w; if (d) return d; } return 0; });
+}
+
+function render() {
+  const box = document.getElementById('groups');
+  box.classList.toggle('sorted', sorts.length > 0 || byTime);
+  box.replaceChildren();
+  for (const g of shown()) {
+    const el = document.createElement('div');
+    const ticked = g.trials.filter((t) => !g.off.has(t)).length;
+    el.className = 'group' + (g.open ? ' open' : '') + (lit.has('g:' + g.name) ? ' lit' : '') + (g.hidden ? ' off' : '');
+    el.draggable = !sorts.length && !byTime;
+    el.innerHTML = `<div class="ghead">
+        <span class="grip" title="Drag to reorder">⠿</span>
+        <input type="checkbox" ${g.hidden || !ticked ? '' : 'checked'} title="In every chart">
+        <button class="swatch" style="background:${g.color}" title="Its color"></button>
+        <span class="gname" title="${g.name}">${g.name}</span>
+        <span class="gmeta">${g.kind ? `<span class="badge" title="Group alike stimuli joined these">${g.kind}</span>` : ''}${g.trials.length}</span>
+        <span class="chev">›</span></div>
+      <div class="tlist">${g.trials.map((t) => `<div class="trial${g.off.has(t) ? ' off' : ''}${lit.has('t:' + t) ? ' lit' : ''}" data-t="${t}">
+          <input type="checkbox" ${g.off.has(t) || g.hidden ? '' : 'checked'}>
+          <span class="tname">${stem(t)}${notes[t] ? ` <span class="tnote">· ${notes[t]}</span>` : ''}</span>
+          ${spark(g)}<span class="dur">${(2 + (t % 3) * 0.5).toFixed(1)} s</span></div>`).join('')}</div>`;
+    const cb = el.querySelector('.ghead input');
+    cb.indeterminate = !g.hidden && ticked > 0 && ticked < g.trials.length;
+    cb.onclick = (e) => { e.stopPropagation(); g.hidden = !cb.checked; if (cb.checked) g.off.clear(); render(); };
+    el.querySelector('.chev').onclick = (e) => { e.stopPropagation(); g.open = !g.open; render(); };
+    el.querySelector('.swatch').onclick = (e) => { e.stopPropagation(); };
+    el.querySelector('.ghead').onclick = (e) => highlight('g:' + g.name, e);
+    const nm = el.querySelector('.gname');
+    nm.ondblclick = (e) => { e.stopPropagation(); nm.contentEditable = 'true'; nm.focus(); document.getSelection().selectAllChildren(nm); };
+    nm.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); nm.blur(); } };
+    nm.onblur = () => { if (nm.isContentEditable) { lit.delete('g:' + g.name); g.name = nm.textContent.trim() || g.name; render(); } };
+    for (const row of el.querySelectorAll('.trial')) {
+      const t = +row.dataset.t;
+      row.querySelector('input').onclick = (e) => { e.stopPropagation(); g.off.has(t) ? g.off.delete(t) : g.off.add(t); g.hidden = false; render(); };
+      row.onclick = (e) => highlight('t:' + t, e);
+    }
+    el.ondragstart = (e) => { el.classList.add('dragging'); e.dataTransfer.setData('text', g.name); };
+    el.ondragend = () => el.classList.remove('dragging');
+    el.ondragover = (e) => { e.preventDefault(); el.classList.add('over'); };
+    el.ondragleave = () => el.classList.remove('over');
+    el.ondrop = (e) => {
+      e.preventDefault();
+      const from = groups.findIndex((x) => x.name === e.dataTransfer.getData('text'));
+      const [moved] = groups.splice(from, 1);
+      groups.splice(groups.indexOf(g), 0, moved);
+      render();
+    };
+    box.append(el);
+  }
+  const n = groups.reduce((s, g) => s + g.trials.length, 0);
+  document.getElementById('count').textContent = `${n} in ${groups.length} groups`;
+  const acts = document.getElementById('actions');
+  acts.classList.toggle('show', lit.size > 0);
+  const ng = [...lit].filter((k) => k[0] === 'g').length, nt = lit.size - ng;
+  document.getElementById('what').textContent = [ng && `${ng} group${ng > 1 ? 's' : ''}`, nt && `${nt} trial${nt > 1 ? 's' : ''}`].filter(Boolean).join(', ');
+  acts.querySelector('[data-a=combine]').disabled = ng < 2;
+  acts.querySelector('[data-a=split]').disabled = !(ng === 1 && shown().find((g) => lit.has('g:' + g.name) && g.kind));
+  acts.querySelector('[data-a=move]').disabled = nt === 0;
+}
+
+function highlight(key, e) {
+  if (e.shiftKey || e.metaKey || e.ctrlKey) lit.has(key) ? lit.delete(key) : lit.add(key);
+  else lit = lit.has(key) && lit.size === 1 ? new Set() : new Set([key]);
+  render();
+}
+
+document.getElementById('sorts').onclick = (e) => {
+  const chip = e.target.closest('.chip'); if (!chip) return;
+  const k = chip.dataset.key, at = sorts.findIndex(([x]) => x === k);
+  if (at < 0) sorts.push([k, k === 'trials' ? -1 : 1]);
+  else if (sorts[at][1] === (k === 'trials' ? -1 : 1)) sorts[at][1] *= -1;
+  else sorts.splice(at, 1);
+  for (const c of document.querySelectorAll('#sorts .chip')) {
+    const i = sorts.findIndex(([x]) => x === c.dataset.key);
+    if (i < 0) { delete c.dataset.way; c.innerHTML = c.textContent.replace(/^\d+ /, ''); }
+    else { c.dataset.way = sorts[i][1]; c.innerHTML = (sorts.length > 1 ? `<span class="n">${i + 1}</span>` : '') + c.textContent.replace(/^\d+ ?/, ''); }
+  }
+  render();
+};
+document.getElementById('organize').onclick = (e) => {
+  if (e.target.tagName !== 'BUTTON') return;
+  byTime = e.target.textContent === 'By time';
+  for (const b of e.currentTarget.children) b.setAttribute('aria-pressed', String(b === e.target));
+  render();
+};
+document.getElementById('actions').onclick = (e) => {
+  const a = e.target.dataset.a; if (!a) return;
+  const names = [...lit].filter((k) => k[0] === 'g').map((k) => k.slice(2));
+  if (a === 'combine' && names.length > 1) {
+    const parts = groups.filter((g) => names.includes(g.name));
+    const keep = parts[0];
+    keep.name = parts.map((g) => g.name).join(' + '); keep.kind = 'combined';
+    keep.trials = parts.flatMap((g) => g.trials).sort((x, y) => x - y);
+    groups = groups.filter((g) => g === keep || !parts.includes(g));
+    lit = new Set(['g:' + keep.name]);
+  } else if (a === 'only') {
+    for (const g of groups) { g.hidden = !names.includes(g.name) && !g.trials.some((t) => lit.has('t:' + t)); g.off = new Set(g.trials.filter((t) => !names.includes(g.name) && !lit.has('t:' + t))); }
+  }
+  render();
+};
+document.getElementById('tickall').onclick = () => { groups.forEach((g) => { g.hidden = false; g.off.clear(); }); render(); };
+document.getElementById('untickall').onclick = () => { groups.forEach((g) => { g.hidden = true; }); render(); };
+const op = document.getElementById('op');
+op.oninput = () => { op.nextElementSibling.textContent = +op.value ? op.value + '%' : 'Auto'; };
+const gs = document.getElementById('gstyle');
+gs.onchange = () => {
+  const cols = gs.value === 'Viridis' ? VIRIDIS : gs.value === 'Palette' ? PAL : null;
+  groups.forEach((g, i) => {
+    g.color = cols === VIRIDIS ? VIRIDIS[Math.round(i / (groups.length - 1) * 4)] : cols ? PAL[i % 8]
+      : gs.value === 'One color' ? '#0072B2' : `color-mix(in srgb, #0072B2 ${30 + 70 * i / (groups.length - 1)}%, #e8eef3)`;
+  });
+  document.getElementById('ramp').style.background = `linear-gradient(90deg, ${groups.map((g) => g.color).join(', ')})`;
+  render();
+};
+gs.onchange();
+</script>
+</body>
+</html>

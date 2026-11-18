@@ -81,15 +81,21 @@ SOLID, OPACITY, SHADES_T = "Solid", "Opacity", "Shades"
 TRIAL_STYLES = (SOLID, OPACITY, SHADES_T, *MAPS)
 PALETTE_STYLE, ONE, SHADES, TWO = "Palette", "One color", "Shades of one color", "From one color to another"
 PAGE_STYLES = (PALETTE_STYLE, ONE, SHADES, TWO, *MAPS)
-BASE_COLOR = "#0072B2"             # one color / shades: until you pick one
-FIRST_COLOR, LAST_COLOR = "#0072B2", "#D55E00"     # from one color to another: until you pick them
+# the colors a Groups setting is made from (saved under these keys), until you pick them
+PICKED = {"base_color": "#0072B2", "first_color": "#0072B2", "last_color": "#D55E00"}
+PICKS = {ONE: ("base_color",), SHADES: ("base_color",), TWO: ("first_color", "last_color")}
+LEVELS = 12
+START = 0.12                       # where a map starts
 
 
-def blend(first: str, last: str, f: float):
-    """The color f (0 to 1) of the way from `first` to `last`, as a QColor ("" for either: the default)."""
+def _clamp(f: float) -> float:
+    return min(1.0, max(0.0, f))
+
+
+def _mix(a, b, f: float):
+    """The color f (0 to 1) of the way from a to b, as a QColor."""
     from pyqtgraph.Qt import QtGui
-    a, b = QtGui.QColor(first or FIRST_COLOR), QtGui.QColor(last or LAST_COLOR)
-    f = min(1.0, max(0.0, f))
+    a, b = QtGui.QColor(a), QtGui.QColor(b)
     return QtGui.QColor(*(round(x + (y - x) * f) for x, y in
                           ((a.red(), b.red()), (a.green(), b.green()), (a.blue(), b.blue()))))
 
@@ -97,26 +103,40 @@ def blend(first: str, last: str, f: float):
 def shade(color: str, f: float):
     """Color at f (0 to 1) along its shades: pale and greyish (0) to full and deep (1), the same hue."""
     from pyqtgraph.Qt import QtGui
-    c = QtGui.QColor(color)
-    h, s, l, _ = c.getHslF()
-    f = min(1.0, max(0.0, f))
+    h, s, _, _ = QtGui.QColor(color).getHslF()
+    f = _clamp(f)
     s2 = 0.18 + (max(s, 0.55) - 0.18) * f       # saturation up
     l2 = 0.78 - 0.42 * f                        # light to dark
     return QtGui.QColor.fromHslF(max(h, 0.0), s2, l2)
-LEVELS = 12
-START = 0.12                       # where a map starts
 
 
 def sample(name: str, f: float):
     """Map `name` at f (0 to 1), as a QColor."""
-    from pyqtgraph.Qt import QtGui
     stops = MAPS[name]
-    k = (START + (1 - START) * min(1.0, max(0.0, f))) * (len(stops) - 1)
+    k = (START + (1 - START) * _clamp(f)) * (len(stops) - 1)
     i = min(int(k), len(stops) - 2)
-    a, b = QtGui.QColor(stops[i]), QtGui.QColor(stops[i + 1])
-    g = k - i
-    return QtGui.QColor(*(int(x + (y - x) * g) for x, y in
-                          ((a.red(), b.red()), (a.green(), b.green()), (a.blue(), b.blue()))))
+    return _mix(stops[i], stops[i + 1], k - i)
+
+
+def picked(looks: dict, key: str) -> str:
+    """The color you picked for a Groups setting (PICKED's keys), or its default."""
+    return looks.get(key) or PICKED[key]
+
+
+def along(style: str, f: float, looks: dict):
+    """A group's color f (0 to 1) of the way along a Groups setting, as a QColor: pale to deep
+    (Shades of one color), first color to last (From one color to another), or across a color
+    map (Viridis for the settings that don't run from one end to the other)."""
+    if style == SHADES:
+        return shade(picked(looks, "base_color"), f)
+    if style == TWO:
+        return _mix(picked(looks, "first_color"), picked(looks, "last_color"), _clamp(f))
+    return sample(style if style in MAPS else "Viridis", f)
+
+
+def alpha(opacity: float) -> float:
+    """How solid (0 to 255) the Opacity setting (0 to 1) draws, never quite invisible."""
+    return 255 * min(1.0, max(0.02, opacity))
 
 
 def spread(style: str, color: str, n: int, opacity: float | None = None) -> list:
@@ -128,7 +148,7 @@ def spread(style: str, color: str, n: int, opacity: float | None = None) -> list
         f = round(k / max(1, n - 1) * (LEVELS - 1)) / (LEVELS - 1)
         c = sample(style, f) if style in MAPS else shade(color, f) if style == SHADES_T else QtGui.QColor(color)
         if opacity is not None:
-            top = 255 * min(1.0, max(0.02, opacity))
+            top = alpha(opacity)
             c.setAlpha(int(top * (0.14 + 0.86 * f)) if style == OPACITY and n > 1 else int(top))
         elif style == OPACITY:
             c.setAlpha(int(35 + 220 * f) if n > 1 else 255)

@@ -2194,7 +2194,7 @@ def test_groups_can_be_dragged_and_sorted(app, win):
     assert ap.blocks_panel.tree.topLevelItem(0).data(0, QtCore.Qt.ItemDataRole.UserRole) == ("page", names[1])
     ap.move_group(names[1], 2)                                       # to the end: back again
     assert [n for n, _ in ap.shown] == names
-    ap.sort_groups("amplitude")
+    ap.sort_groups([["amp", 1]])
     sizes = [abs(ap._signature_of(ap._paths, "Stim")(b[0], ap.recorded(b[0], "Stim"), ap.blocks[b[0]]["sample_rate"])[2])
              for _, b in ap.shown]
     assert sizes == sorted(sizes)
@@ -2246,8 +2246,8 @@ def test_groups_combine_split_and_join_by_likeness(app, win):
 def test_saved_order_goes_first_and_new_groups_after():
     shown = [("a", [0]), ("b", [1]), ("c", [2])]
     assert [n for n, _ in groupsfile.arrange(shown, {"order": ["c", "a"]}, None)] == ["c", "a", "b"]
-    size = {0: (3, 1), 1: (1, 2), 2: (2, 3)}
-    assert [n for n, _ in groupsfile.arrange(shown, {"sort": "frequency"}, lambda b: size[b[0]])] == ["b", "c", "a"]
+    size = {0: {"freq": 3}, 1: {"freq": 1}, 2: {"freq": 2}}
+    assert [n for n, _ in groupsfile.arrange(shown, {"sorts": [["freq", 1]]}, lambda b: size[b[0]])] == ["b", "c", "a"]
 
 
 def test_analysis_saves_with_the_session_and_comes_back(app, win, tmp_path):

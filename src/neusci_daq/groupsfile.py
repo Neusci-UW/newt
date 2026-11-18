@@ -21,7 +21,7 @@ What you change is kept in the session folder, in pages.json:
   order    the pages in the order you dragged them
   sorts    [[measure, 1 smallest first or -1 biggest]...]: kept sorted by these, the first
            first (stimmeasures.MEASURES, "pc1" along the map, "trials"); [] your order.
-           (Older files: sort, "frequency" or "amplitude".)
+           (Older files have sort, "frequency" or "amplitude", read as sorts.)
   alike    Group alike stimuli: {"feats": the measures (and "shape") the map is made of,
            "by": "n" (a number of groups) or "close" (how close counts as alike),
            "n": how many groups (0: each stimulus its own), "close": 0-100% of the
@@ -42,7 +42,11 @@ from pathlib import Path
 FILE = "pages.json"
 ALL = "All trials"                # the one group when there's nothing to group by
 ALIKE = {"feats": [], "by": "n", "n": 0, "close": 0}
-OLD_SORTS = {"frequency": [["freq", 1]], "amplitude": [["amp", 1]]}
+OLD_SORTS = {"frequency": [["freq", 1]], "amplitude": [["amp", 1]]}    # older files' "sort"
+# what the Analysis page keeps as it's set and writes back; the rest is changed in the file itself
+LOOKS = ("colors", "page_map", "trial_map", "base_color", "first_color", "last_color", "trial_opacity", "gains",
+         "stim_fit", "hidden_groups", "hidden_trials", "shown_trials", "order", "sorts", "alike", "color_by",
+         "avg_each")
 
 
 def joined_name(names) -> str:
@@ -77,19 +81,20 @@ def entries(auto: list[tuple[str, list[int]]], d: dict) -> list[tuple[str, list[
 def kinds(auto: list[tuple[str, list[int]]], d: dict) -> dict[str, str]:
     """The groups holding more than one stimulus: {name: "alike"} if Group alike stimuli
     joined them (until Keep these groups), {name: "combined"} if you did."""
-    pages: dict[str, list] = {}
+    count: dict[str, int] = {}
+    alike = set()
     for name, _, labels in entries(auto, d):
-        p = pages.setdefault(name, [0, False])
-        p[0] += len(labels)
-        p[1] = p[1] or len(labels) > 1
-    return {name: "alike" if live else "combined" for name, (n, live) in pages.items() if n > 1}
+        count[name] = count.get(name, 0) + len(labels)
+        if len(labels) > 1:                    # the map joined them
+            alike.add(name)
+    return {name: "alike" if name in alike else "combined" for name, n in count.items() if n > 1}
 
 
 def load(folder: str | Path | None) -> dict:
     out = {"renamed": {}, "moved": {}, "colors": {}, "page_map": "", "trial_map": "", "base_color": "",
            "first_color": "", "last_color": "", "trial_opacity": 0,
            "gains": {}, "stim_fit": "",
-           "hidden_groups": [], "hidden_trials": [], "shown_trials": [], "order": [], "sort": "",
+           "hidden_groups": [], "hidden_trials": [], "shown_trials": [], "order": [],
            "sorts": [], "alike": dict(ALIKE), "merged": [], "color_by": "", "avg_each": False,
            "organize": ""}
     if folder is None:
@@ -107,9 +112,8 @@ def load(folder: str | Path | None) -> dict:
         out["stim_fit"] = str(d.get("stim_fit", ""))
         for key in ("hidden_groups", "hidden_trials", "shown_trials", "order"):
             out[key] = [str(x) for x in d.get(key, [])]
-        out["sort"] = str(d.get("sort", ""))
         out["sorts"] = [[str(k), -1 if s == -1 else 1] for k, s in d.get("sorts", [])] \
-            if "sorts" in d else list(OLD_SORTS.get(out["sort"], []))
+            if "sorts" in d else list(OLD_SORTS.get(str(d.get("sort", "")), []))
         a = d.get("alike") or {}
         out["alike"] = {"feats": [str(f) for f in a.get("feats", [])], "by": "close" if a.get("by") == "close" else "n",
                         "n": int(a.get("n", 0) or 0), "close": int(a.get("close", 0) or 0)}
@@ -144,14 +148,11 @@ def apply(auto: list[tuple[str, list[int]]], stems: list[str], d: dict) -> list[
 
 def arrange(shown: list[tuple[str, list[int]]], d: dict, measure) -> list[tuple[str, list[int]]]:
     """The pages in the order asked for: sorted, if `sorts` says so, by measure(blocks) (a
-    dict of measures; or, as before, (frequency, amplitude)), ties by the next sort, pages
-    without that measure last; otherwise your order, and any you haven't placed after those."""
-    sorts = d.get("sorts") if "sorts" in d else OLD_SORTS.get(d.get("sort", ""), [])
+    dict of measures), ties by the next sort, pages without that measure last; otherwise
+    your order, and any you haven't placed after those."""
+    sorts = d.get("sorts")
     if sorts:
-        values = {}
-        for name, blocks in shown:
-            m = measure(blocks)
-            values[name] = {"freq": m[0], "amp": m[1]} if isinstance(m, tuple) else (m or {})
+        values = {name: measure(blocks) or {} for name, blocks in shown}
 
         def key(page):
             out = []

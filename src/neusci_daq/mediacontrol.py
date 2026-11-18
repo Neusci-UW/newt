@@ -3,17 +3,14 @@ the camera panel, playing back a recorded trial with its video, and switching th
 device."""
 from __future__ import annotations
 
-import dataclasses
 import json
-import time
 
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from . import config as cfgmod
-from .config import Channel
-from . import colors
+from . import rigsetup
 from .backends import daq_devices
 from .channels import ChannelRow
 from .mainparts import LIVE, REVIEW
@@ -225,27 +222,15 @@ class MediaMixin:
         """Use another input device, in this window. Acquiring stops (ending any block), the
         input changes, and if it was acquiring it carries on from the new device: with Record
         on, in a new block of the same session. Everything else stays as it was."""
-        import copy
         if self.trials_page.running:
             QtWidgets.QMessageBox.information(self, "Busy", "Stop the protocol first.")
             return False
         if backend == self.cfg.backend and (backend != "audio" or device == self.cfg.audio_device):
             return True
-        cfg = copy.deepcopy(self.cfg)            # the setup on the new device, checked before anything changes
-        cfg.backend, cfg.audio_device = backend, device
-        if backend == "audio":
-            from . import audio
-            audio.use_audio_channels(cfg)
-        elif self.cfg.backend == "audio":       # back to the DAQ's own channel setup
-            saved = json.loads(self.settings.value("daq_setup", "") or "{}")
-            chans = [Channel(**{k: (tuple(v) if k == "range" else v) for k, v in c.items()})
-                     for c in saved.get("channels", [])] or [Channel("ai0", "Ch1"), Channel("ai1", "Ch2")]
-            cfg.channels = [c for c in chans if c.enabled]
-            cfg.spare_channels = [c for c in chans if not c.enabled]
-            cfg.sample_rate = float(saved.get("sample_rate", 20000))
-            cfg.chunk_size = cfgmod.auto_chunk_size(cfg.sample_rate)
-            cfg.stim_monitor = saved.get("stim_monitor", cfg.stim_monitor)
-            colors.fill_colors(cfg.channels + cfg.spare_channels)
+        # the setup on the new device, checked before anything changes (back from an audio
+        # input: the DAQ's own channel setup)
+        saved = json.loads(self.settings.value("daq_setup", "") or "{}") if self.cfg.backend == "audio" else {}
+        cfg = rigsetup.for_input(self.cfg, backend, device, saved)
         try:
             cfgmod.validate(cfg)
         except ValueError as e:
@@ -260,9 +245,7 @@ class MediaMixin:
             self.settings.setValue("live_input", json.dumps({"backend": self.cfg.backend,
                                                              "device": self.cfg.audio_device}))
         if self.cfg.backend != "audio":         # remembered, to come back to
-            self.settings.setValue("daq_setup", json.dumps({
-                "channels": [dataclasses.asdict(c) for c in self.cfg.channels + self.cfg.spare_channels],
-                "sample_rate": self.cfg.sample_rate, "stim_monitor": self.cfg.stim_monitor}))
+            self.settings.setValue("daq_setup", json.dumps(rigsetup.daq_setup(self.cfg)))
         running = self.btn_run.isChecked()
         stimulating = bool(self.repeating or getattr(self.simple_page, "repeating", False)
                            or (self.stim_out is not None and self.stim_out.busy))

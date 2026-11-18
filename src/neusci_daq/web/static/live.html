@@ -7,75 +7,190 @@
 <link rel="stylesheet" href="/static/newt.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
 <style>
-/* the strips: one chart per input, sharing the time axis */
+[hidden]{display:none !important}
+/* the strips: one chart per channel (then calculated channels), sharing the time axis */
 #strips{display:flex;flex-direction:column;gap:6px}
 .strip{display:flex;flex-direction:column;gap:2px}
-.shead{display:flex;align-items:center;gap:8px;font-size:13.5px;min-height:28px}
+.shead{display:flex;align-items:center;gap:8px;font-size:13.5px;min-height:28px;flex-wrap:wrap}
 .sname{font-weight:600}
+.fx{font-family:var(--font-mono);font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:0 5px}
+.sprob{font-size:12.5px;color:var(--bad)}
 .sval{font-family:var(--font-mono);font-size:13px;min-width:86px;font-variant-numeric:tabular-nums}
 .srate{font-size:13px;color:var(--muted)}
 .shead .seg button{padding:2px 10px;font-size:12.5px}
+.yr{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}
+.yr input{font:inherit;font-family:var(--font-mono);font-size:12px;width:66px;padding:2px 6px;border:1px solid var(--line);
+  border-radius:6px;background:var(--surface);color:var(--ink);font-variant-numeric:tabular-nums}
+.yr input:focus{outline:2px solid color-mix(in srgb, var(--accent) 40%, transparent);border-color:var(--accent)}
 /* Record: a red dot while it's on; red all over while a trial is being recorded */
 #rec .dot{background:var(--bad);margin-right:6px}
 #rec.live{background:var(--bad);border-color:var(--bad);color:var(--surface);font-weight:500}
 #rec.live .dot{background:var(--surface);border-radius:2px}
 .recrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:8px 0 10px}
 .recrow label{font-size:13.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
-.recrow input[type=text],#session select{font:inherit;font-size:13.5px;color:var(--ink);background:var(--surface);
+.recrow input[type=text],#session select,#setup input[type=text],#setup select,#rsess,#rtrial,#wins{font:inherit;font-size:13.5px;color:var(--ink);background:var(--surface);
   border:1px solid var(--line);border-radius:7px;padding:4px 8px}
 #label{width:130px}
 #comment{flex:1;min-width:200px}
 #comment:disabled{opacity:.6}
+#wins{width:62px;font-family:var(--font-mono);font-size:13px}
 #session .sname{font-family:var(--font-mono);font-size:13px;overflow-wrap:anywhere}
 #session .btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 #session select{max-width:100%}
-#notes{list-style:none;margin:0;padding:0;font-size:13px;max-height:140px;overflow:auto}
-#notes li{display:flex;gap:8px}
-#notes b{font-family:var(--font-mono);font-weight:500;color:var(--muted);min-width:48px;text-align:right}
-#recmsg.bad{color:var(--bad)}
+#notes{list-style:none;margin:0;padding:0;font-size:13px;max-height:220px;overflow:auto}
+#notes li{display:flex;gap:6px;align-items:baseline;padding:1px 0}
+#notes b{font-family:var(--font-mono);font-weight:500;color:var(--muted);min-width:52px;text-align:right;cursor:default}
+#notes.jump b{cursor:pointer;color:var(--accent)}
+#notes .ntext{flex:1;cursor:text;overflow-wrap:anywhere}
+#notes .ntext[contenteditable=true]{outline:1px solid var(--accent);border-radius:4px;padding:0 3px}
+#notes button{padding:0 6px;font-size:12px;border-color:transparent;background:none;color:var(--muted);visibility:hidden}
+#notes li:hover button{visibility:visible}
+#recmsg.bad,#setmsg.bad{color:var(--bad)}
+/* the setup: device, rate, wiring, then a row per channel */
+#setup{display:flex;flex-direction:column;gap:12px}
+#setup h3{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:4px 0 0}
+.setrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:13.5px}
+.setrow label{display:flex;align-items:center;gap:6px;color:var(--muted)}
+#rate{width:96px;font-family:var(--font-mono)}
+.tablewrap{overflow-x:auto}
+#chtab{border-collapse:collapse;font-size:13.5px;width:100%}
+#chtab th{font-size:12px;font-weight:500;color:var(--muted);text-align:left;padding:2px 6px;white-space:nowrap}
+#chtab td{padding:3px 6px;border-top:1px solid var(--line);vertical-align:middle}
+#chtab tr.off td:not(:first-child){opacity:.55}
+#chtab input[type=text]{width:100%;min-width:60px;padding:3px 6px}
+#chtab input.nm{min-width:120px}
+#chtab input.num{width:74px;font-family:var(--font-mono);font-size:13px}
+#chtab input[type=color]{width:34px;height:24px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer}
+#chtab select{padding:3px 4px}
+#chtab .x{padding:2px 8px;border-color:transparent;background:none;color:var(--muted)}
+#chtab .x:hover{color:var(--bad);border-color:var(--line)}
+#calcs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:13.5px}
+#calcs li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+#calcs code{font-family:var(--font-mono);font-size:12.5px;color:var(--muted)}
+#calcs .bad{color:var(--bad);font-size:12.5px}
+#calcform{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 10px;align-items:center;font-size:13.5px;
+  border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg)}
+#calcform label{color:var(--muted)}
+#cformula{font-family:var(--font-mono)}
+#calcform .acts{grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#calcform details{grid-column:1/-1;font-size:13px;color:var(--muted)}
+#calcform pre{font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:6px 0 0}
+#ccheck.bad{color:var(--bad)}
+.ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:8px 10px;border:1px solid var(--accent);border-radius:8px;
+  background:color-mix(in srgb, var(--accent) 8%, var(--surface));font-size:13.5px}
+.ask span{flex:1;min-width:200px}
+.setfoot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+/* review: one recorded trial at a time */
+body:not(.reviewing) .review-only,body.reviewing .live-only,body.reviewing #setup{display:none !important}
+#pan{margin-top:2px}
+#video video{width:100%;border-radius:6px;background:#000}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Live recording</h1>
-    <p>Four inputs from the simulated rig: two cells recorded from inside, one from outside, and the
-      stimulus, which drives cell 1. Cell 1 excites cell 2, cell 2 excites cell 3, and cell 3 inhibits cell 1.
-      Press Run, then Stimulate. Turn Record on to save what comes in as a trial you can look at in Analysis.</p>
+    <p id="intro">Press Run to see what comes in, then Stimulate. Turn Record on to save it as a trial you can look at in
+      Analysis. Set up chooses the input device, the channels and how each is shown.</p>
   </header>
   <div class="top">
     <section class="card stage">
       <div class="runbar">
-        <button id="run" class="primary">Run</button>
-        <button id="rec" title="Turn on to record: now while running, or as soon as you press Run"><span class="dot"></span><span id="rectext">Record: Off</span></button>
+        <button id="back" class="review-only" title="Back to the live traces">◀ Back to Live</button>
+        <button id="run" class="primary live-only">Run</button>
+        <button id="rec" class="live-only" title="Turn on to record: now while running, or as soon as you press Run"><span class="dot"></span><span id="rectext">Record: Off</span></button>
+        <span class="review-only"><select id="rsess" title="The session whose trials you're looking at"></select></span>
+        <span class="review-only"><button id="prev" title="The trial before">‹</button>
+          <select id="rtrial" title="Which trial"></select>
+          <button id="next" title="The next trial">›</button></span>
         <span class="runlab">Window</span>
         <div class="seg" id="win"></div>
+        <input type="text" id="wins" inputmode="decimal" title="Seconds across the plot: type any number (up to 60 s live)">
         <span class="spacer"></span>
+        <button id="setupbtn" class="live-only" aria-pressed="false" title="The input device, its channels, and calculated channels">Set up</button>
+        <button id="revbtn" class="live-only" title="Look back through this session's trials, one at a time">Review</button>
         <span class="status" id="status">Stopped</span>
       </div>
+      <section id="setup" hidden>
+        <div class="setrow">
+          <label>Input device <select id="device" title="Where the data comes from"></select></label>
+          <label>Samples per second <input type="text" id="rate" list="rates" inputmode="decimal"
+            title="Per channel. Type a number of Hz, e.g. 1000 or 20k"></label>
+          <datalist id="rates"></datalist>
+          <span class="caption" id="ratecap"></span>
+          <span id="wirebox" class="setrow"><span class="caption">Wiring</span>
+            <span class="seg" id="wiring"><button data-w="RSE" title="Each input against ground (ai0–ai7)">Single-ended (RSE)</button><button
+              data-w="DIFF" title="Each input against its own minus input: ai0–ai3, with ai4–ai7 as the minus inputs">Differential (DIFF)</button></span></span>
+        </div>
+        <div class="ask" id="ask" hidden><span></span><button class="primary" id="askyes">Go ahead</button><button id="askno">Cancel</button></div>
+        <div class="tablewrap">
+          <table id="chtab">
+            <thead><tr><th title="Record and show this channel">On</th><th>Color</th><th>Name</th><th>Input</th><th>Units</th>
+              <th title="Shown value = volts × scale + offset">× Scale</th><th title="Added after scaling">+ Offset</th>
+              <th title="Line thickness (px)">Line</th><th title="This input records the stimulator's output (wired to it)">Stimulus</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="setfoot">
+          <button id="addch">+ Add channel</button>
+          <p class="caption">Shown value = volts at the input × scale + offset. An amplifier with a gain of 100, shown in mV:
+            scale = 1000 mV per V ÷ 100 = 10. Only the volts are saved; scale and offset go with each trial, so they can be fixed later.</p>
+        </div>
+        <h3>Calculated channels</h3>
+        <p class="caption">Worked out from the channels while you watch, like LabChart's channel calculations: a filter, the
+          difference of two channels, a rate meter… Never recorded: Analysis works them out from the trials.</p>
+        <ul id="calcs"></ul>
+        <form id="calcform" hidden autocomplete="off">
+          <label for="cpreset">Start from</label><select id="cpreset"><option value="">A formula of your own</option></select>
+          <label for="cname">Name</label><input type="text" id="cname">
+          <label for="cformula">Formula</label><input type="text" id="cformula" spellcheck="false">
+          <label for="cunit">Units</label><input type="text" id="cunit" style="max-width:120px">
+          <div class="acts"><button type="submit" class="primary" id="csave">Add</button><button type="button" id="ccancel">Cancel</button>
+            <span class="caption" id="ccheck"></span></div>
+          <details><summary>What a formula can use</summary>
+<pre>Channels by name (in quotes if it has spaces): Ch1, "Cell 1 (inside)", and the calculated channels above.
++ − * / ** and brackets: Ch1 - Ch2, 2 * Ch1 + 0.5
+Filters (Hz): lowpass(x, 100)  highpass(x, 100)  bandpass(x, 300, 3000)  bandstop(x, 55, 65)  notch(x, 60)
+Moving windows (ms): smooth(x, 1)  rms(x, 10)  envelope(x, 10)
+derivative(x) per second · integral(x) × seconds · abs sqrt exp log log10 sin cos tan sign clip(x, lo, hi) max min
+Events, each rise through a level: rate(x, level) per second · period(x, level) · height(x, level) · count(x, level)</pre></details>
+        </form>
+        <div><button id="addcalc">+ Calculated channel</button></div>
+        <div class="setfoot">
+          <button id="savesetup" title="Write this setup as a config file either app can start from">Save setup…</button>
+          <span class="caption" id="setmsg"></span>
+        </div>
+      </section>
       <div class="recrow">
-        <label>Trial label <input type="text" id="label" placeholder="e.g. Cell 1" title="Saved with each trial from now on"></label>
+        <label class="live-only">Trial label <input type="text" id="label" placeholder="e.g. Cell 1" title="Saved with each trial from now on"></label>
         <input type="text" id="comment" placeholder="Press Record to add comments" disabled
                title="Saved with the trial at the newest sample. Press C to type one.">
       </div>
       <div id="strips"></div>
+      <input type="range" id="pan" class="review-only" min="0" max="1000" value="0" title="Move along the trial">
     </section>
     <aside class="panel">
       <div class="card" id="session">
-        <p class="sect-title">Session</p>
+        <p class="sect-title" id="sesstitle">Session</p>
         <div class="sname" id="sname">–</div>
         <p class="caption" id="scount"></p>
-        <div class="btns">
+        <div class="btns live-only">
           <button id="newsess" title="The next trial starts a new session">New session</button>
           <select id="addto" title="Keep adding trials to a session recorded with these same channels">
             <option value="">Keep adding to…</option>
           </select>
         </div>
         <p class="caption" id="recmsg"></p>
+        <p class="sect-title" id="ntitle" hidden>Comments</p>
         <ul id="notes"></ul>
       </div>
-      <div class="card" id="dock"></div>
-      <div class="card">
+      <div class="card review-only" id="video" hidden>
+        <p class="sect-title">Video</p>
+        <video id="vid" controls muted playsinline></video>
+        <p class="caption">Recorded with this trial in the Qt app. Click a trace to show that moment.</p>
+      </div>
+      <div class="card live-only" id="dock"></div>
+      <div class="card live-only">
         <p class="sect-title">Lag</p>
         <div class="vbox">
           <div class="vnum" id="age">–</div>

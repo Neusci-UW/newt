@@ -17,8 +17,9 @@ A new session is a folder in data/unsaved/ named for when it started, as the Qt 
 before it's saved; the next launch keeps adding to it, until New session. Or keep adding to
 any session recorded with these same channels.
 
-Not yet as in Qt: video, a bar on the live trace for each trial, and naming or saving the
-session (the Qt app's File › Save does that).
+Not yet as in Qt: recording video, a bar on the live trace for each trial, and naming or
+saving the session (the Qt app's File › Save does that). Comments show as marks on the live
+traces; the setup and review are rig.py's and review.py's.
 """
 from __future__ import annotations
 
@@ -314,6 +315,7 @@ class Recording:
             return {
                 "on": self.on, "recording": rec.recording, "windows": self.win.running,
                 "trial": rec.path.stem if rec.recording and rec.path else "",
+                "t0": rec.block_start if rec.recording and rec.block_started else None,   # (stream s)
                 "secs": rec.samples_written / max(float(self.live.backend.actual_rate), 1e-9) if rec.recording else 0.0,
                 "session": self.folder.name if self.folder else "", "folder": str(self.folder or ""),
                 "unsaved": self.folder is None or self.folder.parent == self.unsaved(),

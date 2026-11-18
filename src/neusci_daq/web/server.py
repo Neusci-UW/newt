@@ -49,6 +49,12 @@ POST /canvas/cmd      JSON {"cmd": ...}: paper, letters, text, move, resize, fre
                       image, ann_add, ann_set (see Figures.canvas_command)
 GET /breadboard/state JSON: the Breadboard simulator's board, preview, timing (see breadboard.py)
 POST /breadboard/cmd  JSON {"cmd": ...}: add, drop, edit, delete, reset, clear, save, open, files, load
+GET /app/state        JSON: the session showing, its file, recent files, theme (see App.state)
+GET /app/files        JSON: ?dir=...&kind=newt|argus|mat|folder: a folder's contents, for a page's own
+                      file dialog (see App.files)
+GET /app/help         JSON: the Help page's explanations (see App.help)
+GET /app/watch        never-ending: a byte every 0.5 s while the page is open (see App.watch)
+POST /app/cmd         JSON {"cmd": ...}: new, open, save, save_as, export, stop, theme, forget (App.command)
 
 Only 127.0.0.1 is served, and everything but the pages' files needs this launch's key
 (header X-Newt-Key): any program on the computer can reach a local server, and
@@ -64,6 +70,7 @@ from urllib.parse import parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .app import App
 from .charts import Charts
 from .design import Design
 from .figures import Figures
@@ -82,7 +89,7 @@ STATIC = Path(__file__).parent / "static"
 
 def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, recording: Recording,
                 charts: Charts, pad: Pad, figures: Figures, key: str,
-                port: int = 0, breadboard=None) -> ThreadingHTTPServer:
+                port: int = 0, breadboard=None, app: App | None = None) -> ThreadingHTTPServer:
     network = Network(live)
 
     class Handler(BaseHTTPRequestHandler):
@@ -118,7 +125,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 f = (STATIC / path[len("/static/"):]).resolve()
                 if STATIC.resolve() in f.parents and f.is_file():
                     ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
-                    return self._send(f.read_bytes(), ctype)
+                    body = f.read_bytes()
+                    return self._send(app.page(body) if app and f.suffix == ".html" else body, ctype)
                 return self._send(b"not found", "text/plain", 404)
             if not self._keyed():
                 return
@@ -128,6 +136,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 return self._json(live.state())
             if path in ("/network/state", "/network/rates"):
                 return self._json(network.state() if path == "/network/state" else network.rates())
+            if app and path.startswith("/app/"):
+                return self._app_get(path, parse_qs(query))
             if path == "/trials/state":
                 return self._json(trials.state())
             if path == "/spikes/state":
@@ -162,6 +172,7 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                      "/spikes/cmd": trials.spikes.state, "/trials/preview": dict, "/trials/calc": dict,
                      "/breadboard/cmd": breadboard.state if breadboard else dict,
                      "/live/review": dict, "/live/video": dict,
+                     "/app/cmd": app.state if app else dict,
                      }.get(path, trials.state)
             try:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -207,6 +218,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                     design.command(d)
                 elif path == "/breadboard/cmd" and breadboard is not None:
                     breadboard.command(d)
+                elif path == "/app/cmd" and app:
+                    out = app.command(d)
                 else:
                     return self._send(b"not found", "text/plain", 404)
                 self._json({**state(), **out})
@@ -262,6 +275,24 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 stimulator.delete_preset(d["name"])
             else:
                 raise ValueError(f"Unknown command {cmd!r}")
+
+        def _app_get(self, path: str, q: dict):
+            if path == "/app/state":
+                return self._json(app.state())
+            if path == "/app/help":
+                return self._json(app.help())
+            if path == "/app/files":
+                try:
+                    return self._json(app.files(q.get("dir", [""])[0], q.get("kind", ["newt"])[0]))
+                except ValueError as e:
+                    return self._json({"problem": str(e)}, 400)
+            if path == "/app/watch":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return app.watch(self.wfile.write)
+            self._send(b"not found", "text/plain", 404)
 
         def _stream(self):
             self.send_response(200)

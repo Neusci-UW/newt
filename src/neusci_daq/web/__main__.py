@@ -15,6 +15,7 @@ import webbrowser
 from pathlib import Path
 
 from .breadboard import Breadboard
+from .app import App, window_dialog
 from .charts import Charts
 from .design import Design
 from .figures import Figures
@@ -73,8 +74,9 @@ def main() -> None:
     charts, pad = Charts(trials), Pad(trials)
     figures = Figures(trials, pad, charts)
     breadboard = Breadboard(live, stimulator, data)
+    app = App(data, live, trials, recording, stimulator, design)
     srv = make_server(live, trials, stimulator, design, recording, charts, pad, figures, key, args.port,
-                      breadboard=breadboard)
+                      breadboard=breadboard, app=app)
     url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
     print(f"serving {url}", flush=True)
     try:
@@ -86,7 +88,8 @@ def main() -> None:
             import webview
             threading.Thread(target=srv.serve_forever, daemon=True, name="web-server").start()
             window = webview.create_window("Newt (HTML)", url, width=1440, height=980,
-                                           min_size=(900, 640), background_color="#f3f4f1")
+                                           min_size=(900, 640),
+                                           background_color="#111614" if app.theme == "dark" else "#f3f4f1")
 
             def ask_path(name: str, fmt: str):           # Save figure… and Export…: the window's own dialog
                 got = window.create_file_dialog(webview.FileDialog.SAVE, save_filename=name,
@@ -96,6 +99,7 @@ def main() -> None:
                 return got
             figures.ask_path = live.rig.ask_path = ask_path
             breadboard.ask_path = ask_path
+            app.dialog = window_dialog(window)              # Open, Save as, Import, Export: the window's too
             webview.start()
     except KeyboardInterrupt:
         pass

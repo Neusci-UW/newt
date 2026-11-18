@@ -5,6 +5,7 @@ view. Run: python -m neusci_daq.web --run
   __main__.py   the window (or --browser / --serve)
   server.py     a local web server: the page, a binary frame stream, commands (keyed)
   live.py       the live view's Python half: backend, ring buffer, min/max frames
+  app.py        every page's own parts: the session's file, import/export, theme, outputs kept safe
   static/       newt.css (the shared look), fonts/ (IBM Plex, local), vendor/ (uPlot),
                 one .html + .js per page
 """

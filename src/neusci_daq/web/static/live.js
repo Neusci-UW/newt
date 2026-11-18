@@ -23,7 +23,7 @@ const post = (d) => fetch('/live/cmd', {method: 'POST', headers: H, body: JSON.s
 const minus = (s) => String(s).replace('-', '−');
 const unminus = (s) => String(s).replace(/[−–]/g, '-').trim();
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const dark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+const dark = () => (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 const num = (v) => minus(String(+(+v).toPrecision(6)));
 const secs = (s) => (s >= 1 ? +s.toPrecision(3) : +s.toPrecision(2)) + ' s';
@@ -763,6 +763,7 @@ new ResizeObserver(() => {
   sendCols();
 }).observe($('strips'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { stripSig = ''; if (S) maybeRebuild(); });
+addEventListener('newt-theme', (e) => { e.preventDefault(); stripSig = ''; if (S) maybeRebuild(); });    // the switch (app.js)
 
 (async () => {
   showState(await (await fetch('/live/state', {headers: H})).json());

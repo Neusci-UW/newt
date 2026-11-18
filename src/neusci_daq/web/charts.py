@@ -2,17 +2,19 @@
 each one draws, worked out here and sent to the page already shrunk (chartplan.envelope:
 two points per screen column), never the raw samples.
 
-Three kinds, as the Qt board has them, drawn as Qt draws them (responsecharts.py,
+The kinds, as the Qt board has them, drawn as Qt draws them (responsecharts.py,
 spikecharts.py): the trials over time (Response: each ticked group's average, with its
 ± SD or SEM shaded, and trials ticked on their own as traces), the stimulus over time
-(Stimulus), and one number from each trial against the stimulus (a measure against the
-stimulus: an input–output curve, the trials as dots and each group's average as a big one).
+(Stimulus), one number from each trial against the stimulus (a measure against the
+stimulus: an input–output curve, the trials as dots and each group's average as a big one),
+and the spikes found (spikes.py): a raster, trial by trial, and each unit's waveforms.
+Every channel is read through trials.py (its gain, the stimulus fit, calculated channels).
 
 Saved with the session in analysis.json, under "board", in the Qt board's format (canvas.py:
 state_of), so the Qt app keeps them; it skips the kind it doesn't have.
 
-Not yet as in Qt: a stimulus fit isn't drawn; no spikes or threshold on the traces; one
-board (no saved layouts); charts aren't moved or resized by dragging.
+Not yet as in Qt: no spikes or threshold on the traces; the rate, PCA, sizes and intervals
+charts; one board (no saved layouts); charts aren't moved or resized by dragging.
 """
 from __future__ import annotations
 
@@ -29,13 +31,19 @@ from .. import datapad as D
 from .. import stimmeasures as SM
 
 RESPONSE, STIMULUS, MEASURE = "Response", "Stimulus", "Measure against stimulus"
-KINDS = {RESPONSE: "Trials over time", STIMULUS: "Stimulus over time", MEASURE: "A measure against the stimulus"}
+RASTER, WAVEFORMS = "Raster", "Waveforms"
+KINDS = {RESPONSE: "Trials over time", STIMULUS: "Stimulus over time", MEASURE: "A measure against the stimulus",
+         RASTER: "Spikes, trial by trial", WAVEFORMS: "Each unit's spike shape"}
+SPIKE_KINDS = (RASTER, WAVEFORMS)
+MAX_WAVES = 150                       # spikes of each unit drawn behind its average (spikecharts.MAX_WAVES)
 SERIES = ("", "dV/dt", "d²V/dt²")       # a channel itself, its slope, its slope's slope (Qt: V, dV/dt, d²V/dt²)
 FIELDS = {RESPONSE: {"smooth": 0.2, "bin": 0.0, "layout": "stacked", "show_trials": False, "show_average": True,
                      "threshold": False, "dots": False, "dot_size": 9},
           STIMULUS: {"bin": 0.0},
           MEASURE: {"x": "", "channel": "", "measure": "", "window": "stim", "show_trials": True,
-                    "show_average": True}}
+                    "show_average": True},
+          RASTER: {"dots": 3},
+          WAVEFORMS: {"norm": False, "show": 0, "smooth": 0.1}}
 Y_MEASURES = [k for k in D.MEASUREMENTS if k not in D.SPIKE_KEYS and k != "value"]
 WINDOWS = {"stim": "While the stimulus is on", "trial": "The whole trial"}
 SPREADS = ("", "sd", "sem")
@@ -88,7 +96,7 @@ class Charts:
             return
         y, charts = 0, []
         for c in self.board["charts"]:                # lined up down the board, as the page shows them
-            w, h = (420, 420) if c["kind"] == MEASURE else (560, 320)
+            w, h = (420, 420) if c["kind"] in (MEASURE, WAVEFORMS) else (560, 320)
             charts.append({**c, "place": [0, y, w, h]})
             y += h + 20
         analysisfile.save_part(self._folder, analysisfile.BOARD, {**self.board, "charts": charts})
@@ -166,6 +174,10 @@ class Charts:
             return json.dumps({"note": "Open a session"}).encode(), "application/json"
         if chart["kind"] == MEASURE:
             return json.dumps(self._measure_chart(chart, v, spread)).encode(), "application/json"
+        if chart["kind"] == RASTER:
+            return json.dumps(self._raster(chart, v)).encode(), "application/json"
+        if chart["kind"] == WAVEFORMS:
+            return json.dumps(self._waveforms(chart, v, spread)).encode(), "application/json"
         cols = max(50, min(4000, int(c.get("cols", 800))))
         head, arrays = self._time_chart(chart, v, spread, c.get("x0"), c.get("x1"), cols)
         return self._pack(head, arrays), "application/octet-stream"
@@ -179,10 +191,7 @@ class Charts:
                          *(np.ascontiguousarray(a, "<f8" if k == 0 else "<f4").tobytes() for k, a in enumerate(arrays))])
 
     def _units(self, v: dict) -> dict[str, str]:
-        for b in v.get("blocks", []):
-            if b is not None:
-                return dict(zip(b["channel_names"], b["units"]))
-        return {}
+        return {n: self.trials.unit_of(n) for n in self.trials.names()}
 
     def _chosen(self, v: dict, names: list[str]) -> tuple[float, list[int]]:
         """(the sample rate, the trials ticked that have these channels at the first trial's
@@ -195,12 +204,22 @@ class Charts:
         listed = dict.fromkeys(i for _, bl in v["shown"] for i in bl)
         at = {i: k for k, i in enumerate(listed)}
         ok = [i for i, b in enumerate(blocks) if b is not None and i not in v["hidden"] and b["sample_rate"] == fs
-              and all(n in b["channel_names"] for n in names)]
+              and all(self.trials.has(i, n) for n in names)]
         return fs, sorted(ok, key=lambda i: (at.get(i, len(at)), i))
 
     def _plan(self, v: dict, chosen: list[int]):
         picked, pages = chartplan.ticked(v["shown"], v["hidden"], v["looks"]["hidden_groups"])
-        return chartplan.plan(v["shown"], chosen, picked, pages)
+        kinds, label = v.get("kinds", {}), v.get("stim_label", {})
+
+        def each(entry):                          # a combined group: an average for each stimulus in it
+            g, name, blocks = entry
+            if name not in kinds:
+                return [entry]
+            parts: dict[str, list[int]] = {}
+            for i in blocks:
+                parts.setdefault(label.get(i, name), []).append(i)
+            return [(g, f"{name}: {lab}", bl) for lab, bl in parts.items()] if len(parts) > 1 else [entry]
+        return chartplan.plan(v["shown"], chosen, picked, pages, each if v["looks"].get("avg_each") else None)
 
     def _opacity(self, v: dict) -> float | None:
         o = int(v["looks"].get("trial_opacity", 0) or 0)
@@ -224,18 +243,15 @@ class Charts:
         return out
 
     def _trace(self, v: dict, i: int, name: str, series: int, fs: float, bin_ms: float, smooth: float):
-        """Trial i's channel with its gain (and, for series 1 or 2, its d/dt), averaged in bins."""
-        b = v["blocks"][i]
-        y = b["data"][b["channel_names"].index(name)]
-        gain = float(v["looks"].get("gains", {}).get(name, 1.0) or 1.0)
-        if gain == 1 and not series and not bin_ms > 0:
-            return y
+        """Trial i's channel as every analysis reads it (trials.trace: its gain, the stimulus
+        fit), and for series 1 or 2 its d/dt, averaged in bins."""
         def make():
-            out = y / gain if gain != 1 else np.asarray(y, float)
+            out = np.asarray(self.trials.trace(i, name), float)
             if series:
                 out = A.derivative(out, fs, series, smooth)
             return np.asarray(A.bin_average(out, fs, bin_ms), np.float32)
-        return self._keep(("trace", str(v["paths"][i]), name, series, gain, bin_ms, smooth if series else 0), make)
+        return self._keep(("trace", str(v["paths"][i]), name, self.trials.tag(name), series, bin_ms,
+                           smooth if series else 0), make)
 
     def _average(self, v, blocks, name, series, fs, bin_ms, smooth):
         """(mean, SD, SEM) of these trials' traces at each sample (A.mean_spread)."""
@@ -245,9 +261,8 @@ class Charts:
             for r, y in enumerate(ys):
                 Y[r, :len(y)] = y
             return tuple(np.asarray(a, np.float32) for a in A.mean_spread(Y)[:3])
-        gain = v["looks"].get("gains", {}).get(name, 1.0)
-        return self._keep(("mean", tuple(str(v["paths"][i]) for i in blocks), name, series, gain, bin_ms,
-                           smooth if series else 0), make)
+        return self._keep(("mean", tuple(str(v["paths"][i]) for i in blocks), name, self.trials.tag(name), series,
+                           bin_ms, smooth if series else 0), make)
 
     def _time_chart(self, chart, v, spread, x0, x1, cols):
         """(header, [x, each series]) for a Response or Stimulus chart."""
@@ -415,5 +430,84 @@ class Charts:
             if b - a < 1:
                 return float("nan")
             return float(D.measure(key, np.arange(a, b) / fs, y[a:b], fs))
-        gain = v["looks"].get("gains", {}).get(ch, 1.0)
-        return self._keep(("measure", str(v["paths"][i]), ch, key, when, v["how"], gain), make)
+        return self._keep(("measure", str(v["paths"][i]), ch, key, when, v["how"], self.trials.tag(ch)), make)
+
+    # -- the spikes found (spikes.py) --------------------------------------------------------------
+    def _spikes(self, v: dict):
+        """(what spikes.py found, the trials ticked that were searched, in the Trials pane's
+        order), or a note to show instead."""
+        sp = self.trials.spikes.view()
+        ev, ch = sp["events"], sp["channel"]
+        if not ch:
+            return None, None, "No channel to find spikes on"
+        if ev is None:
+            return None, None, "No spikes found yet: tick Identify spikes in the Spikes panel"
+        _, chosen = self._chosen(v, [ch])
+        if not chosen:
+            return None, None, "No trials ticked: tick some in the Trials pane"
+        return sp, chosen, ""
+
+    def _raster(self, chart: dict, v: dict) -> dict:
+        """Every spike of the units ticked, at its time in its trial, a row per trial ticked
+        (spikecharts.RasterChart), each row marked in its group's color."""
+        sp, chosen, note = self._spikes(v)
+        if note:
+            return {"note": note}
+        ev = sp["events"]
+        rows = {i: r for r, i in enumerate(chosen)}
+        group = {i: g for g, (_, bl) in enumerate(v["shown"]) for i in bl}
+        stems = [p.stem for p in v["paths"]]
+        show = np.isin(ev.unit, sorted(sp["shown"])) & np.isin(ev.block, chosen)
+        units = ev.unit[show]
+        return {"rows": [{"i": i, "stem": stems[i], "c": v["colors"][group[i]] if i in group and group[i] < len(v["colors"])
+                          else None} for i in chosen],
+                "t": np.round(ev.t[show], 5).tolist(), "r": [rows[int(b)] for b in ev.block[show]],
+                "u": units.astype(int).tolist(),
+                "colors": {int(u): with_alpha(sp["color"][u], sp["opacity"][u]) for u in sp["color"]},
+                "end": max(float(v["blocks"][i]["duration_s"]) for i in chosen), "dots": int(chart["fields"].get("dots", 3))}
+
+    def _waveforms(self, chart: dict, v: dict, spread: str) -> dict:
+        """Each unit's spikes (up to MAX_WAVES, faint) behind their average, with its spread
+        (spikecharts.WaveformsChart): the voltage, or its first or second d/dt; normalized
+        to the unit's average peak if asked."""
+        sp, chosen, note = self._spikes(v)
+        if note:
+            return {"note": note}
+        ev, f = sp["events"], chart["fields"]
+        mine = np.isin(ev.block, chosen)
+        if not mine.any():
+            return {"note": "No spikes in the trials ticked"}
+        order, norm, smooth = int(f.get("show") or 0), bool(f.get("norm")), float(f.get("smooth") or 0)
+        tms = np.asarray(ev.wave_t_ms, float)
+        fs = 1000 / float(np.median(np.diff(tms))) if len(tms) > 1 else 1.0
+        deriv = lambda w: np.array([A.derivative(r, fs, order, smooth) for r in w])
+        peak = int(np.argmin(np.abs(tms))) if len(tms) else 0
+        rng = np.random.default_rng(0)
+        out = []
+        for u in sorted(sp["shown"]):
+            w = ev.waves[mine & (ev.unit == u)]
+            if not len(w):
+                continue
+            if norm:
+                size = float(np.abs(w[:, peak]).mean())
+                w = w / size if size > 0 else w
+            shown = rng.choice(len(w), min(MAX_WAVES, len(w)), replace=False)
+            mean = w.mean(0)
+            if order:
+                mean = A.derivative(mean, fs, order, smooth)
+                each, w = deriv(w[shown]), (deriv(w) if spread else w)
+            else:
+                each = w[shown]
+            band = None
+            if spread:
+                _, sd, sem, _ = A.mean_spread(w)
+                band = np.nan_to_num(sd if spread == "sd" else sem).astype(np.float32).tolist()
+            out.append({"u": int(u), "n": int(len(w)), "c": sp["color"][u], "a": sp["opacity"][u],
+                        "mean": np.asarray(mean, np.float32).tolist(), "band": band,
+                        "each": np.asarray(each, np.float32).tolist()})
+        unit = sp["unit"]
+        what = ("V", "dV/dt", "d²V/dt²")[order]
+        return {"t": tms.astype(np.float32).tolist(), "units": out, "spread": spread,
+                "y": {"label": ("÷ the unit's average peak" if not order else f"{what}, ÷ the unit's average peak")
+                      if norm else sp["channel"] if not order else what,
+                      "unit": "" if norm else unit if not order else f"{unit}/s" if order == 1 else f"{unit}/s²"}}

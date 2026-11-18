@@ -5,6 +5,7 @@ file stem, so the file still means the same if blocks are added or removed.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ FILE, SPIKES = "analysis.json", "analysis_spikes.npz"
 BOARD = "board"         # the HTML front end's charts (web/charts.py): kept when the Qt app saves
 PAD_CHARTS = "pad_charts"   # the HTML DataPad's charts of one column against another (web/pad.py): kept too
 KEPT = (BOARD, PAD_CHARTS)
+LOCK = threading.RLock()  # one change at a time: the HTML front end saves its parts from several threads
 
 
 def exists(folder: str | Path) -> bool:
@@ -23,18 +25,34 @@ def exists(folder: str | Path) -> bool:
 
 def save(folder: str | Path, state: dict, events: A.Events | None, stems: list[str]) -> None:
     folder = Path(folder)
-    saved = read_state(folder)
-    state = {**{k: saved[k] for k in KEPT if k in saved and k not in state}, **state}
-    (folder / FILE).write_text(json.dumps(state, indent=2), encoding="utf-8")
-    spikes = folder / SPIKES
-    if events is None:
-        spikes.unlink(missing_ok=True)
-    else:
-        with spikes.open("wb") as f:
+    with LOCK:
+        saved = read_state(folder)
+        state = {**{k: saved[k] for k in KEPT if k in saved and k not in state}, **state}
+        _write(folder, state)
+        save_spikes(folder, events, stems)
+
+
+def _write(folder: Path, state: dict) -> None:
+    """analysis.json, whole or not at all: a reader never finds it half written."""
+    tmp = folder / (FILE + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp.replace(folder / FILE)
+
+
+def save_spikes(folder: str | Path, events: A.Events | None, stems: list[str]) -> None:
+    """analysis_spikes.npz: the spikes found (none: the file goes)."""
+    spikes = Path(folder) / SPIKES
+    with LOCK:
+        if events is None:
+            spikes.unlink(missing_ok=True)
+            return
+        tmp = spikes.with_name(SPIKES + ".tmp")
+        with tmp.open("wb") as f:
             np.savez_compressed(f, stem=np.array(stems)[events.block], t=events.t, unit=events.unit,
                                 amplitude=events.amplitude, waves=events.waves, wave_t_ms=events.wave_t_ms,
                                 level=events.level, duration_s=events.duration_s,
                                 notes=np.array(events.notes, dtype=str))
+        tmp.replace(spikes)
 
 
 def load(folder: str | Path, stems: list[str]) -> tuple[dict, A.Events | None]:
@@ -71,8 +89,7 @@ def save_part(folder: str | Path, key: str, value) -> None:
 def save_parts(folder: str | Path, parts: dict) -> None:
     """Change some parts of the saved settings at once, leaving the rest as they are."""
     folder = Path(folder)
-    state = read_state(folder)
-    state.update(parts)
-    tmp = folder / (FILE + ".tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    tmp.replace(folder / FILE)
+    with LOCK:
+        state = read_state(folder)
+        state.update(parts)
+        _write(folder, state)

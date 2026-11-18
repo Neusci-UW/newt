@@ -1,7 +1,9 @@
 // The Analysis board: the charts you add beside the Trials pane (web/charts.py works out
 // what each draws). Time charts are uPlot strips like Record's, fed traces already shrunk
 // to two points per screen column; zooming asks Python again for just what's on screen.
-// A measure against the stimulus is a square SVG scatter. Uses $, H and esc (analysis.js).
+// A measure against the stimulus is a square SVG scatter; the spikes found (the Spikes
+// panel) show as a raster on a canvas and each unit's waveforms in SVG. Uses $, H and esc
+// (analysis.js).
 'use strict';
 
 (() => {
@@ -16,7 +18,11 @@ const ABOUT = {
   'Response': 'Each channel through the trial: each ticked group’s average, with its spread shaded, or every trial.',
   'Stimulus': 'What the stimulus was in each trial, in its group’s color.',
   'Measure against stimulus': 'One number from each trial (its peak, its area…) against the stimulus: an input–output curve.',
+  'Raster': 'Each spike found, as a dot at its time, a row for each ticked trial: when did the cell fire?',
+  'Waveforms': 'What each unit’s spike looks like: its spikes, faint, behind their average.',
 };
+const SPIKY = new Set(['Raster', 'Waveforms']);
+const SMOOTH = [[0, 'None'], [0.05, '0.05 ms'], [0.1, '0.1 ms'], [0.2, '0.2 ms'], [0.5, '0.5 ms'], [1, '1 ms']];
 
 // ---------------------------------------------------------------- numbers on axes
 function si(big, unit) {            // a prefix for small numbers: 0.02 V reads as 20 mV
@@ -98,11 +104,11 @@ window.boardTrials = (st) => {
 function makeCard(c) {
   const el = document.createElement('div');
   el.className = 'chart';
-  const time = c.kind !== 'Measure against stimulus';
+  const time = c.kind === 'Response' || c.kind === 'Stimulus';
   el.innerHTML = `<div class="chead"><b class="ctitle"></b><span class="cnote"></span><span class="spacer"></span>
       ${time ? '<button class="ib" data-a="whole" title="Show the whole trial (or double-click the chart)">Whole trial</button>' : ''}
       <span class="cbtns"><button class="ib" data-a="up" title="Move this chart up">↑</button><button class="ib" data-a="down" title="Move this chart down">↓</button><button class="ib" data-a="close" title="Remove this chart">×</button></span></div>
-    <div class="crow">${c.kind === 'Stimulus' ? '' : `<div class="seg show" title="Each ticked group's average, every trial in its trial color, or faint trials behind bold averages"><button data-v="avg">Averages</button><button data-v="trials">All trials</button><button data-v="both">Both</button></div>`}<div class="csets"></div></div>
+    <div class="crow">${c.kind === 'Stimulus' || SPIKY.has(c.kind) ? '' : `<div class="seg show" title="Each ticked group's average, every trial in its trial color, or faint trials behind bold averages"><button data-v="avg">Averages</button><button data-v="trials">All trials</button><button data-v="both">Both</button></div>`}<div class="csets"></div></div>
     <div class="cbody"></div>
     ${time ? `<p class="caption hint">Scroll to zoom in time · ${isMac ? '⌘' : 'Ctrl'}-scroll zooms up and down · drag to move along · double-click for the whole trial</p>` : ''}`;
   const card = {el, cfg: c, plots: [], shape: '', seq: 0, head: null, yr: {}, timer: 0, time};
@@ -142,6 +148,13 @@ function fillSets(card) {
         title="${k === 1 ? `How fast ${esc(ch.name)} changes (its slope), per second` : k === 2 ? 'How fast that slope changes, per second' : esc(ch.name) + ' as recorded'}">${k ? s : esc(ch.name)}</button>`).join('')}</span>`).join('')}</span>` + bins;
   } else if (c.kind === 'Stimulus') {
     html = `<span class="cfield muted">${S.how && S.channels.some((ch) => ch.name === S.how) ? esc(S.how) + ', the stimulus channel picked in the Trials pane' : 'The stimulus channel is picked in the Trials pane'}</span>` + bins;
+  } else if (c.kind === 'Raster') {
+    html = `<label class="cfield">Dot size <select data-f="dots">${[1, 2, 3, 4, 5, 6, 8, 10].map((v) => opt(v, v + ' px', f.dots)).join('')}</select></label>
+      <span class="cfield muted">Click a row to look at that trial</span>`;
+  } else if (c.kind === 'Waveforms') {
+    html = `<label class="cfield">Show <select data-f="show">${[[0, 'V'], [1, 'dV/dt'], [2, 'd²V/dt²']].map(([v, t]) => opt(v, t, f.show)).join('')}</select></label>
+      <label class="cfield" title="Each unit's spikes divided by the average size of their peaks (the unit's average peak = ±1), so units compare by shape"><input type="checkbox" data-f="norm"${f.norm ? ' checked' : ''}> Normalize</label>
+      ${+f.show ? `<label class="cfield" title="Differentiating amplifies noise: average over this long first">Smooth first <select data-f="smooth">${SMOOTH.map(([v, t]) => opt(v, t, f.smooth)).join('')}</select></label>` : ''}`;
   } else {
     html = `<label class="cfield">Y <select data-f="channel">${opt('', 'Choose a channel…', f.channel)}${S.channels.filter((ch) => ch.name !== S.how).map((ch) => opt(ch.name, ch.name, f.channel)).join('')}</select>
         <select data-f="measure">${opt('', 'Choose a measure…', f.measure)}${S.y_measures.map(([k, name]) => opt(k, name, f.measure)).join('')}</select></label>
@@ -163,7 +176,8 @@ const sameKind = (c) => {
 function setField(card, el) {
   const k = el.dataset.f;
   if (!k) return;
-  cmd({cmd: 'set', id: card.cfg.id, fields: {[k]: k === 'bin' ? +el.value : el.value}});
+  const v = el.type === 'checkbox' ? el.checked : ['bin', 'dots', 'show', 'smooth'].includes(k) ? +el.value : el.value;
+  cmd({cmd: 'set', id: card.cfg.id, fields: {[k]: v}});
 }
 
 // ---------------------------------------------------------------- data
@@ -182,6 +196,8 @@ async function fetchData(card) {
   if ((r.headers.get('Content-Type') || '').includes('json')) {
     const d = await r.json();
     if (seq !== card.seq) return;
+    if (card.cfg.kind === 'Raster') { card.data = d; return drawRaster(card); }
+    if (card.cfg.kind === 'Waveforms') return drawWaves(card, d);
     return card.time ? note(card, d.note) : drawScatter(card, d);
   }
   const buf = await r.arrayBuffer();
@@ -295,6 +311,7 @@ function setX(card, x0, x1) {
   }
   const xr = B.x || [0, end];
   for (const c of B.cards.values()) {
+    if (c.cfg.kind === 'Raster' && c.data) drawRaster(c);          // the raster's time follows them
     if (!c.time) continue;
     const r = B.x || [0, c.head ? c.head.end : xr[1]];
     c.plots.forEach((pv) => pv.u.setScale('x', {min: r[0], max: r[1]}));
@@ -394,6 +411,109 @@ function drawScatter(card, d) {
   card.el.querySelector('.cnote').textContent = [n && `${n} average${n === 1 ? '' : 's'}`, t && `${t} trial${t === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
   body.innerHTML = s + `<p class="caption">${esc(d.y.label)} ${esc(d.y.when)}, against the stimulus.` +
     (d.missing ? ` ${d.missing} trial${d.missing === 1 ? ' has' : 's have'} no number (no stimulus found in ${d.missing === 1 ? 'it' : 'them'}?).` : '') + '</p>';
+}
+
+// ---------------------------------------------------------------- the spikes found
+// the Spikes panel found new spikes, or a unit was ticked or recolored (sidepanels.js)
+window.boardSpikes = () => { for (const c of B.cards.values()) if (SPIKY.has(c.cfg.kind)) fetchData(c); };
+// the trial looked at in the Trials pane (analysis.js): the raster marks its row
+window.boardCurrent = () => { for (const c of B.cards.values()) if (c.cfg.kind === 'Raster' && c.data) drawRaster(c); };
+
+function drawRaster(card) {
+  const d = card.data, body = card.el.querySelector('.cbody');
+  card.head = null;
+  if (d.note) return note(card, d.note);
+  const rows = d.rows.length, nd = d.t.length;
+  card.el.querySelector('.cnote').textContent = `${nd} spike${nd === 1 ? '' : 's'} in ${rows} trial${rows === 1 ? '' : 's'}`;
+  const L = 76, R = 12, T = 6, Bm = 30;
+  const W = Math.max(200, plotWidth(card)), side = W - L - R;
+  const rowH = Math.max(2, Math.min(14, Math.floor(380 / Math.max(1, rows))));
+  const H = T + rows * rowH + Bm;
+  let cv = body.querySelector('canvas.raster');
+  if (!cv) { body.innerHTML = '<canvas class="raster"></canvas>'; cv = body.querySelector('canvas'); }
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const [x0, x1] = B.x || [0, d.end];
+  const X = (t) => L + (t - x0) / (x1 - x0) * side;
+  const muted = cssv('--muted'), line = cssv('--line');
+  g.font = FONT; g.fillStyle = muted; g.strokeStyle = line; g.lineWidth = 1;
+  const xt = niceTicks(x0, x1), xl = tickText(xt, '');
+  g.textAlign = 'center';
+  xt.forEach((v, k) => {
+    const x = Math.round(X(v)) + 0.5;
+    g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + rows * rowH); g.stroke();
+    g.fillText(xl[k] + ' s', x, T + rows * rowH + 18);
+  });
+  g.strokeRect(L + 0.5, T + 0.5, side, rows * rowH);
+  g.save(); g.translate(16, T + rows * rowH / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center';
+  g.fillText('trial', 0, 0); g.restore();
+  const cur = window.trialsCurrent ? window.trialsCurrent() : null;
+  const at = d.rows.findIndex((r) => r.i === cur);
+  if (at >= 0) { g.fillStyle = 'rgba(86,180,233,.22)'; g.fillRect(L, T + at * rowH, side, rowH); }
+  d.rows.forEach((r, k) => { if (r.c) { g.fillStyle = r.c; g.fillRect(L - 8, T + k * rowH, 6, rowH); } });
+  g.save(); g.beginPath(); g.rect(L, T, side, rows * rowH); g.clip();
+  const sz = Math.max(1, Math.min(d.dots, rowH + 2)), half = sz / 2;
+  let last = null;
+  for (let k = 0; k < nd; k++) {
+    const t = d.t[k];
+    if (t < x0 || t > x1) continue;
+    const c = d.colors[d.u[k]];
+    if (c !== last) { g.fillStyle = c; last = c; }
+    g.fillRect(X(t) - half, T + (d.r[k] + 0.5) * rowH - half, sz, sz);
+  }
+  g.restore();
+  cv.onclick = (e) => {
+    const k = Math.floor((e.clientY - cv.getBoundingClientRect().top - T) / rowH);
+    if (k >= 0 && k < rows && window.showTrial) window.showTrial(d.rows[k].i);
+  };
+  cv.onmousemove = (e) => {
+    const k = Math.floor((e.clientY - cv.getBoundingClientRect().top - T) / rowH);
+    cv.title = k >= 0 && k < rows ? d.rows[k].stem : '';
+  };
+}
+
+function drawWaves(card, d) {
+  card.head = null;
+  const body = card.el.querySelector('.cbody');
+  if (d.note) return note(card, d.note);
+  const t = d.t, us = d.units;
+  if (!us.length) return note(card, 'No units ticked: tick one in the Spikes panel');
+  const ys = us.flatMap((u) => [...u.mean.map((v, k) => v - (u.band ? u.band[k] : 0)), ...u.mean.map((v, k) => v + (u.band ? u.band[k] : 0)),
+                                ...u.each.flat()]).filter((v) => isFinite(v));
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y1 - y0 < 1e-15) { y0 -= 1; y1 += 1; }
+  const py = (y1 - y0) * 0.06; y0 -= py; y1 += py;
+  const x0 = t[0], x1 = t[t.length - 1];
+  const L = 78, R = 16, T = 10, Bm = 50;
+  const W = Math.max(260, Math.min(620, body.clientWidth)), side = W - L - R, h = Math.round(side * 0.62), Hh = h + T + Bm;
+  const X = (v) => (L + (v - x0) / (x1 - x0) * side).toFixed(1), Y = (v) => (T + h - (v - y0) / (y1 - y0) * h).toFixed(1);
+  const xt = niceTicks(x0, x1), yt = niceTicks(y0, y1), yl = tickText(yt, d.y.unit);
+  const yu = (yl.find((s) => s.includes(' ')) || '').split(' ').slice(1).join(' ');
+  let s = `<svg class="scatter" viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}">`;
+  s += xt.map((v) => `<line class="grid" x1="${X(v)}" x2="${X(v)}" y1="${T}" y2="${T + h}"/>`).join('');
+  s += yt.map((v) => `<line class="grid" x1="${L}" x2="${L + side}" y1="${Y(v)}" y2="${Y(v)}"/>`).join('');
+  s += `<rect class="frame" x="${L}" y="${T}" width="${side}" height="${h}"/>`;
+  s += xt.map((v) => `<text class="tick" x="${X(v)}" y="${T + h + 16}" text-anchor="middle">${minus(+v.toFixed(3))}</text>`).join('');
+  s += yt.map((v, k) => `<text class="tick" x="${L - 6}" y="${+Y(v) + 4}" text-anchor="end">${esc(yl[k].split(' ')[0])}</text>`).join('');
+  s += `<text class="alab" x="${L + side / 2}" y="${Hh - 8}" text-anchor="middle">ms from the peak</text>`;
+  s += `<text class="alab" transform="translate(14 ${T + h / 2}) rotate(-90)" text-anchor="middle">${esc(d.y.label)}${yu ? ` (${esc(yu)})` : ''}</text>`;
+  const path = (y) => y.map((v, k) => `${k ? 'L' : 'M'}${X(t[k])} ${Y(v)}`).join('');
+  for (const u of us) {
+    if (u.each.length) s += `<path d="${u.each.map(path).join('')}" stroke="${u.c}" stroke-opacity="${(0.16 * u.a).toFixed(3)}" fill="none" stroke-width="1"/>`;
+  }
+  for (const u of us) {
+    if (u.band) {
+      const hi = u.mean.map((v, k) => v + u.band[k]), lo = u.mean.map((v, k) => v - u.band[k]).reverse();
+      s += `<path d="${path(hi)}${lo.map((v, k) => `L${X(t[t.length - 1 - k])} ${Y(v)}`).join('')}Z" fill="${u.c}" fill-opacity="${(0.22 * u.a).toFixed(3)}" stroke="none"/>`;
+    }
+    s += `<path d="${path(u.mean)}" stroke="${u.c}" stroke-opacity="${u.a}" fill="none" stroke-width="3"><title>Unit ${u.u + 1}: average of ${u.n} spike${u.n === 1 ? '' : 's'}</title></path>`;
+  }
+  s += '</svg>';
+  card.el.querySelector('.cnote').textContent = us.map((u) => `Unit ${u.u + 1}: ${u.n}`).join(' · ');
+  body.innerHTML = s + `<p class="caption">Up to 150 of each unit’s spikes, faint, behind their average${d.spread ? ` (± ${d.spread.toUpperCase()} shaded)` : ''}.</p>`;
 }
 
 // ---------------------------------------------------------------- the board's own controls

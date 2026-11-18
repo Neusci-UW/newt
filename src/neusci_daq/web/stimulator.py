@@ -72,6 +72,8 @@ class Stimulator:
                     self.values[k] = bool(v)
                 elif k in INTS:
                     self.values[k] = max(0 if k == "repeats" else 1, int(float(v)))
+                elif k in ("before", "after"):          # save just around each stimulus (ms)
+                    self.values[k] = max(0.0, float(v))
                 else:
                     self.values[k] = float(v)
             self._save()
@@ -104,7 +106,7 @@ class Stimulator:
             self.sent += 1
             self.log.insert(0, f"#{self.sent}  {desc}  {time.strftime('%H:%M:%S')}")
             del self.log[200:]
-            self.live.sent(desc, s)
+            self.live.sent(desc, s, wave)
             self._say("")
             if self.repeating:
                 self.rep_sent += 1

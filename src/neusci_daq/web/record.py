@@ -9,14 +9,16 @@ samples isn't kept. Each stimulus sent while recording is saved with the trial a
 a comment ("Stim: Pulse 5 V"); comments typed while recording are saved at the newest
 sample; the trial label is saved with each trial. A trial that sent two or more stimuli
 (Repeat, Raise, Stimulus Design's trials) becomes a trial for each when it ends, the whole
-one hidden (trialsplit), as Qt does.
+one hidden (trialsplit), as Qt does. Or, with Simple Stimulus's "save just around each
+stimulus" on, each stimulus sent becomes a trial of its own, Before it to After it, and
+nothing in between is saved (stimwindows.py, on a thread of its own here).
 
 A new session is a folder in data/unsaved/ named for when it started, as the Qt app makes
 before it's saved; the next launch keeps adding to it, until New session. Or keep adding to
 any session recorded with these same channels.
 
-Not yet as in Qt: Simple Stimulus's "save just around each stimulus" (this records straight
-through), video, and naming or saving the session (the Qt app's File › Save does that).
+Not yet as in Qt: video, a bar on the live trace for each trial, and naming or saving the
+session (the Qt app's File › Save does that).
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import recorder, session, trialsplit
+from ..stimwindows import StimWindows
 from .stimulator import read_settings, update_settings
 from .trials import session_folders, session_name
 
@@ -37,6 +40,9 @@ class Recording:
         self.live, self.cfg, self.stimulator = live, live.cfg, stimulator
         self.data = Path(data)
         self.rec = recorder.Recorder(live.backend)
+        self.win = StimWindows(live)       # "save just around each stimulus"
+        self.n_windows = 0                 # trials it saved this run
+        self._token = None                 # its saving thread's, while it runs
         self.on = False                    # Record's switch
         self.folder: Path | None = None    # the session trials go to (made at the first)
         self.blocks: list[Path] = []       # its trials (not the whole ones that were split)
@@ -92,10 +98,10 @@ class Recording:
     def set_on(self, on: bool) -> None:
         with self._lock:
             self.on = on
-            if on and self.live.backend.running and not self.rec.recording:
-                self._start()
-            elif not on and self.rec.recording:
-                self._stop()
+            if on and self.live.backend.running and not self.busy:
+                self._begin()
+            elif not on:
+                self._end()
 
     def comment(self, text: str) -> None:
         text = text.strip()
@@ -124,7 +130,7 @@ class Recording:
 
     def new_session(self) -> None:
         with self._lock:
-            if self.rec.recording:
+            if self.busy:
                 raise ValueError("Stop recording first.")
             self.folder, self.blocks = None, []
             update_settings(last_live_session="")
@@ -132,7 +138,7 @@ class Recording:
 
     def add_to(self, folder: Path) -> None:
         with self._lock:
-            if self.rec.recording:
+            if self.busy:
                 raise ValueError("Stop recording first.")
             problems, warnings = session.append_check(folder, self.cfg)
             if problems:
@@ -146,23 +152,33 @@ class Recording:
     # -- from Live and the stimulators -------------------------------------------------
     def run_started(self) -> None:
         """The stream just started: with Record on, a trial starts with it. Waits (up to 1 s)
-        for its first sample, so a stimulus that started the run is in the trial, at its time."""
+        for its first sample, so a stimulus that started the run is in the trial, at its time;
+        saving just around each stimulus, for its Before (the baseline) to be recorded first,
+        as Qt does (at least 0.3 s, at most 3)."""
         with self._lock:
-            if not self.on or self.rec.recording:
+            if not self.on or self.busy:
                 return
-            self._start()
+            self._begin()
+            settle = None if self.rec.recording else max(0.3, float(self.stimulator.values.get("before", 100.0)) / 1000 + 0.1)
+        if settle is not None:
+            time.sleep(min(settle, 3.0))
+            return
         end = time.monotonic() + 1.0
         while not self.rec.block_started and time.monotonic() < end and self.rec.recording:
             time.sleep(0.005)
 
     def run_stopping(self) -> None:
         with self._lock:
-            if self.rec.recording:
-                self._stop()
+            self._end()
 
-    def sent(self, desc: str, stimulus=None) -> None:
-        """A stimulus just went out: saved with the trial being recorded, and noted as a comment."""
+    def sent(self, desc: str, stimulus=None, wave=None) -> None:
+        """A stimulus just went out: saved with the trial being recorded, and noted as a
+        comment; or, saving just around each stimulus, its window kept once it's all in."""
         with self._lock:
+            if self.win.running:
+                if wave is not None:
+                    self.win.sent(wave, self.cfg.stim_rate, desc, stimulus, None, (self.cfg.stim_output, ""))
+                return
             if not self.rec.recording:
                 return
             self._comment(f"Stim: {desc}" if not desc.startswith("Stimulus ") else desc)
@@ -171,13 +187,70 @@ class Recording:
             self.n_sent += 1
 
     # -- trials ----------------------------------------------------------------------
-    def _start(self) -> None:
+    @property
+    def busy(self) -> bool:
+        """Recording a trial, or saving just around each stimulus."""
+        return self.rec.recording or self.win.running
+
+    def _windows(self) -> bool:
+        return bool(self.stimulator.values.get("windows"))
+
+    def _begin(self) -> None:
+        if self._windows():
+            v = self.stimulator.values
+            self.win.start(float(v.get("before", 100.0)), float(v.get("after", 500.0)))
+            self.n_windows = 0
+            self.message, self.error = (f"Saving just around each stimulus: {v['before']:g} ms before it to "
+                                        f"{v['after']:g} ms after."), False
+            self._token = token = object()
+            threading.Thread(target=self._windows_loop, args=(token,), daemon=True, name="web-windows").start()
+        else:
+            self._start()
+
+    def _end(self) -> None:
+        if self.win.running:
+            self._token = None
+            for r in self.win.stop():               # the last ones, with what arrived
+                self._write_window(r)
+        if self.rec.recording:
+            self._stop()
+
+    def _windows_loop(self, token) -> None:
+        """Every 50 ms, off any page's thread: save the windows whose After has all come in."""
+        while True:
+            time.sleep(0.05)
+            with self._lock:
+                if self._token is not token or not self.win.running:
+                    return
+                for r in self.win.tick():
+                    self._write_window(r)
+
+    def _write_window(self, r) -> None:
+        try:
+            path = self.win.write(r, self._folder, self.label)
+        except OSError as e:
+            self.message, self.error = f"Couldn't save the stimulus's trial: {e}", True
+            return
+        if path is None:
+            return
+        self.blocks.append(path)
+        self.n_windows += 1
+        n = self.n_windows
+        self.message, self.error = (f"Saved {path.stem}, just around its stimulus "
+                                    f"({n} trial{'' if n == 1 else 's'} this run)."), False
+        self._saved(path.parent)
+
+    def _folder(self) -> Path:
+        """The session's folder, made now if there's none yet."""
         if self.folder is None:
             self.folder = self.unsaved() / datetime.now().strftime("session_%Y%m%d_%H%M%S")
             self.blocks = []
             update_settings(last_live_session=str(self.folder))
         self.folder.mkdir(parents=True, exist_ok=True)
-        path = self.rec.start(session.next_block_path(self.folder))
+        return self.folder
+
+    def _start(self) -> None:
+        path = self.rec.start(session.next_block_path(self._folder()))
         if self.label:
             self.rec.set_attr("label", self.label)
         self.blocks.append(path)
@@ -239,7 +312,7 @@ class Recording:
         with self._lock:
             rec = self.rec
             return {
-                "on": self.on, "recording": rec.recording,
+                "on": self.on, "recording": rec.recording, "windows": self.win.running,
                 "trial": rec.path.stem if rec.recording and rec.path else "",
                 "secs": rec.samples_written / max(float(self.live.backend.actual_rate), 1e-9) if rec.recording else 0.0,
                 "session": self.folder.name if self.folder else "", "folder": str(self.folder or ""),
@@ -250,4 +323,6 @@ class Recording:
             }
 
     def close(self) -> None:
+        with self._lock:
+            self._end()
         self.rec.close()

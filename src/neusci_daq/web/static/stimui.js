@@ -108,6 +108,12 @@ const StimUI = (() => {
               <button class="rep" data-a="repeat">Start repeating</button><button data-a="stop">Stop</button></div>
             <p class="ssmsg st"></p><p class="ssmsg say"></p>
           </div>
+          <div class="card"><p class="sect-title">Record</p>
+            <label class="check"><input type="checkbox" data-k="windows"> <span>With Record on, save just around each stimulus:
+              Before <input type="number" class="inl" data-k="before" step="10" min="0"> ms,
+              After <input type="number" class="inl" data-k="after" step="50" min="0"> ms</span></label>
+            <p class="caption">Each stimulus becomes a trial of its own, from Before it to After it (always the whole
+              stimulus), and nothing in between is saved. Off: Record saves everything.</p></div>
           <div class="card"><p class="sect-title">Sent</p><ol class="sslog"></ol></div>
           <div class="card"><p class="sect-title">Lab presets</p><div class="sspresets"></div>
             <div class="prow"><input type="text" placeholder="Name for these settings"><button data-a="save">Save</button></div></div>
@@ -147,6 +153,7 @@ const StimUI = (() => {
           if (inp.type === 'checkbox') inp.checked = !!v[inp.dataset.k];
           else inp.value = +(+v[inp.dataset.k]).toPrecision(6);
         }
+        qa('[data-k=before],[data-k=after]').forEach((inp) => { inp.disabled = !v.windows; });
         qa('.uu').forEach((s) => { s.textContent = u; });
         const fire = q('[data-a=fire]'), rep = q('[data-a=repeat]'), stop = q('[data-a=stop]');
         fire.disabled = !st.ok || st.repeating;

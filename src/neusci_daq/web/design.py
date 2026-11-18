@@ -280,7 +280,7 @@ class Design:
         self.sent += 1
         self.log.insert(0, f"#{self.sent}  {desc}  {time.strftime('%H:%M:%S')}")
         del self.log[200:]
-        self.live.sent(desc, stimulus)
+        self.live.sent(desc, stimulus, wave)
 
     def once(self) -> None:
         """The trial the picture shows, once."""

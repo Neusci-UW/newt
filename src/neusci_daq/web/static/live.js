@@ -197,7 +197,8 @@ function showState(st) {
   $('chunk').textContent = st.chunk_ms.toFixed(0) + ' ms';
   const status = $('status');
   const recording = st.record && st.record.recording;
-  status.textContent = st.error ? st.error : st.running ? `${recording ? 'Recording' : 'Running'} · ${st.fs / 1000} kHz` : 'Stopped';
+  const what = recording ? 'Recording' : st.record && st.record.windows ? 'Saving around each stimulus' : 'Running';
+  status.textContent = st.error ? st.error : st.running ? `${what} · ${st.fs / 1000} kHz` : 'Stopped';
   status.classList.toggle('bad', !!st.error);
   if (st.problem) problem = [st.problem, performance.now() + 6000];     // shown for a while
   if (st.record) showRecord(st.record, problem && performance.now() < problem[1] ? problem[0] : '');
@@ -225,13 +226,16 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>':
 function showRecord(r, problem) {
   const btn = $('rec');
   btn.classList.toggle('live', r.recording);
-  $('rectext').textContent = r.recording ? `Stop recording · ${clock(r.secs)}` : r.on ? 'Record: On' : 'Record: Off';
-  btn.title = r.recording ? `Recording ${r.trial}: click to stop recording` : r.on
-    ? (S && S.running ? 'Click to turn recording off' : 'Run will record too. Click to turn recording off.')
+  $('rectext').textContent = r.recording ? `Stop recording · ${clock(r.secs)}` : r.windows ? 'Record: On · each stimulus'
+    : r.on ? 'Record: On' : 'Record: Off';
+  btn.title = r.recording ? `Recording ${r.trial}: click to stop recording`
+    : r.windows ? 'Saving just around each stimulus (set on the Stimulator tab). Click to turn recording off.'
+    : r.on ? (S && S.running ? 'Click to turn recording off' : 'Run will record too. Click to turn recording off.')
     : 'Turn on to record: now while running, or as soon as you press Run';
   const box = $('comment');
   box.disabled = !r.recording;
-  box.placeholder = r.recording ? 'Type a comment, press Enter' : 'Press Record to add comments';
+  box.placeholder = r.recording ? 'Type a comment, press Enter'
+    : r.windows ? 'Each stimulus is saved as its own trial, with no comments' : 'Press Record to add comments';
   if (document.activeElement !== $('label')) $('label').value = r.label;
   $('sname').textContent = r.session || 'None yet';
   const n = r.n_trials;
@@ -239,8 +243,8 @@ function showRecord(r, problem) {
     ? `${n} trial${n === 1 ? '' : 's'}${r.recording ? ', one being recorded' : ''}` +
       (r.unsaved ? ' · kept in data/unsaved, as the Qt app keeps a session it hasn\'t saved yet' : '')
     : 'Your first trial starts one, in data/unsaved, as the Qt app does.';
-  $('newsess').disabled = r.recording || !r.session;
-  $('addto').disabled = r.recording;
+  $('newsess').disabled = r.recording || r.windows || !r.session;
+  $('addto').disabled = r.recording || r.windows;
   const msg = $('recmsg');
   msg.textContent = problem || (r.splitting ? 'Making a trial of each stimulus…' : r.message);
   msg.classList.toggle('bad', !!problem || r.error);

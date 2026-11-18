@@ -91,11 +91,11 @@ class Live:
         self.cols = max(50, min(4000, int(n)))
         self._dirty = True
 
-    def sent(self, desc: str, stimulus=None) -> None:
-        """A stimulator just sent `stimulus` (stim.Stimulus, described as `desc`)."""
+    def sent(self, desc: str, stimulus=None, wave=None) -> None:
+        """A stimulator just sent `stimulus` (stim.Stimulus, described as `desc`, as `wave`)."""
         self.last_stim = desc
         if self.recording is not None:
-            self.recording.sent(desc, stimulus)
+            self.recording.sent(desc, stimulus, wave)
 
     def state(self) -> dict:
         rates = self.backend.rates(10.0) if self.backend.running and hasattr(self.backend, "rates") else []

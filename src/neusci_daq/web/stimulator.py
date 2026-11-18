@@ -104,7 +104,7 @@ class Stimulator:
             self.sent += 1
             self.log.insert(0, f"#{self.sent}  {desc}  {time.strftime('%H:%M:%S')}")
             del self.log[200:]
-            self.live.last_stim = desc
+            self.live.sent(desc, s)
             self._say("")
             if self.repeating:
                 self.rep_sent += 1

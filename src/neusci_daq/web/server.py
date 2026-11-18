@@ -3,7 +3,8 @@
 GET /                 the first page (Record)      GET /static/...  the pages and their files
 GET /live/stream      never-ending binary: [u32 length][frame] for every frame (see Live._build)
 GET /live/state       JSON: channels, running, rates, ...
-POST /live/cmd        JSON {"cmd": ...}: run, window, cols, lag (the page's lag numbers, printed)
+POST /live/cmd        JSON {"cmd": ...}: run, window, cols, lag (the page's lag numbers, printed);
+                      record, comment, label, new_session, add_to, sessions (Recording.command)
 GET /stim/state       JSON: Simple Stimulus's settings, what was sent, presets (see Stimulator.state)
 POST /stim/cmd        JSON {"cmd": ...}: set, fire, repeat, stop, preset_save, preset_load, preset_delete
 GET /design/state     JSON: Stimulus Design's segments, trials, run (see Design.state); ?pic=N leaves
@@ -28,14 +29,15 @@ from pathlib import Path
 
 from .design import Design
 from .live import Live
+from .record import COMMANDS as RECORD_COMMANDS, Recording
 from .stimulator import Stimulator
 from .trials import Trials
 
 STATIC = Path(__file__).parent / "static"
 
 
-def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, key: str,
-                port: int = 0) -> ThreadingHTTPServer:
+def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Design, recording: Recording,
+                key: str, port: int = 0) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):          # quiet
             pass
@@ -113,6 +115,8 @@ def make_server(live: Live, trials: Trials, stimulator: Stimulator, design: Desi
                 live.set_window(d["s"])
             elif cmd == "cols":
                 live.set_cols(d["n"])
+            elif cmd in RECORD_COMMANDS:
+                return recording.command(d)
             elif cmd == "lag":
                 print("lag ({engine}, {vis}): Python→screen {age_med:.0f} ms median, {age_p95:.0f} ms p95 "
                       "(→page {net_med:.0f}, →canvas {canvas_med:.0f}) · draw {draw_ms:.2f} ms · {fps:.0f} frames/s "

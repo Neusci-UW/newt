@@ -271,7 +271,7 @@ class Design:
             raise ValueError("No stimulator: it needs the simulated (or nidaqmx) backend.")
         return out
 
-    def _send(self, wave: np.ndarray, desc: str) -> None:
+    def _send(self, wave: np.ndarray, desc: str, stimulus=None) -> None:
         """Out now (acquiring first, if it isn't, as the Qt app does), and logged."""
         out = self._output()
         if not self.live.backend.running:
@@ -280,7 +280,7 @@ class Design:
         self.sent += 1
         self.log.insert(0, f"#{self.sent}  {desc}  {time.strftime('%H:%M:%S')}")
         del self.log[200:]
-        self.live.last_stim = desc
+        self.live.sent(desc, stimulus)
 
     def once(self) -> None:
         """The trial the picture shows, once."""
@@ -295,7 +295,7 @@ class Design:
             st = self.stim.at_trial(self.cur)
             wave = st.waveform(self.cfg.stim_rate)
             stim.check_limit(wave, self.cfg.stim_max_v)
-            self._send(wave, f"Trial {self.cur + 1}: " + st.describe(self.units, self.k))
+            self._send(wave, f"Trial {self.cur + 1}: " + st.describe(self.units, self.k), st)
 
     def run(self) -> None:
         with self._lock:
@@ -342,7 +342,7 @@ class Design:
                         stim.check_limit(t.wave, self.cfg.stim_max_v)
                         desc = (f"Stimulus {tr.n}/{len(self.plan)}, trial {tr.a:g}: "
                                 + t.stimulus.describe(self.units, self.k))
-                        self._send(t.wave, desc)
+                        self._send(t.wave, desc, t.stimulus)
                     except (ValueError, RuntimeError) as e:
                         return self._end(f"Stopped at stimulus {tr.n}: {e}", True)
                     self.cur = int(tr.a) - 1

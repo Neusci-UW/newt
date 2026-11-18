@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .design import Design
 from .live import Live
+from .record import Recording
 from .server import make_server
 from .stimulator import Stimulator
 from .trials import Trials, session_folders
@@ -30,16 +31,19 @@ def main() -> None:
     args = ap.parse_args()
 
     live = Live()
-    if args.run:
-        live.run(True)
     stimulator = Stimulator(live)
     design = Design(live, stimulator)
-    trials = Trials(Path(args.data).expanduser().resolve())
+    data = Path(args.data).expanduser().resolve()
+    trials = Trials(data)
+    recording = Recording(live, stimulator, data)
+    recording.on_saved = trials.added          # a new trial shows on Analysis
+    if args.run:
+        live.run(True)
     first = Path(args.session) if args.session else next(iter(session_folders(trials.data)), None)
     if first is not None:           # read while the window opens
         threading.Thread(target=trials.open, args=(first,), daemon=True, name="web-open").start()
     key = args.key or secrets.token_urlsafe(16)
-    srv = make_server(live, trials, stimulator, design, key, args.port)
+    srv = make_server(live, trials, stimulator, design, recording, key, args.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/#k={key}"
     print(f"serving {url}", flush=True)
     try:
@@ -58,7 +62,8 @@ def main() -> None:
     finally:
         design.stop()
         stimulator.stop()
-        live.close()
+        live.close()                   # (ends the trial being recorded)
+        recording.close()
         srv.server_close()
 
 

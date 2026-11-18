@@ -24,12 +24,19 @@ NONE_FOUND = "No stimulus found"
 
 
 def session_folders(data: Path) -> list[Path]:
-    """Session folders under the data folder (and data/open, where .newt files unpack), newest first."""
+    """Session folders under the data folder (and data/open, where .newt files unpack, and
+    data/unsaved, where Record starts new ones), newest first."""
     found = []
-    for base in (data, data / "open"):
+    for base in (data, data / "open", data / "unsaved"):
         if base.is_dir():
             found += [p for p in base.iterdir() if p.is_dir() and session.is_session(p)]
     return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def session_name(p: Path, data: Path) -> str:
+    """A session's name in the lists: where it is, if it isn't straight in the data folder."""
+    where = {data / "open": " (opened)", data / "unsaved": " (recorded here, not saved yet)"}
+    return p.name + where.get(p.parent, "")
 
 
 class Trials:
@@ -60,6 +67,15 @@ class Trials:
             self.how = self._default_how()
             self._state = self._auto = None
             self.busy = ""
+
+    def added(self, folder: Path) -> None:
+        """Record added trials to `folder`: read again if it's the one open (or none is), and
+        the list of sessions made again."""
+        with self._lock:
+            again = self.folder is None or Path(self.folder).resolve() == Path(folder).resolve()
+            self._state = None
+        if again:
+            self.open(folder)
 
     def names(self) -> list[str]:
         good = next((b for b in self.blocks if b is not None), None)
@@ -146,8 +162,7 @@ class Trials:
         n = len([x for x in names if x != NONE_FOUND])
         return {
             "folder": str(self.folder) if self.folder else "", "name": self.folder.name if self.folder else "",
-            "sessions": [{"path": str(p), "name": p.name if p.parent == self.data else f"{p.name} (opened)"}
-                         for p in session_folders(self.data)],
+            "sessions": [{"path": str(p), "name": session_name(p, self.data)} for p in session_folders(self.data)],
             "how": self.how, "channels": self.names(),
             "can_sent": any(grouping.sent_key(b) for b in self.blocks),
             "can_notes": any(b is not None and A.stimulus_notes(b["comments"]) for b in self.blocks),

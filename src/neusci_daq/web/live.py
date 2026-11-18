@@ -57,6 +57,7 @@ class Live:
         self.window_s = 5.0
         self.cols = 1200              # screen columns the page draws (it tells us)
         self.last_stim = ""              # what the Stimulator sent last (stimulator.py)
+        self.recording = None            # Record (record.py), once it's made
         self._clear = False           # the pump empties the ring (it alone touches it)
         self._dirty = True            # make a frame even without new data (window changed...)
         self._newest_wall = 0.0       # wall time (ms) the newest chunk reached us
@@ -68,10 +69,15 @@ class Live:
 
     # -- commands from the page ---------------------------------------------------
     def run(self, on: bool) -> None:
+        rec = self.recording
         if on and not self.backend.running:
             self._clear = True
             self.backend.start()
+            if rec is not None:            # with Record on, a trial starts with the run
+                rec.run_started()
         elif not on and self.backend.running:
+            if rec is not None:            # the trial ends; Record stays on for the next Run
+                rec.run_stopping()
             if self.output is not None:
                 self.output.stop()
             self.backend.stop()
@@ -84,6 +90,12 @@ class Live:
     def set_cols(self, n: int) -> None:
         self.cols = max(50, min(4000, int(n)))
         self._dirty = True
+
+    def sent(self, desc: str, stimulus=None) -> None:
+        """A stimulator just sent `stimulus` (stim.Stimulus, described as `desc`)."""
+        self.last_stim = desc
+        if self.recording is not None:
+            self.recording.sent(desc, stimulus)
 
     def state(self) -> dict:
         rates = self.backend.rates(10.0) if self.backend.running and hasattr(self.backend, "rates") else []
@@ -98,6 +110,7 @@ class Live:
             "window_s": self.window_s, "windows": WINDOWS,
             "fs": self.backend.actual_rate, "chunk_ms": 1000 * self.cfg.chunk_size / self.cfg.sample_rate,
             "stim_busy": bool(busy), "last_stim": self.last_stim,
+            "record": self.recording.state() if self.recording is not None else None,
         }
 
     def close(self) -> None:

@@ -30,6 +30,7 @@ from typing import Callable
 import numpy as np
 
 from . import analysis as A
+from . import groupsfile
 from . import stimmeasures as SM
 from . import trialfile
 from .stim import Stimulus
@@ -194,3 +195,19 @@ def split_at_rest(path: str | Path, stim_channel: str, before_ms: float, next_pa
         out.append((c.lo, c.hi, {"stimuli": json.dumps(sent),
                                  "split_from": json.dumps({"trial": path.stem, "stimulus": k + 1, "at_rest": True})}))
     return _write(path, rec, out, next_path)
+
+
+def hide_originals(made: list[tuple[Path, list]]) -> None:
+    """After splits [(the original, its new trials from split())]: each original is hidden in
+    its session's groups (pages.json), so nothing counts twice (tick it to bring it back),
+    and the new trials get the channel colors you gave the original."""
+    for folder in {p.parent for p, _ in made}:
+        stems = [p.stem for p, _ in made if p.parent == folder]
+        d = groupsfile.load(folder)
+        d["hidden_trials"] = [s for s in d["hidden_trials"] if s not in stems] + stems
+        d["shown_trials"] = [s for s in d["shown_trials"] if s not in stems]
+        groupsfile.save(folder, d)
+    for p, new in made:
+        colors = trialfile.load_edits(p.parent)["colors"].get(p.stem)
+        if colors:
+            trialfile.recolor_blocks([q for q, _, _ in new], colors)

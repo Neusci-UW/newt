@@ -15,6 +15,24 @@
 .sval{font-family:var(--font-mono);font-size:13px;min-width:86px;font-variant-numeric:tabular-nums}
 .srate{font-size:13px;color:var(--muted)}
 .shead .seg button{padding:2px 10px;font-size:12.5px}
+/* Record: a red dot while it's on; red all over while a trial is being recorded */
+#rec .dot{background:var(--bad);margin-right:6px}
+#rec.live{background:var(--bad);border-color:var(--bad);color:var(--surface);font-weight:500}
+#rec.live .dot{background:var(--surface);border-radius:2px}
+.recrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:8px 0 10px}
+.recrow label{font-size:13.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.recrow input[type=text],#session select{font:inherit;font-size:13.5px;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);border-radius:7px;padding:4px 8px}
+#label{width:130px}
+#comment{flex:1;min-width:200px}
+#comment:disabled{opacity:.6}
+#session .sname{font-family:var(--font-mono);font-size:13px;overflow-wrap:anywhere}
+#session .btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#session select{max-width:100%}
+#notes{list-style:none;margin:0;padding:0;font-size:13px;max-height:140px;overflow:auto}
+#notes li{display:flex;gap:8px}
+#notes b{font-family:var(--font-mono);font-weight:500;color:var(--muted);min-width:48px;text-align:right}
+#recmsg.bad{color:var(--bad)}
 </style>
 </head>
 <body>
@@ -23,20 +41,39 @@
     <h1>Live recording</h1>
     <p>Four inputs from the simulated rig: two cells recorded from inside, one from outside, and the
       stimulus, which drives cell 1. Cell 1 excites cell 2, cell 2 excites cell 3, and cell 3 inhibits cell 1.
-      Press Run, then Stimulate.</p>
+      Press Run, then Stimulate. Turn Record on to save what comes in as a trial you can look at in Analysis.</p>
   </header>
   <div class="top">
     <section class="card stage">
       <div class="runbar">
         <button id="run" class="primary">Run</button>
+        <button id="rec" title="Turn on to record: now while running, or as soon as you press Run"><span class="dot"></span><span id="rectext">Record: Off</span></button>
         <span class="runlab">Window</span>
         <div class="seg" id="win"></div>
         <span class="spacer"></span>
         <span class="status" id="status">Stopped</span>
       </div>
+      <div class="recrow">
+        <label>Trial label <input type="text" id="label" placeholder="e.g. Cell 1" title="Saved with each trial from now on"></label>
+        <input type="text" id="comment" placeholder="Press Record to add comments" disabled
+               title="Saved with the trial at the newest sample. Press C to type one.">
+      </div>
       <div id="strips"></div>
     </section>
     <aside class="panel">
+      <div class="card" id="session">
+        <p class="sect-title">Session</p>
+        <div class="sname" id="sname">–</div>
+        <p class="caption" id="scount"></p>
+        <div class="btns">
+          <button id="newsess" title="The next trial starts a new session">New session</button>
+          <select id="addto" title="Keep adding trials to a session recorded with these same channels">
+            <option value="">Keep adding to…</option>
+          </select>
+        </div>
+        <p class="caption" id="recmsg"></p>
+        <ul id="notes"></ul>
+      </div>
       <div class="card" id="dock"></div>
       <div class="card">
         <p class="sect-title">Lag</p>

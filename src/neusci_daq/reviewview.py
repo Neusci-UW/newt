@@ -251,16 +251,7 @@ class ReviewMixin:
         results, marks = got
         made = [(p, new) for p, new, _ in results if new]
         failed = [p.name for p, _, err in results if err is not None]
-        for folder in {p.parent for p, _ in made}:          # the originals: hidden, so nothing counts twice
-            stems = [p.stem for p, _ in made if p.parent == folder]
-            d = groupsfile.load(folder)
-            d["hidden_trials"] = [s for s in d["hidden_trials"] if s not in stems] + stems
-            d["shown_trials"] = [s for s in d["shown_trials"] if s not in stems]
-            groupsfile.save(folder, d)
-        for p, new in made:                                 # the channel colors you gave the original
-            colors = trialfile.load_edits(p.parent)["colors"].get(p.stem)
-            if colors:
-                trialfile.recolor_blocks([q for q, _, _ in new], colors)
+        trialsplit.hide_originals(made)      # the originals: hidden, so nothing counts twice
         paths = [q for _, new in made for q, _, _ in new]
         for q in paths:
             if self.session_dir is not None and q.parent == Path(self.session_dir):

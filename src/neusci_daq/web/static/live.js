@@ -196,8 +196,11 @@ function showState(st) {
   $('run').textContent = st.running ? 'Stop' : 'Run';
   $('chunk').textContent = st.chunk_ms.toFixed(0) + ' ms';
   const status = $('status');
-  status.textContent = st.error ? st.error : st.running ? `Recording ${st.fs / 1000} kHz` : 'Stopped';
+  const recording = st.record && st.record.recording;
+  status.textContent = st.error ? st.error : st.running ? `${recording ? 'Recording' : 'Running'} · ${st.fs / 1000} kHz` : 'Stopped';
   status.classList.toggle('bad', !!st.error);
+  if (st.problem) problem = [st.problem, performance.now() + 6000];     // shown for a while
+  if (st.record) showRecord(st.record, problem && performance.now() < problem[1] ? problem[0] : '');
   const win = $('win');
   if (!win.children.length) {
     for (const w of st.windows) {
@@ -213,6 +216,65 @@ function showState(st) {
     s.rateEl.textContent = r == null || !st.running ? '' : `${r.toFixed(1)} spikes/s`;
   });
 }
+
+// ---------------------------------------------------------------- Record
+let problem = null;            // [what went wrong, until when]
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
+
+function showRecord(r, problem) {
+  const btn = $('rec');
+  btn.classList.toggle('live', r.recording);
+  $('rectext').textContent = r.recording ? `Stop recording · ${clock(r.secs)}` : r.on ? 'Record: On' : 'Record: Off';
+  btn.title = r.recording ? `Recording ${r.trial}: click to stop recording` : r.on
+    ? (S && S.running ? 'Click to turn recording off' : 'Run will record too. Click to turn recording off.')
+    : 'Turn on to record: now while running, or as soon as you press Run';
+  const box = $('comment');
+  box.disabled = !r.recording;
+  box.placeholder = r.recording ? 'Type a comment, press Enter' : 'Press Record to add comments';
+  if (document.activeElement !== $('label')) $('label').value = r.label;
+  $('sname').textContent = r.session || 'None yet';
+  const n = r.n_trials;
+  $('scount').textContent = r.session
+    ? `${n} trial${n === 1 ? '' : 's'}${r.recording ? ', one being recorded' : ''}` +
+      (r.unsaved ? ' · kept in data/unsaved, as the Qt app keeps a session it hasn\'t saved yet' : '')
+    : 'Your first trial starts one, in data/unsaved, as the Qt app does.';
+  $('newsess').disabled = r.recording || !r.session;
+  $('addto').disabled = r.recording;
+  const msg = $('recmsg');
+  msg.textContent = problem || (r.splitting ? 'Making a trial of each stimulus…' : r.message);
+  msg.classList.toggle('bad', !!problem || r.error);
+  const notes = $('notes');
+  const html = r.comments.map(([t, text]) => `<li><b>${t.toFixed(1)} s</b><span>${esc(text)}</span></li>`).join('');
+  if (notes.dataset.html !== html) { notes.innerHTML = html; notes.dataset.html = html; notes.scrollTop = notes.scrollHeight; }
+}
+
+$('rec').onclick = () => post({cmd: 'record', on: !(S && S.record && (S.record.on || S.record.recording))}).then(showState);
+$('comment').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target.value.trim()) return;
+  post({cmd: 'comment', text: e.target.value}).then(showState);
+  e.target.value = '';
+});
+$('label').addEventListener('change', (e) => post({cmd: 'label', text: e.target.value}).then(showState));
+$('label').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+$('newsess').onclick = () => post({cmd: 'new_session'}).then(showState);
+const addto = $('addto');
+addto.addEventListener('focus', () => post({cmd: 'sessions'}).then((st) => {   // listed when you open it
+  addto.replaceChildren(new Option('Keep adding to…', ''));
+  for (const s of st.sessions || []) if (s.path !== (S.record && S.record.folder)) addto.append(new Option(s.name, s.path));
+}));
+addto.addEventListener('change', () => {
+  if (addto.value) post({cmd: 'add_to', folder: addto.value}).then(showState);
+  addto.value = '';
+  addto.blur();
+});
+document.addEventListener('keydown', (e) => {   // C while recording: the comment box
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (e.key.toLowerCase() === 'c' && !typing && !e.metaKey && !e.ctrlKey && !$('comment').disabled) {
+    e.preventDefault();
+    $('comment').focus();
+  }
+});
 
 // ---------------------------------------------------------------- controls
 $('run').onclick = () => post({cmd: 'run', on: !(S && S.running)}).then(showState);

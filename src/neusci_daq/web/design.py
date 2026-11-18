@@ -217,13 +217,13 @@ class Design:
         self._push(parts)
 
     def _per_trial(self, parts: list[dict], i: int, key: str, text: str) -> None:
-        if key not in ("d_level", "d_dur"):
+        what = next((w for f, _, w, _ in D.FIELDS.get(parts[i].get("kind"), []) if "d_" + f == key), None)
+        if what is None or key[2:] not in stim.PER_TRIAL:
             raise ValueError(f"No per-trial box {key!r}.")
         try:
             got = stim.parse_per_trial(text)
         except ValueError as e:
             raise ValueError(f"{stim.letter(i)}: {e}") from None
-        what = next((w for _, _, w, dk in D.FIELDS.get(parts[i].get("kind"), []) if dk == key), "")
         k = self.k if what == "level" else 1.0
         parts[i][key] = stim.format_per_trial(got, 1.0 / k)
         if got and got[0] == "list" and self.n < len(got[1]):      # one trial per value, if there were fewer
@@ -427,6 +427,8 @@ class Design:
         kind = p.get("kind", "step")
         fields = []
         for key, label, what, dkey in D.FIELDS.get(kind, []):
+            if key in stim.PER_TRIAL:              # here every number can change from trial to trial
+                dkey = "d_" + key
             v = float(p.get(key, p.get("level", 0.0) if key == "level2" else 0.0) or 0.0)
             kk = k if what == "level" else 1.0
             dtext = ""
@@ -455,7 +457,7 @@ class Design:
             extra["file"] = Path(p.get("file", "")).name or "(none)"
         return {"i": i, "letter": stim.letter(i), "name": D.seg_name(p), "kind": kind, "hint": D.HINTS.get(kind, ""),
                 "fields": fields, "extra": extra, "n_parts": len(parts),
-                "dims": " · ".join(D.dims(p, u, k))}
+                "dims": " · ".join(D.dims(p, u, k, every=True))}
 
     def state(self, have=None) -> dict:
         with self._lock:

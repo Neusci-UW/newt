@@ -133,28 +133,37 @@ def trial_rgb(f: float) -> tuple[int, int, int]:
     return TRIAL_STOPS[-1][1]
 
 
-def dims(p: dict, units: str, k: float) -> list[str]:
-    """A segment's main numbers, for the picture: levels in `units` (volts × k)."""
+def dims(p: dict, units: str, k: float, every: bool = False) -> list[str]:
+    """A segment's main numbers, for the picture: levels in `units` (volts × k). `every`:
+    every setting can have a per-trial change (stim.PER_TRIAL), not only those in FIELDS."""
     kind = p.get("kind")
     lv = lambda key: f"{float(p.get(key, 0)) * k:g} {units}"
     out = []
     for key, label, what, dkey in FIELDS.get(kind, []):
+        if every and key in stimmod.PER_TRIAL:
+            dkey = "d_" + key
         if key == "offset":
-            if float(p.get("offset", 0) or 0):
+            if float(p.get("offset", 0) or 0) or (dkey and p.get(dkey)):
                 out.append(f"offset {lv('offset')}")
-            continue
-        if key == "level2":
-            if float(p.get("level2", p.get("level", 0))) != float(p.get("level", 0)):
+            else:
+                continue
+        elif key == "level2":
+            if float(p.get("level2", p.get("level", 0))) != float(p.get("level", 0)) or (dkey and p.get(dkey)):
                 out[-1] = out[-1].split(" (")[0] + f" → {lv('level2')}"
+            else:
+                continue
+        elif what == "n" and int(p.get(key, 1)) <= 1 and not (dkey and p.get(dkey)):
             continue
-        if what == "level":
+        elif what == "level":
             out.append(lv(key))
         elif what == "ms":
             out.append(f"{float(p.get(key, 0)):g} ms" if key == "dur" else f"{label} {float(p.get(key, 0)):g} ms")
         elif what == "Hz":
             out.append(f"{float(p.get(key, 0)):g} Hz")
-        elif what == "n" and int(p.get(key, 1)) > 1:
-            out.append(f"×{int(p[key])}")
+        elif what == "n":
+            out.append(f"×{int(p.get(key, 1))}")
+        else:
+            continue
         if dkey and p.get(dkey):
             got = stimmod.parse_per_trial(p[dkey])
             kk = k if what == "level" else 1.0

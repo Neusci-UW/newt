@@ -119,6 +119,14 @@ def letter(i: int) -> str:
     return out
 
 
+# The settings a segment's dashed "per trial" box can change from trial to trial; the box
+# is "d_" + the setting (d_level, d_freq…). The Qt Stimulator offers level and duration.
+PER_TRIAL = ("level", "dur", "start", "level2", "freq", "freq2", "count", "interval", "tau", "offset")
+PER_TRIAL_WORDS = {"level": "level", "dur": "duration", "start": "start", "level2": "end amplitude",
+                   "freq": "frequency", "freq2": "end frequency", "count": "number of pulses",
+                   "interval": "interval", "tau": "τ", "offset": "offset"}
+
+
 def parse_per_trial(text: str) -> tuple[str, float | list[float]] | None:
     """A "per trial" box: None when blank, ("step", 0.5) for "+0.5" (added each trial),
     ("list", [0.5, 1, 2]) for "0.5, 1, 2" (one value per trial). Raises ValueError."""
@@ -296,13 +304,13 @@ class Stimulus:
     @property
     def steps(self) -> bool:
         """Whether any segment changes from trial to trial."""
-        return self.shape == "segments" and any(p.get("d_level") or p.get("d_dur") for p in self.parts)
+        return self.shape == "segments" and any(p.get("d_" + f) for p in self.parts for f in PER_TRIAL)
 
     def list_lengths(self) -> list[int]:
         """How many values each per-trial list has (lists can't run past their end)."""
         out = []
         for p in self.parts if self.shape == "segments" else []:
-            for key in ("d_level", "d_dur"):
+            for key in ("d_" + f for f in PER_TRIAL):
                 try:
                     got = parse_per_trial(p.get(key, ""))
                 except ValueError:
@@ -319,11 +327,21 @@ class Stimulus:
         parts = []
         for i, p in enumerate(self.parts):
             q = dict(p)
-            for key, dk in (("level", "d_level"), ("dur", "d_dur")):
+            for key in PER_TRIAL:
+                dk = "d_" + key
+                if key not in ("level", "dur") and not p.get(dk):
+                    continue
+                base = p.get(key, p.get("level", 0.0) if key == "level2" else 0.0)
                 try:
-                    q[key] = per_trial(float(p.get(key, 0.0)), p.get(dk, ""), t)
+                    v = per_trial(float(base or 0.0), p.get(dk, ""), t)
                 except ValueError as e:
                     raise ValueError(f"{letter(i)}: {e}") from None
+                if key == "count":
+                    if v < 1 - 1e-9 or abs(v - round(v)) > 1e-9:
+                        raise ValueError(f"{letter(i)}: trial {t + 1} would have {v:g} pulses; "
+                                         "it needs a whole number, 1 or more.")
+                    v = int(round(v))
+                q[key] = v
                 q[dk] = ""
             parts.append(q)
         return replace(self, parts=parts)
@@ -578,7 +596,7 @@ def _describe_part(p: dict, units: str, scale: float) -> str:
     off = float(p.get("offset", 0.0) or 0.0)
     if off:
         s += f", offset {lv(off)} {units}"
-    changes = [w for w, k in (("level", "d_level"), ("duration", "d_dur")) if p.get(k)]
+    changes = [PER_TRIAL_WORDS[f] for f in PER_TRIAL if p.get("d_" + f)]
     return s + (f" ({' and '.join(changes)} change per trial)" if changes else "")
 
 

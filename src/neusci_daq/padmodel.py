@@ -853,6 +853,9 @@ class Pad:
         self.version = 0                         # bumped when the recordings (or spikes) change
         self._skip: set[int] = set()
         self._cache: dict[str, tuple] = {}
+        # one measured cell: (version, trial, channel, measure, window) -> its value, so ticking a
+        # trial, or putting the rows in another order, measures only what wasn't measured yet
+        self._cells: dict[tuple, float] = {}
 
     def names(self) -> list[str]:
         return [c.name for c in self.columns]
@@ -862,6 +865,7 @@ class Pad:
 
     def data_changed(self) -> None:
         self.version += 1
+        self._cells.clear()
 
     def rename(self, c: Column, new: str) -> None:
         """Give column c the formula name `new`, in the formulas and Python that use it too."""
@@ -889,6 +893,7 @@ class Pad:
         self.rows_seg = state.get("rows_seg", "")
         self.manual = list(state.get("manual", []))
         self._cache.clear()
+        self._cells.clear()
 
     # -- rows ---------------------------------------------------------------------------
     def rows(self, src: Source) -> list[Row]:
@@ -975,8 +980,15 @@ class Pad:
                 found = found or st is not None
                 if c.over == "window" and c.sel.is_phase():
                     out[k] = measure_phase(src, r.trial, channel, c.key, c.sel, row_segments(segs[r.trial], r), st)
-                else:
+                elif st is not None:                 # (spikes can be found again: not kept)
                     out[k] = measure_window(src, r.trial, channel, c.key, w, st)
+                else:
+                    cell = (self.version, r.trial, channel, c.key, w)
+                    if cell not in self._cells:
+                        if len(self._cells) > 500_000:
+                            self._cells.clear()
+                        self._cells[cell] = measure_window(src, r.trial, channel, c.key, w, st)
+                    out[k] = self._cells[cell]
             if spiky and used and not found:
                 raise ValueError("No spikes found yet: find them in the Spikes panel (the rail on the left)")
             missing = sum(w is None for w, r in zip(wins, rows) if r.trial not in self._skip)

@@ -45,7 +45,9 @@ svg.anns .sel{fill:none;stroke:#1a5fd0;stroke-dasharray:4 3;stroke-width:1;vecto
 <div class="wrap">
   <section class="card cvcard" aria-label="Plot Canvas">
     <div class="fbar">
-      <label>Page <select id="paper" title="The page's size"></select></label>
+      <label>Page <select id="paper" title="The page's size: a paper, or Custom for a size of your own"></select></label>
+      <label class="pagemm" title="The page's width and height, in mm">
+        <input type="number" id="pagew" step="1" aria-label="Page width, mm"> × <input type="number" id="pageh" step="1" aria-label="Page height, mm"> mm</label>
       <label title="A, B, C… on each figure, in the order they sit: top to bottom, left to right"><input type="checkbox" id="letters"> Panel letters</label>
       <span class="sep"></span>
       <label class="textpt" title="The axis labels of every figure on the page, in pt as they print; each figure's numbers and title keep their size against them">Text

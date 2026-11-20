@@ -20,17 +20,41 @@ from matplotlib.figure import Figure
 from . import figspec as F
 from . import stim as stimmod
 
-PAPERS = {"A4 portrait": (210, 297), "A4 landscape": (297, 210), "Letter portrait": (216, 279),
-          "Letter landscape": (279, 216), "Slide 16:9": (338, 190)}
+PAPERS = {"Square": (200, 200), "A4 portrait": (210, 297), "A4 landscape": (297, 210),
+          "Letter portrait": (216, 279), "Letter landscape": (279, 216), "Slide 16:9": (338, 190)}
+PAPER = "Square"                  # a new page's
+CUSTOM = "Custom"                 # a size of your own
+SIDE_MM = (40, 1300)              # the shortest and longest a side can be (a poster is 1189)
 MARGIN = 12.0                     # mm
+ROW_MM = 15.0                     # figures with tops this close sit in one row (the shortest figure is 15 mm)
 LINKS = {"text": True, "lines": True, "axes": False, "colors": False, "legend": False}   # the same on every figure
 FORMATS = {"pdf": "PDF", "svg": "SVG", "png": "PNG"}
+
+
+def page_of(paper, size=None) -> tuple[str, tuple[float, float]]:
+    """A page's paper and its width and height in whole mm, from what was asked or saved: a
+    paper's own size, or one typed in (named for the paper it matches, else Custom). A page
+    saved before sizes were kept has only its paper's name."""
+    if size is None and paper in PAPERS:
+        return paper, PAPERS[paper]
+    try:
+        w, h = (float(min(SIDE_MM[1], max(SIDE_MM[0], round(float(v))))) for v in size)
+    except (TypeError, ValueError, OverflowError):
+        return PAPER, PAPERS[PAPER]
+    return next((n for n, s in PAPERS.items() if s == (w, h)), CUSTOM), (w, h)
 
 
 def png(spec: dict, data: dict, dpi: float) -> bytes:
     """The figure drawn at its size in mm, as PNG (a picture put on the page: as it was)."""
     if spec.get("kind") == "image":
         return base64.b64decode(data.get("png", ""))
+    buf = io.BytesIO()
+    _drawn(spec, data, dpi).savefig(buf, format="png", dpi=dpi, facecolor="white")
+    return buf.getvalue()
+
+
+def _drawn(spec: dict, data: dict, dpi: float) -> Figure:
+    """The figure drawn and laid out at its size in mm (or saying why it can't be)."""
     fig = Figure(figsize=(spec["w_mm"] / 25.4, spec["h_mm"] / 25.4), dpi=dpi)
     try:
         F.draw(fig, spec, data)
@@ -38,9 +62,27 @@ def png(spec: dict, data: dict, dpi: float) -> bytes:
     except Exception as e:
         fig.clear()
         fig.text(0.5, 0.5, f"Can't draw: {e}", ha="center", va="center")
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, facecolor="white")
-    return buf.getvalue()
+    return fig
+
+
+def pixels(spec: dict, data: dict, dpi: float) -> tuple[bytes, int, int, tuple | None]:
+    """The figure drawn for a screen, with no PNG in between (quicker than png): its pixels
+    (RGBA, row by row), how many across and down, and where its plot sits in it ((x0, y0, w, h)
+    as fractions, y from the bottom, as laid_out_axes; None if it couldn't be drawn)."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    fig = _drawn(spec, data, dpi)
+    fig.patch.set_facecolor("white")
+    canvas = FigureCanvasAgg(fig)
+    try:
+        canvas.draw()
+    except Exception as e:                            # (a label that can't be set: found only now)
+        fig.clear()
+        fig.text(0.5, 0.5, f"Can't draw: {e}", ha="center", va="center")
+        canvas.draw()
+    w, h = canvas.get_width_height()
+    box = fig.axes[0].get_position() if fig.axes else None
+    axes = tuple(float(v) for v in (box.x0, box.y0, box.width, box.height)) if box is not None else None
+    return bytes(canvas.buffer_rgba()), w, h, axes
 
 
 def laid_out_axes(spec: dict, data: dict):
@@ -79,12 +121,21 @@ def free_spot(spec: dict, taken: list, paper: tuple[float, float], tries: int = 
 
 
 def letters(places: list[tuple[float, float]]) -> list[str]:
-    """Each figure's panel letter (A, B, C…) from where it sits ((x, y) in mm): in rows about
-    20 mm deep, top to bottom, then left to right."""
-    order = sorted(range(len(places)), key=lambda k: (round(places[k][1] / 20), places[k][0]))
+    """Each figure's panel letter (A, B, C…) from where it sits ((x, y) in mm): in rows, top to
+    bottom, then left to right. A row is the figures whose tops are less than ROW_MM below its
+    highest one's (not fixed bands down the page: a small nudge never swaps two letters)."""
+    rows, top = [], None
+    for k in sorted(range(len(places)), key=lambda k: (places[k][1], places[k][0])):
+        if top is None or places[k][1] - top >= ROW_MM:
+            rows.append([])
+            top = places[k][1]
+        rows[-1].append(k)
     out = [""] * len(places)
-    for n, k in enumerate(order):
-        out[k] = stimmod.letter(n)
+    n = 0
+    for row in rows:
+        for k in sorted(row, key=lambda k: places[k][0]):
+            out[k] = stimmod.letter(n)
+            n += 1
     return out
 
 

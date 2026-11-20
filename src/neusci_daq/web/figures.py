@@ -35,6 +35,9 @@ from .pad import ROW_ORDER
 FIGURE, CANVAS = "figure", "plot_canvas"
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)   # (Arial's stand-ins it doesn't have)
 _DRAW = threading.Lock()            # matplotlib's settings (rc_context) are the whole program's: one at a time
+SAVE_AFTER = 1.5                    # s of quiet before the figures are written: a run of edits, one write (a
+#                                     page of figures is megabytes of analysis.json: a second to write)
+log = logging.getLogger(__name__)
 SPEC_KEYS = set(F.new_spec()) | set(F.LOOK_DEFAULTS) | {"box", "aspect", "points", "auto_size"}
 LEGEND_MAX = 8                      # more groups than this: no legend (it would cover the plot)
 PT_PX = 0.75                        # a screen pixel in pt (at 96 dpi), as a chart's lines are drawn
@@ -98,11 +101,15 @@ class Figures:
         self.anns: list[dict] = []               # Qt's annotation states, each with an "id"
         self._ids = 0
         self._pad_seen = None
+        self._unsaved = False                    # changed since last written (flush)
+        self._save_timer: threading.Timer | None = None
+        self._writing = threading.Lock()         # one write at a time
+        self._asked = self._written = 0          # writes asked for, and the newest one done
         self.ask_path = None                     # in a window: asks where to save (name, fmt) -> path or None
 
     @staticmethod
     def _blank_page() -> dict:
-        return {"paper": "A4 portrait", "letters": True, "text_pt": 9.0, "links": dict(figpage.LINKS), "look": {}}
+        return {"paper": figpage.PAPER, "size": list(figpage.PAPERS[figpage.PAPER]), "letters": True, "text_pt": 9.0, "links": dict(figpage.LINKS), "look": {}}
 
     def _id(self) -> int:
         self._ids += 1
@@ -113,6 +120,7 @@ class Figures:
         folder = self.trials.folder
         if folder == self._folder:
             return
+        self.flush()                                 # the session being left: its last changes written
         self._folder = folder
         st = analysisfile.read_state(folder) if folder else {}
         spec = st.get(FIGURE)
@@ -125,8 +133,8 @@ class Figures:
         self.page, self.panels, self.anns = self._blank_page(), [], []
         if not isinstance(s, dict):
             return
-        self.page.update(paper=s.get("paper") if s.get("paper") in figpage.PAPERS else "A4 portrait",
-                         letters=bool(s.get("letters", True)))
+        paper, size = figpage.page_of(s.get("paper"), s.get("size"))
+        self.page.update(paper=paper, size=list(size), letters=bool(s.get("letters", True)))
         if s.get("text_pt"):
             self.page["text_pt"] = float(s["text_pt"])
         self.page["links"] = {**figpage.LINKS, **{k: bool(v) for k, v in (s.get("links") or {}).items()
@@ -145,16 +153,47 @@ class Figures:
     def canvas_state(self) -> dict:
         """The Plot Canvas as the Qt app saves it (PlotCanvasPage.state)."""
         p = self.page
-        return {"paper": p["paper"], "letters": p["letters"], "text_pt": p["text_pt"], "links": dict(p["links"]),
+        return {"paper": p["paper"], "size": list(p["size"]), "letters": p["letters"], "text_pt": p["text_pt"], "links": dict(p["links"]),
                 "look": dict(p["look"]),
                 "panels": [{"spec": q["spec"], "data": q["data"], "linked": q["linked"], "x_mm": q["x_mm"],
                             "y_mm": q["y_mm"]} for q in self.panels],
                 "annotations": [{k: v for k, v in a.items() if k != "id"} for a in self.anns]}
 
     def _save(self) -> None:
-        if self._folder is not None:
-            analysisfile.save_parts(self._folder, {FIGURE: F.clone(self.spec) if self.spec else None,
-                                                   CANVAS: self.canvas_state()})     # NaN kept, as Qt keeps it
+        """Written soon, not now: one write after a run of edits (a slider dragged, a figure moved)."""
+        if self._folder is None:
+            return
+        self._unsaved = True
+        if self._save_timer is not None:
+            self._save_timer.cancel()
+        self._save_timer = threading.Timer(SAVE_AFTER, self.flush)
+        self._save_timer.daemon = True
+        self._save_timer.start()
+
+    def flush(self) -> None:
+        """Write the figures now, if they've changed since they were written: after the quiet,
+        before another session opens, and as Newt closes."""
+        with self._lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+            if not self._unsaved or self._folder is None:
+                return
+            self._unsaved = False
+            folder, canvas = self._folder, self.canvas_state()
+            canvas["panels"] = [{**q, "spec": F.clone(q["spec"])} for q in canvas["panels"]]    # as they are now:
+            canvas["annotations"] = copy.deepcopy(canvas["annotations"])    # written after the lock is let go
+            parts = {FIGURE: F.clone(self.spec) if self.spec else None, CANVAS: canvas}     # NaN kept, as Qt keeps it
+            self._asked += 1
+            asked = self._asked
+        with self._writing:                           # not under the lock: the pages go on while it's written
+            if asked < self._written:
+                return                                # a newer one is written already
+            try:
+                analysisfile.save_parts(folder, parts)
+            except OSError as e:                      # the folder's gone, say
+                log.warning("Figures not saved in %s: %s", folder, e)
+            self._written = asked
 
     # -- following the DataPad ---------------------------------------------------------------------
     def _follow(self) -> None:
@@ -230,8 +269,8 @@ class Figures:
                        "kind": p["spec"].get("kind"), "linked": p["linked"], "v": p["v"], "letter": L,
                        "font": F.paper_font(p["spec"]), "title": p["spec"].get("title", "")}
                       for p, L in zip(self.panels, letters)]
-            return _clean({"folder": str(self._folder or ""), "page": {**self.page, "size": figpage.PAPERS[self.page["paper"]]},
-                           "papers": list(figpage.PAPERS), "panels": panels, "anns": self.anns,
+            return _clean({"folder": str(self._folder or ""), "page": dict(self.page),
+                           "papers": [*figpage.PAPERS, figpage.CUSTOM], "side_mm": list(figpage.SIDE_MM), "panels": panels, "anns": self.anns,
                            "editing": self.editing})
 
     def picture(self, d: dict) -> dict:
@@ -275,7 +314,7 @@ class Figures:
                 letters = figpage.letters([(p["x_mm"], p["y_mm"]) for p in self.panels])
                 panels = [(F.clone(p["spec"]), p["data"], p["x_mm"], p["y_mm"], L) for p, L in zip(self.panels, letters)]
                 anns = [{k: v for k, v in a.items() if k != "id"} for a in self.anns]
-                page = (figpage.PAPERS[self.page["paper"]], self.page["letters"])
+                page = (tuple(self.page["size"]), self.page["letters"])
         with _DRAW:
             if d.get("what") == "single":
                 out, name = figpage.figure_bytes(spec, data, fmt, dpi), "figure"
@@ -507,7 +546,7 @@ class Figures:
             edited["spec"], edited["data"], edited["v"] = spec, data, edited["v"] + 1
             return edited
         x, y = at if at else figpage.free_spot(spec, [(p["x_mm"], p["y_mm"], p["spec"]["w_mm"], p["spec"]["h_mm"])
-                                                      for p in self.panels], figpage.PAPERS[self.page["paper"]],
+                                                      for p in self.panels], tuple(self.page["size"]),
                                                      tries=20000)       # (Qt looks 200 times: often the top left)
         p = {"id": self._id(), "spec": spec, "data": data, "linked": bool(linked), "x_mm": float(round(float(x))),
              "y_mm": float(round(float(y))), "v": 1}
@@ -552,10 +591,11 @@ class Figures:
                 raise RuntimeError("Open a session first: the page is saved with it.")
             self._follow()
             cmd, out = d.get("cmd"), {}
-            if cmd == "paper":
-                if d.get("name") not in figpage.PAPERS:
+            if cmd == "paper":                         # a paper by name, or a size of your own (mm)
+                if d.get("size") is None and d.get("name") not in figpage.PAPERS:
                     raise ValueError("No such paper")
-                self.page["paper"] = d["name"]
+                paper, size = figpage.page_of(d.get("name"), d.get("size"))
+                self.page.update(paper=paper, size=list(size))
             elif cmd == "letters":
                 self.page["letters"] = bool(d.get("on"))
             elif cmd == "text":
@@ -645,7 +685,7 @@ class Figures:
                 png_, w, h = figpage.picture_png(raw, name)
         except Exception as e:
             raise ValueError(f"Couldn't read {name}: {e}") from e
-        W = figpage.PAPERS[self.page["paper"]][0]
+        W = self.page["size"][0]
         spec, data = F.image_spec(png_, w, h, width_mm=min(100.0, W - 2 * figpage.MARGIN))
         spec["title"] = name
         self._add(spec, data, linked=False)

@@ -40,11 +40,15 @@ function problem(text, good) {
 // ---------------------------------------------------------------- the page
 function show(st) {
   if (!st || !st.page) return;
-  const first = !C.st, paperChanged = C.st && C.st.page.paper !== st.page.paper;
+  const first = !C.st, paperChanged = C.st && String(C.st.page.size) !== String(st.page.size);
   C.st = st;
   const paper = E('paper');
   if (!paper.options.length) paper.innerHTML = st.papers.map((n) => `<option>${esc(n)}</option>`).join('');
   paper.value = st.page.paper;
+  for (const [id, v] of [['pagew', st.page.size[0]], ['pageh', st.page.size[1]]]) {
+    [E(id).min, E(id).max] = st.side_mm;
+    if (document.activeElement !== E(id)) E(id).value = v;
+  }
   E('letters').checked = !!st.page.letters;
   if (document.activeElement !== E('textn')) E('textn').value = st.page.text_pt;
   if (document.activeElement !== E('textr')) E('textr').value = st.page.text_pt;
@@ -409,7 +413,15 @@ function remove() {
 }
 
 // ---------------------------------------------------------------- the bars' buttons
-E('paper').onchange = (e) => ccmd({cmd: 'paper', name: e.target.value});
+E('paper').onchange = (e) => {              // Custom: the size stays, to type your own
+  if (C.st && !C.st.papers.slice(0, -1).includes(e.target.value)) { E('pagew').focus(); E('pagew').select(); return; }
+  ccmd({cmd: 'paper', name: e.target.value});
+};
+for (const id of ['pagew', 'pageh']) E(id).onchange = () => {
+  const [w, h] = [+E('pagew').value, +E('pageh').value];
+  if (C.st && w > 0 && h > 0) ccmd({cmd: 'paper', size: [w, h]}).then(() => { E('pagew').value = C.st.page.size[0]; E('pageh').value = C.st.page.size[1]; });
+  else if (C.st) [E('pagew').value, E('pageh').value] = C.st.page.size;
+};
 E('letters').onchange = (e) => ccmd({cmd: 'letters', on: e.target.checked});
 let textT = 0;
 const text = (v) => { clearTimeout(textT); textT = setTimeout(() => ccmd({cmd: 'text', pt: +v}), 200); };

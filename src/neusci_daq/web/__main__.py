@@ -74,6 +74,7 @@ def close(srv, parts) -> None:
     parts.stimulator.stop()
     parts.live.close()                 # (ends the trial being recorded)
     parts.recording.close()
+    parts.figures.flush()              # (figures are written a moment after they change: now, if not yet)
     srv.server_close()
 
 

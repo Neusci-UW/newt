@@ -17,6 +17,7 @@ subscript B), so students never see the underscore on a figure.
 from __future__ import annotations
 
 import copy
+import functools
 import re
 
 import numpy as np
@@ -913,6 +914,13 @@ def do_fit(spec: dict, data: dict):
         return None
 
 
+@functools.lru_cache(maxsize=32)
+def _fit_kept(model: str, degree: int, x: bytes, y: bytes):
+    """The fit through these points, kept: one change of the figure asks for it more than once
+    (its result shown, its curve drawn), and a change of look asks for the same one again."""
+    return fitting.fit(model, np.frombuffer(x), np.frombuffer(y), degree)
+
+
 def _fit_now(spec: dict, data: dict):
     lines = fit_lines(spec, data)
     if not spec.get("fit") or not lines:
@@ -927,7 +935,8 @@ def _fit_now(spec: dict, data: dict):
         m &= x <= hi
     if m.sum() < 3:
         raise ValueError("Fewer than 3 points in that x range")
-    f = fitting.fit(spec["fit"], x[m], y[m], int(spec.get("fit_degree", 1)))
+    f = _fit_kept(spec["fit"], int(spec.get("fit_degree", 1)), np.asarray(x[m], float).tobytes(),
+                  np.asarray(y[m], float).tobytes())
     return name, f, x[m]
 
 

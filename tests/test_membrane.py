@@ -44,7 +44,7 @@ def test_follows_the_app_theme(win):
 
 def test_rc_page_ships_and_is_under_simulation(app, win):
     html = membranepage.RC_PAGE.read_text(encoding="utf-8")
-    assert "<title>RC Circuit and Membrane</title>" in html
+    assert "<title>Passive Properties: Time</title>" in html
     assert win.tabs.pages["rc"] is win.lesson_pages["rc"]
     assert win.tabs.group_of["rc"] == "lessons"
     win.show()

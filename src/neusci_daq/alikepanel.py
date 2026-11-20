@@ -21,6 +21,19 @@ def _note(text: str = "") -> QtWidgets.QLabel:
     return lbl
 
 
+# what each measure is, in plain words: the tooltips of its tick boxes
+TIPS = {
+    "amp": "How far the stimulus swings from rest at its biggest, either way",
+    "p2p": "From the stimulus's highest point to its lowest, counting rest",
+    "var": "How big the stimulus is on average across its window: the mean of its swing from rest, squared",
+    "len": "How long the stimulus lasts: from when it first leaves rest to when it last comes back (ms)",
+    "freq": "How many pulses a second, from the first pulse's start to the last's (Hz); 0 for a single pulse",
+    "width": "How long the first pulse lasts (ms)",
+    "count": "How many pulses the stimulus has",
+    "area": "The area between the trace and rest; for a current stimulus, the charge it carries",
+}
+
+
 def measure_name(key: str | None) -> str:
     return SHAPE_NAME.split(" (")[0].lower() if key == SHAPE else MEASURES[key][0] if key in MEASURES else ""
 
@@ -50,6 +63,7 @@ class AlikePanel(QtWidgets.QWidget):
         self.ticks[SHAPE] = shape
         for k, (key, (name, _)) in enumerate(MEASURES.items()):
             box = QtWidgets.QCheckBox(name)
+            box.setToolTip(TIPS[key])
             grid.addWidget(box, 1 + k // 2, k % 2)
             self.ticks[key] = box
         for box in self.ticks.values():
@@ -63,6 +77,8 @@ class AlikePanel(QtWidgets.QWidget):
         lay.addWidget(self.by)
         row = QtWidgets.QHBoxLayout()
         self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.slider.setToolTip("Join the stimuli that sit close on the map into groups: how many groups, or how "
+                               "close two must be (as picked above)")
         self.value = QtWidgets.QLabel()
         self.value.setMinimumWidth(70)
         row.addWidget(self.slider, 1)

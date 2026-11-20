@@ -66,6 +66,7 @@ class MiniStimulator(QtWidgets.QFrame):
         self.level = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.level.setRange(-10 * STEPS_PER_V, 10 * STEPS_PER_V)
         self.level.setAccessibleName("Stimulus level")
+        self.level.setToolTip("The picked segment's level")       # named for the segment once one is picked
         self.level_text = QtWidgets.QLabel()
         self.level_text.setMinimumWidth(64)
         self.level_text.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)

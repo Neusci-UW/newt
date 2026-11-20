@@ -173,7 +173,6 @@ class SinglePlotPage(QtWidgets.QWidget):
         self.editing = None                      # the Plot Canvas figure being changed, if any
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
-        self.outer = lay                          # the DataPad's left rail (Trials, Groups…) docks at its start
         self.focus_chart = None                  # a whiteboard chart open in focus mode
         self.mode = QtWidgets.QStackedWidget()
         lay.addWidget(self.mode, 1)
@@ -916,7 +915,6 @@ class SinglePlotPage(QtWidgets.QWidget):
 
     def showEvent(self, ev):
         super().showEvent(ev)
-        self.page.dock_panels(self.outer)          # pick trials and colors here too
         if self.focus_chart is None and self.spec is None and self.page.blocks:
             # nothing open yet: start on a live chart (the first one made, else a Response)
             QtCore.QTimer.singleShot(0, lambda: self.focus_chart is None and self.spec is None

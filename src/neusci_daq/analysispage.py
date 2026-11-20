@@ -447,7 +447,7 @@ class AnalysisPage(QtWidgets.QWidget):
 
     def dock_panels(self, lay: QtWidgets.QBoxLayout) -> None:
         """Put the left rail (Trials, Groups, Channels, Spikes) and its drawer at the start of
-        `lay`: the DataPad's, or Single Plot's, whichever tab is showing."""
+        `lay`: the DataPad's (Single Plot has no rail: trials are picked on the DataPad)."""
         for k, w in enumerate((self.rail, self.drawer)):
             if lay.indexOf(w) == k:
                 continue

@@ -36,10 +36,45 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": [
         "-c",
-        "PY=.venv/bin/python; [ -x $PY ] || PY=../../../.venv/bin/python; PYTHONPATH=src exec $PY -m neusci_daq.web --serve --port 18520 --key dev"
+        "cd .claude/worktrees/html-frontend && PYTHONPATH=src exec ../../../.venv/bin/python -m neusci_daq.web --serve --port 18520 --key dev --data /private/tmp/claude-501/-Users-kyobi-repos-newt/13b2a47b-69fd-4679-a747-fda74e6efeb0/scratchpad/data"
       ],
       "url": "http://127.0.0.1:18520",
       "port": 18520
+    },
+    {
+      "name": "lessons-drafts",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "18493",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "src/neusci_daq/lessons"
+      ],
+      "url": "http://localhost:18493",
+      "port": 18493
+    },
+    {
+      "name": "newt-web-merged",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd .claude/worktrees/html-frontend && PYTHONPATH=src exec ../../../.venv/bin/python -m neusci_daq.web --serve --port 18540 --key dev --data /private/tmp/claude-501/-Users-kyobi-repos-newt/13b2a47b-69fd-4679-a747-fda74e6efeb0/scratchpad/data"
+      ],
+      "url": "http://127.0.0.1:18540",
+      "port": 18540
+    },
+    {
+      "name": "newt-web-here",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "PYTHONPATH=src exec .venv/bin/python -m neusci_daq.web --serve --port 18560 --key dev --data /private/tmp/claude-501/-Users-kyobi--claude-spares-spare-xQJ7I5/2acaec2b-9812-4439-a0f0-5788969995c6/scratchpad/data"
+      ],
+      "url": "http://127.0.0.1:18560",
+      "port": 18560
     }
   ]
 }

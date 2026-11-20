@@ -16,6 +16,7 @@ lessons/tools/fetch_mathjax.py, for computers without internet), otherwise the o
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -57,6 +58,41 @@ except Exception:   # not installed, or imported after the QApplication (as in s
 # answered (lessons/lesson.js). Each lesson is a file in lessons/questions; the page's lesson
 # editor saves into it.
 LESSONS = LESSON_PAGES / "questions"
+
+# The course: every lesson page in order, and which ones students see. index.html and the
+# Lessons tabs both follow lessons/course.js; its Choose lessons page (course.html) edits it.
+COURSE = LESSON_PAGES / "course.js"
+COURSE_PAGE = LESSON_PAGES / "course.html"
+_COURSE_FALLBACK = [("membrane", "membrane_potential.html", "Membrane potential"),
+                    ("rc", "rc_membrane.html", "Passive properties: time"),
+                    ("space", "passive_space.html", "Passive properties: space"),
+                    ("ap", "action_potential.html", "Action potential"),
+                    ("hh", "hodgkin_huxley.html", "Hodgkin–Huxley"),
+                    ("syn", "synapse.html", "Synapse"),
+                    ("sum", "summation.html", "Summation"),
+                    ("plas", "plasticity.html", "Plasticity")]
+
+
+def parse_course(text: str) -> list[dict]:
+    """The lesson list in a course.js file: `window.COURSE = [...]`, plain JSON inside the
+    brackets. Raises ValueError if it isn't one."""
+    start = text.index("[", text.index("window.COURSE"))
+    items = json.loads(text[start:text.rindex("]") + 1])
+    if not isinstance(items, list) or not all(isinstance(c, dict) and c.get("id") and c.get("file") for c in items):
+        raise ValueError("each lesson needs an id and a file")
+    for c in items:
+        if not _LESSON_NAME.fullmatch(str(c["id"])) or "/" in c["file"] or not str(c["file"]).endswith(".html"):
+            raise ValueError(f"bad lesson entry: {c['id']}")
+    return items
+
+
+def course() -> list[dict]:
+    """Every lesson page in course order (lessons/course.js), or the original eight if the
+    file is missing or broken."""
+    try:
+        return parse_course(COURSE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [dict(id=i, file=f, tab=t, on=True) for i, f, t in _COURSE_FALLBACK]
 _LESSON_NAME = re.compile(r"[a-z0-9_-]{1,64}")
 
 
@@ -105,6 +141,23 @@ class LessonBridge(QtCore.QObject):
         try:
             LESSONS.mkdir(exist_ok=True)
             (LESSONS / f"{name}.js").write_text(text, encoding="utf-8")
+        except OSError as e:
+            return str(e)
+        return ""
+
+    @QtCore.pyqtSlot(str, result=str)
+    def saveCourse(self, text: str) -> str:
+        """Write lessons/course.js from the Choose lessons page. Returns "" when saved,
+        otherwise what went wrong. The Lessons tabs change the next time Newt starts."""
+        try:
+            items = parse_course(text)
+        except ValueError as e:
+            return f"that isn't a course file ({e})"
+        missing = [c["file"] for c in items if not (LESSON_PAGES / c["file"]).exists()]
+        if missing:
+            return "these lesson pages don't exist: " + ", ".join(missing)
+        try:
+            COURSE.write_text(text, encoding="utf-8")
         except OSError as e:
             return str(e)
         return ""

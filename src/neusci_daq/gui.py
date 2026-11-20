@@ -55,7 +55,7 @@ from .trialstore import TrialStore
 from .ringbuffer import RingBuffer
 from .simpage import SimPage, with_banner
 from .breadpage import BreadboardPage
-from .membranepage import AP_PAGE, HH_PAGE, PLAS_PAGE, RC_PAGE, SPACE_PAGE, SUM_PAGE, SYN_PAGE, MembranePage   # imports QtWebEngine, which must come before the QApplication
+from .membranepage import COURSE_PAGE, LESSON_PAGES, MembranePage, course   # imports QtWebEngine, which must come before the QApplication
 from .stimwindow import StimPage
 from .protocolspage import ProtocolsPage
 from .stimuluspage import StimulusPage
@@ -503,22 +503,12 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
         # over each says so and offers to switch.
         self.sim_page = SimPage(self)
         self.board_page = BreadboardPage(self)
-        # Ions crossing a membrane, Nernst and GHK: a teaching page, always available.
-        self.membrane_page = MembranePage(self)
-        # The membrane as an RC circuit, then the same charging done by ions.
-        self.rc_page = MembranePage(self, page=RC_PAGE, what="RC circuit")
-        # Passive properties: space. The same patches in a row, as a cable: the length constant.
-        self.space_page = MembranePage(self, page=SPACE_PAGE, what="passive properties: space")
-        # A spike travelling along an axon, using the lessons above.
-        self.ap_page = MembranePage(self, page=AP_PAGE, what="action potential")
-        # Voltage-gated channels: the Hodgkin–Huxley model, the spike taken apart in one patch.
-        self.hh_page = MembranePage(self, page=HH_PAGE, what="Hodgkin–Huxley")
-        # The spike crossing to the next cell: Ca²⁺, vesicles, receptors and the synaptic current.
-        self.syn_page = MembranePage(self, page=SYN_PAGE, what="synapse")
-        # Inputs adding up to a spike: voltage-gated channels and the axon initial segment.
-        self.sum_page = MembranePage(self, page=SUM_PAGE, what="summation")
-        # Where a synapse gets stronger or weaker: spines, NMDA receptors, LTP and LTD.
-        self.plas_page = MembranePage(self, page=PLAS_PAGE, what="plasticity")
+        # The lessons: teaching pages, always available, in the course's order (lessons/course.js).
+        # Only the lessons the course includes get a tab; Choose lessons picks them and their order.
+        self.lesson_pages = {c["id"]: MembranePage(self, page=LESSON_PAGES / c["file"], what=c.get("tab") or c["id"])
+                             for c in course() if c.get("on")}
+        lesson_tabs = [(pid, page.what, page) for pid, page in self.lesson_pages.items()]
+        self.course_page = MembranePage(self, page=COURSE_PAGE, what="Choose lessons")
         placeholder = lambda title, text: self._placeholder(title, text)
         # Record and Stimulus (the stimulator and its protocols) are sub-pages of Acquisition. Either half of
         # a split can show any page, two of Acquisition's included.
@@ -531,18 +521,12 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
             ("plotcanvas", "Plot Canvas", self.analysis_page.plot_canvas),
             ("sim", "Neural network simulator", with_banner(self, self.sim_page)),
             ("board", "Breadboard simulator", with_banner(self, self.board_page)),
-            ("membrane", "Membrane potential", self.membrane_page),
-            ("rc", "Passive properties: time", self.rc_page),
-            ("space", "Passive properties: space", self.space_page),
-            ("ap", "Action potential", self.ap_page),
-            ("syn", "Synapse", self.syn_page),
-            ("sum", "Summation", self.sum_page),
-            ("plas", "Plasticity", self.plas_page),
-            ("hh", "Hodgkin–Huxley", self.hh_page)], groups=[
+            *lesson_tabs,
+            ("course", "Choose lessons", self.course_page)], groups=[
             ("acquisition", "Acquisition", ["acq", "simple", "stim"]),
             ("analysis", "Analysis", ["analysis", "singleplot", "plotcanvas"]),
             ("datasim", "Data Simulation", ["sim", "board"]),   # data sources Acquisition can record
-            ("lessons", "Lessons", ["membrane", "rc", "space", "ap", "syn", "sum", "plas", "hh"]),
+            ("lessons", "Lessons", [*self.lesson_pages, "course"]),
         ])
         self.tabs.changed.connect(self._tabs_changed)
         self.tabs.set_corner(self.tab_corner)
@@ -724,22 +708,9 @@ class MainWindow(LiveMixin, ChannelSetupMixin, SessionFilesMixin, ReviewMixin, S
                 page.apply_theme(mode)
                 if getattr(page, "sim_banner", None) is not None:
                     page.sim_banner.apply_theme(mode)
-        if getattr(self, "membrane_page", None):
-            self.membrane_page.apply_theme(mode)
-        if getattr(self, "rc_page", None):
-            self.rc_page.apply_theme(mode)
-        if getattr(self, "space_page", None):
-            self.space_page.apply_theme(mode)
-        if getattr(self, "hh_page", None):
-            self.hh_page.apply_theme(mode)
-        if getattr(self, "ap_page", None):
-            self.ap_page.apply_theme(mode)
-        if getattr(self, "syn_page", None):
-            self.syn_page.apply_theme(mode)
-        if getattr(self, "sum_page", None):
-            self.sum_page.apply_theme(mode)
-        if getattr(self, "plas_page", None):
-            self.plas_page.apply_theme(mode)
+        for page in (*getattr(self, "lesson_pages", {}).values(), getattr(self, "course_page", None)):
+            if page is not None:
+                page.apply_theme(mode)
         if hasattr(self, "analysis_page"):
             self.analysis_page.apply_theme(mode)
         self._update_theme_button()

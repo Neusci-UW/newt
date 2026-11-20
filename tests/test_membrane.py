@@ -17,7 +17,7 @@ def test_page_ships_with_the_package():
 
 
 def test_tab_is_under_simulation(win):
-    assert win.tabs.pages["membrane"] is win.membrane_page
+    assert win.tabs.pages["membrane"] is win.lesson_pages["membrane"]
     assert win.tabs.group_of["membrane"] == "lessons"
 
 
@@ -25,7 +25,7 @@ def test_tab_shows_the_page_or_explains_what_to_install(app, win):
     win.show()
     win.tabs.pick(0, "membrane")
     pump(app, 0.3)
-    page = win.membrane_page
+    page = win.lesson_pages["membrane"]
     if membranepage.available():
         assert page.view is not None and page.view.url().toLocalFile().endswith("membrane_potential.html")
         assert page.btn_refresh.isVisible()
@@ -36,22 +36,22 @@ def test_tab_shows_the_page_or_explains_what_to_install(app, win):
 
 
 def test_follows_the_app_theme(win):
-    win.membrane_page.apply_theme(style.DARK)
-    assert win.membrane_page._mode == style.DARK
-    win.membrane_page.apply_theme(style.LIGHT)
-    assert win.membrane_page._mode == style.LIGHT
+    win.lesson_pages["membrane"].apply_theme(style.DARK)
+    assert win.lesson_pages["membrane"]._mode == style.DARK
+    win.lesson_pages["membrane"].apply_theme(style.LIGHT)
+    assert win.lesson_pages["membrane"]._mode == style.LIGHT
 
 
 def test_rc_page_ships_and_is_under_simulation(app, win):
     html = membranepage.RC_PAGE.read_text(encoding="utf-8")
     assert "<title>RC Circuit and Membrane</title>" in html
-    assert win.tabs.pages["rc"] is win.rc_page
+    assert win.tabs.pages["rc"] is win.lesson_pages["rc"]
     assert win.tabs.group_of["rc"] == "lessons"
     win.show()
     win.tabs.pick(0, "rc")
     pump(app, 0.3)
     if membranepage.available():
-        assert win.rc_page.view.url().toLocalFile().endswith("rc_membrane.html")
+        assert win.lesson_pages["rc"].view.url().toLocalFile().endswith("rc_membrane.html")
     else:
-        texts = " ".join(lbl.text() for lbl in win.rc_page.findChildren(QtWidgets.QLabel))
-        assert "RC circuit" in texts
+        texts = " ".join(lbl.text() for lbl in win.lesson_pages["rc"].findChildren(QtWidgets.QLabel))
+        assert "Passive properties: time" in texts

@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neuron Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --ink:#1c2220; --muted:#5b6662; --line:#d6dcd8; --accent:#0d6b7c;
+  --on-accent:#ffffff; --accent-soft:#d3e8ec; --accent-wash:#eaf4f6; --warm:#b4582a;
+  --cell:#a9bab4; --cell-hi:#7f9790; --myelin:#ece6d3; --myelin-line:#cfc6a8; --other:#d3d9d6;
+  --font-body:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+    --on-accent:#0b1a1d; --accent-soft:#1d434b; --accent-wash:#16292d; --warm:#e0915e;
+    --cell:#4d5d58; --cell-hi:#6c807a; --myelin:#3a3527; --myelin-line:#5a523a; --other:#27302d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#191f1d; --ink:#e4eae7; --muted:#97a39e; --line:#2b3431; --accent:#4cb2c4;
+  --on-accent:#0b1a1d; --accent-soft:#1d434b; --accent-wash:#16292d; --warm:#e0915e;
+  --cell:#4d5d58; --cell-hi:#6c807a; --myelin:#3a3527; --myelin-line:#5a523a; --other:#27302d;
+  color-scheme: dark;
+}
+*{ box-sizing:border-box; }
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); line-height:1.5; }
+main{ max-width:1040px; margin:0 auto; padding:40px 16px 64px; }
+.tag{ font-family:var(--font-mono); font-size:.72rem; letter-spacing:.08em; color:var(--warm); border:1px solid var(--warm); border-radius:4px; padding:1px 6px; vertical-align:middle; }
+h1{ font-size:1.9rem; font-weight:600; margin:8px 0 6px; }
+.lede{ color:var(--muted); margin:0 0 18px; max-width:720px; }
+.card{ background:var(--surface); border:1px solid var(--line); border-radius:10px; }
+.map{ padding:10px 12px 4px; }
+.map svg{ display:block; width:100%; height:auto; }
+.map .note{ color:var(--muted); font-size:.8rem; margin:0 6px 6px; }
+
+/* the cell */
+.other .o-st{ fill:none; stroke:var(--other); stroke-linecap:round; }
+.other .o-fl{ fill:var(--other); }
+.o-tx{ fill:var(--muted); font-size:11px; font-style:italic; }
+.region{ cursor:pointer; outline:none; transition:opacity .2s; }
+.region .st{ fill:none; stroke:var(--cell); stroke-linecap:round; transition:stroke .15s; }
+.region .fl{ fill:var(--cell); transition:fill .15s; }
+.region .my{ fill:var(--myelin); stroke:var(--myelin-line); transition:fill .15s, stroke .15s; }
+.region .ves{ fill:var(--surface); }
+.region path.hit{ fill:none; stroke:transparent; stroke-width:22; stroke-linecap:round; }
+.region circle.hit{ fill:transparent; }
+.region:hover .st, .region:focus-visible .st{ stroke:var(--cell-hi); }
+.region:hover .fl, .region:focus-visible .fl{ fill:var(--cell-hi); }
+.region:hover .my, .region:focus-visible .my{ stroke:var(--cell-hi); }
+.region.on .st{ stroke:var(--accent); }
+.region.on .fl{ fill:var(--accent); }
+.region.on .my{ fill:var(--accent-soft); stroke:var(--accent); }
+svg.has-sel .region:not(.on){ opacity:.5; }
+svg.has-sel .region:not(.on):hover{ opacity:.85; }
+.lbl{ font-size:13px; font-weight:600; fill:var(--ink); cursor:pointer; }
+.lbl.on{ fill:var(--accent); }
+.lbl.in{ pointer-events:none; font-size:12px; }
+.region.on .lbl.in{ fill:var(--on-accent); }
+
+/* follow-the-signal strip */
+.seg{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:14px 0 16px; }
+.seg button{ font:inherit; font-size:.9rem; border:1px solid var(--line); background:var(--surface); color:var(--ink);
+  padding:6px 12px; border-radius:8px; cursor:pointer; }
+.seg button:hover{ border-color:var(--accent); }
+.seg button[aria-pressed="true"]{ background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+.seg .n{ font-family:var(--font-mono); margin-right:6px; opacity:.75; }
+.seg .arr{ color:var(--muted); }
+.seg .sp{ flex:1; }
+.seg label{ font-size:.85rem; color:var(--muted); display:flex; align-items:center; gap:6px; cursor:pointer; }
+
+/* panel */
+.panel{ padding:20px 22px 22px; }
+.phead{ display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+.phead .num{ font-family:var(--font-mono); font-size:1.4rem; color:var(--accent); }
+.phead h2{ font-size:1.3rem; font-weight:600; margin:0; }
+.phead .nav{ margin-left:auto; display:flex; gap:6px; }
+.phead .nav button{ font:inherit; font-size:.85rem; border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:8px; padding:4px 10px; cursor:pointer; }
+.phead .nav button:hover:not(:disabled){ border-color:var(--accent); }
+.phead .nav button:disabled{ opacity:.4; cursor:default; }
+.where{ color:var(--muted); margin:2px 0 0; }
+.job{ font-size:1.08rem; font-weight:500; margin:10px 0 4px; }
+.cols{ display:grid; grid-template-columns:1.1fr 1fr; gap:8px 28px; }
+@media (max-width:780px){ .cols{ grid-template-columns:1fr; } }
+h3{ font-size:.76rem; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); margin:18px 0 8px; font-weight:600; }
+ol.steps{ margin:0; padding-left:1.25em; }
+ol.steps li{ margin:0 0 6px; }
+.rule{ border-left:3px solid var(--accent); background:var(--accent-wash); padding:10px 14px; border-radius:0 8px 8px 0; }
+.rule .eq{ font-family:var(--font-mono); font-size:1rem; }
+.rule p{ margin:6px 0 0; color:var(--muted); font-size:.92rem; }
+.chips{ display:flex; flex-wrap:wrap; gap:6px; }
+.chip{ border:1px solid var(--line); background:var(--bg); border-radius:8px; padding:4px 10px; font-size:.86rem; }
+.chip b{ font-weight:600; }
+.nums div{ display:flex; justify-content:space-between; gap:16px; border-bottom:1px dashed var(--line); padding:5px 0; font-size:.92rem; }
+.nums .v{ font-family:var(--font-mono); white-space:nowrap; }
+.lessons{ display:flex; flex-wrap:wrap; gap:8px; }
+.lessons a{ display:inline-flex; gap:8px; align-items:baseline; border:1px solid var(--line); background:var(--bg); padding:6px 12px; border-radius:8px; color:inherit; text-decoration:none; font-size:.92rem; }
+.lessons a:hover{ border-color:var(--accent); }
+.lessons .n{ font-family:var(--font-mono); color:var(--accent); }
+.gaps{ border:1px dashed var(--warm); border-radius:8px; padding:4px 14px 10px; margin-top:18px; }
+.gaps h3{ color:var(--warm); }
+.gaps ul{ margin:0; padding-left:1.15em; font-size:.92rem; }
+.gaps li{ margin:0 0 4px; }
+body.hide-gaps .gaps{ display:none; }
+
+/* trace */
+.plot svg{ width:100%; max-width:440px; display:block; }
+.plot .grid{ stroke:var(--line); }
+.plot .axis{ stroke:var(--muted); }
+.plot .tick{ fill:var(--muted); font-family:var(--font-mono); font-size:10px; }
+.plot .tr{ fill:none; stroke-width:2; stroke-linejoin:round; }
+.plot .tr0{ stroke:var(--accent); }
+.plot .tr1{ stroke:var(--warm); }
+.plot .thr{ stroke:var(--muted); stroke-dasharray:4 4; }
+.plot .mk{ stroke:var(--muted); stroke-dasharray:2 3; }
+.plot .mtx{ fill:var(--muted); font-size:10.5px; }
+.legend{ display:flex; flex-wrap:wrap; gap:4px 16px; font-size:.85rem; color:var(--muted); margin-top:4px; }
+.legend i{ display:inline-block; width:16px; height:3px; border-radius:2px; vertical-align:middle; margin-right:6px; }
+.legend .c0{ background:var(--accent); } .legend .c1{ background:var(--warm); }
+
+/* intro state */
+.intro p{ margin:0 0 14px; color:var(--muted); }
+.tiles{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
+.tiles button{ text-align:left; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 14px; cursor:pointer; }
+.tiles button:hover{ border-color:var(--accent); }
+.tiles .n{ font-family:var(--font-mono); color:var(--accent); margin-right:6px; }
+.tiles .t{ font-weight:600; }
+.tiles .j{ display:block; color:var(--muted); font-size:.88rem; margin-top:2px; }
+.foot{ color:var(--muted); font-size:.85rem; margin-top:18px; }
+</style>
+</head>
+<body>
+<main>
+  <span class="tag">MOCK-UP</span>
+  <h1>The neuron, part by part</h1>
+  <p class="lede">Click a part of the cell to see what it does, the rule that governs it, and which lesson covers it. A signal enters at the post-synapse on the left and leaves at the pre-synapse on the right.</p>
+
+  <div class="card map">
+    <svg id="cell" viewBox="0 0 1000 340" role="group" aria-label="A neuron. Select a part to read about it.">
+      <!-- other cells, faded -->
+      <g class="other" aria-hidden="true">
+        <path class="o-st" stroke-width="4" d="M262 6 C 240 26 214 42 200 55"/>
+        <circle class="o-fl" cx="197" cy="64" r="8"/>
+        <path class="o-st" stroke-width="12" d="M938 22 C 918 90 914 150 916 190 C 918 240 926 290 940 330"/>
+        <text class="o-tx" x="268" y="17">axon of another cell</text>
+        <text class="o-tx" x="996" y="304" text-anchor="end">next cell</text>
+      </g>
+
+      <!-- dendrites (drawn under the cell body) -->
+      <g class="region" data-r="dend" tabindex="0" role="button" aria-label="Dendrite">
+        <path class="hit" d="M322 172 C 290 150 260 130 230 120 C 200 110 170 96 140 85 M140 85 C 115 76 92 66 66 56 M140 85 C 120 98 104 112 86 126 M324 212 C 290 236 262 248 236 254 C 204 262 176 272 150 282 M150 282 C 120 292 96 300 64 306 M150 282 C 128 268 110 256 84 248 M236 254 C 228 276 222 296 214 318 M352 152 C 346 124 338 104 330 88 C 322 70 310 52 296 34 M330 88 C 346 70 362 56 384 40 M364 228 C 364 252 360 274 352 296 C 346 312 338 322 326 332"/>
+        <path class="st" stroke-width="9" d="M322 172 C 290 150 260 130 230 120"/>
+        <path class="st" stroke-width="6" d="M230 120 C 200 110 170 96 140 85"/>
+        <path class="st" stroke-width="4" d="M140 85 C 115 76 92 66 66 56"/>
+        <path class="st" stroke-width="4" d="M140 85 C 120 98 104 112 86 126"/>
+        <path class="st" stroke-width="9" d="M324 212 C 290 236 262 248 236 254"/>
+        <path class="st" stroke-width="6" d="M236 254 C 204 262 176 272 150 282"/>
+        <path class="st" stroke-width="4" d="M150 282 C 120 292 96 300 64 306"/>
+        <path class="st" stroke-width="4" d="M150 282 C 128 268 110 256 84 248"/>
+        <path class="st" stroke-width="4" d="M236 254 C 228 276 222 296 214 318"/>
+        <path class="st" stroke-width="8" d="M352 152 C 346 124 338 104 330 88"/>
+        <path class="st" stroke-width="5" d="M330 88 C 322 70 310 52 296 34"/>
+        <path class="st" stroke-width="4" d="M330 88 C 346 70 362 56 384 40"/>
+        <path class="st" stroke-width="8" d="M364 228 C 364 252 360 274 352 296 C 346 312 338 322 326 332"/>
+      </g>
+
+      <!-- post-synapse: spines -->
+      <g class="region" data-r="post" tabindex="0" role="button" aria-label="Post-synapse">
+        <circle class="hit" cx="195" cy="86" r="17"/>
+        <circle class="hit" cx="158" cy="80" r="10"/>
+        <circle class="hit" cx="186" cy="281" r="10"/>
+        <path class="st" stroke-width="3" d="M192 105 L195 88"/>
+        <circle class="fl" cx="196" cy="81" r="6.5"/>
+        <path class="st" stroke-width="2.5" d="M160 94 L158 82"/>
+        <circle class="fl" cx="158" cy="78" r="4.5"/>
+        <path class="st" stroke-width="2.5" d="M184 268 L186 280"/>
+        <circle class="fl" cx="186" cy="284" r="4.5"/>
+      </g>
+
+      <!-- cell body -->
+      <g class="region" data-r="soma" tabindex="0" role="button" aria-label="Cell body">
+        <path class="fl" d="M316 190 C 316 160 340 148 362 148 C 384 148 398 164 404 180 C 410 186 418 187.5 424 187.5 L 424 192.5 C 418 192.5 410 194 404 200 C 398 216 384 232 362 232 C 340 232 316 220 316 190 Z"/>
+        <text class="lbl in" x="362" y="195" text-anchor="middle">Cell body</text>
+      </g>
+
+      <!-- axon initial segment -->
+      <g class="region" data-r="ais" tabindex="0" role="button" aria-label="Axon initial segment">
+        <path class="hit" d="M424 190 L 486 190"/>
+        <path class="st" stroke-width="5" d="M422 190 L 486 190"/>
+      </g>
+
+      <!-- axon -->
+      <g class="region" data-r="axon" tabindex="0" role="button" aria-label="Axon">
+        <path class="hit" d="M486 190 L 812 190"/>
+        <path class="st" stroke-width="4" d="M486 190 L 812 190"/>
+        <rect class="my" x="494" y="182" width="66" height="16" rx="8"/>
+        <rect class="my" x="568" y="182" width="66" height="16" rx="8"/>
+        <rect class="my" x="642" y="182" width="66" height="16" rx="8"/>
+        <rect class="my" x="716" y="182" width="66" height="16" rx="8"/>
+      </g>
+
+      <!-- pre-synapse: terminals -->
+      <g class="region" data-r="pre" tabindex="0" role="button" aria-label="Pre-synapse">
+        <path class="hit" d="M812 190 C 832 186 846 160 868 142 M812 190 L 888 190 M812 190 C 832 194 846 220 868 238"/>
+        <circle class="hit" cx="874" cy="138" r="14"/>
+        <circle class="hit" cx="896" cy="190" r="14"/>
+        <circle class="hit" cx="874" cy="242" r="14"/>
+        <path class="st" stroke-width="3" d="M812 190 C 832 186 846 160 868 142"/>
+        <path class="st" stroke-width="3" d="M812 190 L 888 190"/>
+        <path class="st" stroke-width="3" d="M812 190 C 832 194 846 220 868 238"/>
+        <circle class="fl" cx="874" cy="138" r="9"/>
+        <circle class="fl" cx="896" cy="190" r="9"/>
+        <circle class="fl" cx="874" cy="242" r="9"/>
+        <circle class="ves" cx="893" cy="186" r="1.8"/><circle class="ves" cx="899" cy="191" r="1.8"/><circle class="ves" cx="893" cy="194" r="1.8"/>
+      </g>
+
+      <!-- labels -->
+      <text class="lbl" data-r="post" x="214" y="72">Post-synapse</text>
+      <text class="lbl" data-r="dend" x="30" y="194">Dendrites</text>
+      <text class="lbl" data-r="ais" x="462" y="218" text-anchor="middle">Axon initial segment</text>
+      <text class="lbl" data-r="axon" x="650" y="168" text-anchor="middle">Axon (myelinated)</text>
+      <text class="lbl" data-r="pre" x="852" y="114" text-anchor="middle">Pre-synapse</text>
+    </svg>
+    <p class="note">Not to scale: spines and terminals are drawn far larger, and a real axon can be thousands of times longer than the cell body is wide.</p>
+  </div>
+
+  <div class="seg" id="seg"></div>
+
+  <section class="card panel" id="panel" aria-live="polite"></section>
+
+  <p class="foot">Mock-up. In the app this would sit at the top of the Lessons index; “In the lessons” opens that lesson, and the dashed “Not in the lessons yet” boxes (for you, not students) mark the topics no lesson covers.</p>
+</main>
+
+<script>
+const L = "src/neusci_daq/lessons/";
+const LESSON = {
+  1: ["membrane_potential.html", "Membrane Potential"],
+  2: ["rc_membrane.html", "Passive Properties: Time"],
+  3: ["passive_space.html", "Passive Properties: Space"],
+  4: ["action_potential.html", "The Action Potential Travels"],
+  5: ["hodgkin_huxley.html", "The Hodgkin–Huxley Model"],
+  6: ["synapse.html", "The Chemical Synapse"],
+  7: ["summation.html", "Summation and the Spike Trigger Zone"],
+  8: ["plasticity.html", "Spines and Plasticity"],
+};
+
+// ---------- voltage shapes for the small traces ----------
+const sm = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+function epsp(t, t0, A, tr, td){            // double exponential, peak A
+  const d = t - t0; if (d <= 0) return 0;
+  const tp = tr * td / (td - tr) * Math.log(td / tr);
+  return A * (Math.exp(-d / td) - Math.exp(-d / tr)) / (Math.exp(-tp / td) - Math.exp(-tp / tr));
+}
+function spike(t, ts, base){                // from `base` at ts: up to +40, down to −75, back to −65
+  const d = t - ts;
+  if (d < 0.5) return base + (40 - base) * sm(d / 0.5);
+  if (d < 1.5) return 40 - 115 * sm((d - 0.5) / 1.0);
+  return -65 - 10 * Math.exp(-(d - 1.5) / 4);
+}
+function travelling(t, ts){                 // the charging foot ahead of a spike, then the spike
+  return t < ts ? -65 + 10 * Math.exp((t - ts) / 0.25) : spike(t, ts, -55);
+}
+function aisStrong(){                       // summed input that crosses threshold, then fires
+  const dep = t => epsp(t, 2, 12, 1, 12);
+  let ts = 2; while (dep(ts) < 10) ts += 0.01;
+  return t => t < ts ? -65 + dep(t) : spike(t, ts, -65 + dep(ts));
+}
+
+// ---------- the parts ----------
+const R = {
+  post: {
+    n: 1, name: "Post-synapse", short: "Post-synapse",
+    where: "The dendritic spine and the receptors in its membrane, facing another cell’s terminal across a gap of about 20 nm.",
+    job: "Turns a chemical message back into an electrical one.",
+    steps: [
+      "Transmitter from the other cell crosses the gap and binds receptors that are themselves ion channels.",
+      "The channels open for a millisecond or two, and ions flow, pushed by their driving force V − E.",
+      "That current makes a small voltage change: an EPSP if it pushes V up toward threshold, an IPSP if it holds V down.",
+      "In a spine, NMDA receptors also let Ca²⁺ in, but only if the spine is already depolarized. That Ca²⁺ decides whether the synapse gets stronger (LTP) or weaker (LTD)."
+    ],
+    eq: "I<sub>syn</sub> = g<sub>syn</sub> (V − E<sub>syn</sub>)",
+    rule: "Ohm’s law with a battery. The conductance g<sub>syn</sub> says how many channels are open; the battery E<sub>syn</sub> decides whether the synapse excites or inhibits.",
+    players: ["<b>AMPA</b> receptors: Na⁺ and K⁺, fast excitation", "<b>NMDA</b> receptors: also Ca²⁺; need glutamate and depolarization (Mg²⁺ plug)", "<b>GABA<sub>A</sub></b> and <b>glycine</b> receptors: Cl⁻, inhibition", "<b>Metabotropic</b> receptors: act through G proteins, slowly"],
+    nums: [["E<sub>AMPA</sub>", "≈ 0 mV"], ["E<sub>Cl</sub> (GABA<sub>A</sub>, glycine)", "≈ −75 mV"], ["AMPA current lasts", "≈ 2–5 ms"], ["NMDA current lasts", "≈ 50–100 ms"]],
+    lessons: [6, 8],
+    gaps: ["Metabotropic receptors and neuromodulation: dopamine, serotonin, ACh and GABA<sub>B</sub> acting through G proteins and second messengers, slow PSPs, GIRK channels. One paragraph in lesson 6 today.",
+           "Receptor desensitization, and drugs that act on receptors (benzodiazepines, ketamine, curare)."],
+    plot: { t: [0, 20], v: [-66, -53], yt: [-65, -60, -55],
+            traces: [["Spine head", t => -65 + epsp(t, 2, 10, 0.3, 3)], ["Dendrite at the spine’s base", t => -65 + epsp(t, 2.2, 3.5, 0.7, 5)]] }
+  },
+  dend: {
+    n: 2, name: "Dendrite", short: "Dendrite",
+    where: "The branches that collect inputs: thousands of synapses on a typical neuron.",
+    job: "Collects inputs and carries them to the cell body, making them smaller and slower on the way.",
+    steps: [
+      "Current from a synapse flows along the inside of the dendrite toward the cell body, from high voltage to low.",
+      "On the way, some leaks out through channels in the wall, and some charges the membrane’s capacitor.",
+      "So an input far out arrives later, smaller and more spread out than one close to the cell body.",
+      "Inputs that arrive close together in time or place add up. An inhibitory synapse on the path can cancel (shunt) them."
+    ],
+    eq: "λ = √(r<sub>m</sub> / r<sub>i</sub>) &nbsp;·&nbsp; τ = R<sub>m</sub>C<sub>m</sub>",
+    rule: "Two constants set the spread. Every λ along the dendrite, a steady voltage change falls to 37%; τ sets how fast each patch charges. A leaky or thin dendrite has a short λ.",
+    players: ["<b>Leak channels</b>: the wall’s resistance r<sub>m</sub>", "<b>Membrane capacitance</b>: ≈ 1 µF/cm²", "<b>Cytoplasm</b>: the inside resistance r<sub>i</sub>", "<b>HCN</b> and voltage-gated <b>Na⁺/Ca²⁺</b> channels (active dendrites)"],
+    nums: [["Length constant λ", "≈ 0.2–1 mm"], ["Time constant τ", "≈ 10–30 ms"], ["Synapses per neuron", "≈ 1,000–10,000"]],
+    lessons: [2, 3, 7],
+    gaps: ["Active dendrites: dendritic Na⁺, Ca²⁺ and NMDA spikes, which make nearby inputs add up to more than their sum.",
+           "HCN channels (I<sub>h</sub>), which shorten τ far out on the dendrite so distant inputs aren’t too slow.",
+           "The back-propagating spike: only a trigger in lesson 8, never shown travelling into the dendrite."],
+    plot: { t: [0, 50], v: [-66, -60.5], yt: [-65, -63, -61],
+            traces: [["At the cell body: input near it", t => -65 + epsp(t, 2, 4, 0.5, 8)], ["The same input, far out", t => -65 + epsp(t, 3.5, 1.4, 3, 16)]] }
+  },
+  soma: {
+    n: 3, name: "Cell body", short: "Cell body",
+    where: "The cell body, around the nucleus. Electrically, a large patch of membrane where all the dendrites meet.",
+    job: "Adds up the inputs, and keeps the whole cell supplied.",
+    steps: [
+      "Current from every dendrite flows in and charges the cell body’s large membrane capacitor.",
+      "It charges slowly (τ), so inputs a few ms apart overlap and add: temporal summation.",
+      "Inputs from different branches add here too: spatial summation, excitation minus inhibition.",
+      "The cell body has few Na⁺ channels of its own. Its voltage spreads into the initial segment next door, which decides whether to fire.",
+      "It also makes the proteins (channels, receptors, pumps) that every other part depends on."
+    ],
+    eq: "C dV/dt = I<sub>syn</sub> − I<sub>leak</sub>",
+    rule: "The capacitor rule from lesson 2: the net current in sets how fast V rises. A big cell body has a big C, so it needs more current, for longer.",
+    players: ["<b>Leak K⁺</b> and <b>Cl⁻</b> channels: set the resting voltage", "<b>Na⁺/K⁺ pump</b>: 3 Na⁺ out, 2 K⁺ in", "<b>Ca²⁺-activated K⁺</b> channels: the slow afterhyperpolarization", "<b>Nucleus</b> and ribosomes: new channels and receptors"],
+    nums: [["Resting voltage", "≈ −65 to −70 mV"], ["Diameter", "≈ 10–30 µm"], ["Time constant τ", "≈ 10–30 ms"]],
+    lessons: [1, 2, 7],
+    gaps: ["The Na⁺/K⁺ pump and how the gradients are kept up: every lesson holds the concentrations fixed.",
+           "Firing patterns: regular-spiking, fast-spiking and bursting cells, and spike-frequency adaptation."],
+    plot: { t: [0, 50], v: [-66, -52], yt: [-65, -60, -55], thr: [-55, "threshold, at the initial segment"],
+            traces: [["Three inputs, 5 ms apart", t => -65 + epsp(t, 2, 4, 1, 12) + epsp(t, 7, 4, 1, 12) + epsp(t, 12, 4, 1, 12)], ["One input alone", t => -65 + epsp(t, 2, 4, 1, 12)]] }
+  },
+  ais: {
+    n: 4, name: "Axon initial segment (AIS)", short: "AIS",
+    where: "The first 20–60 µm of the axon, just past the cell body.",
+    job: "Decides: is the summed input big enough to fire a spike?",
+    steps: [
+      "Voltage from the cell body spreads into the initial segment.",
+      "It is packed with voltage-gated Na⁺ channels, far denser than in the cell body, so it reaches threshold first.",
+      "Past threshold, Na⁺ flowing in raises V, which opens more Na⁺ channels: positive feedback, and a spike. Below it, the leak wins and V falls back. All or none.",
+      "The spike runs forward down the axon, and also back into the cell body and dendrites."
+    ],
+    eq: "fires when inward I<sub>Na</sub> &gt; outward I<sub>K</sub> + I<sub>leak</sub>",
+    rule: "The tug of war from lesson 5. Below threshold, a small push up makes more current flow out; above it, more flows in, and the loop runs away.",
+    players: ["<b>Na<sub>V</sub>1.6</b>: a Na⁺ channel that opens at lower voltages", "<b>K<sub>V</sub>1</b> and <b>K<sub>V</sub>7</b> K⁺ channels: set threshold and firing rate", "<b>Ankyrin-G</b>: the scaffold that gathers the channels here", "<b>Axo-axonic</b> synapses: inhibition right at the decision point"],
+    nums: [["Length", "≈ 20–60 µm"], ["Threshold", "≈ −55 mV"], ["Refractory period", "≈ 1–2 ms"]],
+    lessons: [4, 5, 7],
+    gaps: ["Rate coding: how a stronger input gives more spikes per second (the f–I curve), and why the refractory period caps it.",
+           "Adaptation and bursting: M-current, Ca²⁺-activated K⁺ channels, T-type Ca²⁺ channels."],
+    plot: { t: [0, 25], v: [-80, 50], yt: [-65, 0, 40], thr: [-55, "threshold"],
+            traces: [["Input reaches threshold", aisStrong()], ["A slightly weaker input", t => -65 + epsp(t, 2, 8.5, 1, 12)]] }
+  },
+  axon: {
+    n: 5, name: "Axon", short: "Axon",
+    where: "The cable from the initial segment to the terminals: under a millimetre to about a metre long.",
+    job: "Carries the spike to the terminals without letting it shrink.",
+    steps: [
+      "Current from the spike flows ahead along the inside of the axon and charges the next patch of membrane.",
+      "When that patch reaches threshold it fires its own spike. Each patch is a fresh amplifier, so the spike arrives full size.",
+      "Behind the spike the Na⁺ channels are inactivated (refractory), so it can only move forward.",
+      "Myelin wraps the axon and cuts leak and capacitance; the spike jumps from node to node (saltatory conduction)."
+    ],
+    eq: "speed ∝ √d (bare) &nbsp;·&nbsp; speed ∝ d (myelinated)",
+    rule: "A wider axon has less resistance inside, so current spreads further ahead. With myelin, speed grows in proportion to diameter, so it wins for all but the thinnest axons.",
+    players: ["<b>Na<sub>V</sub></b> and <b>K<sub>V</sub></b> channels, packed at the nodes of Ranvier", "<b>Myelin</b>: oligodendrocytes (brain, spinal cord), Schwann cells (nerves)", "<b>Axoplasm</b>: the inside resistance", "<b>Motor proteins</b>: carry cargo to and from the terminals"],
+    nums: [["Pain (C) fibre, bare, 1 µm", "≈ 1 m/s"], ["Squid giant axon, bare, 0.5 mm", "≈ 20 m/s"], ["Motor axon, myelinated, 15 µm", "≈ 80 m/s"]],
+    lessons: [3, 4, 5],
+    gaps: ["Extracellular recording and the compound action potential: what an electrode on a nerve actually picks up, which is what students record in lab.",
+           "Demyelinating disease and conduction block (MS, Guillain–Barré) beyond a mention."],
+    plot: { t: [0, 8], v: [-80, 50], yt: [-65, 0, 40],
+            traces: [["Near the cell body", t => travelling(t, 2)], ["5 cm further on, 1 ms later (50 m/s)", t => travelling(t, 3)]] }
+  },
+  pre: {
+    n: 6, name: "Pre-synapse", short: "Pre-synapse",
+    where: "The axon’s terminals (boutons), each facing a target cell across the gap.",
+    job: "Turns the spike back into a chemical message.",
+    steps: [
+      "The spike invades the terminal and opens voltage-gated Ca²⁺ channels.",
+      "Ca²⁺ rushes in (outside it is about 10,000 times higher) and within a fraction of a millisecond makes docked vesicles fuse with the membrane.",
+      "Each vesicle releases one packet (quantum) of transmitter. Release is by chance: a spike releases a few of the docked vesicles, or none.",
+      "Spikes close together leave Ca²⁺ behind and release more (facilitation), or use up vesicles and release less (depression). Vesicles are refilled and reused."
+    ],
+    eq: "release ∝ [Ca²⁺]⁴",
+    rule: "About four Ca²⁺ ions must bind to trigger fusion, so release is steep: doubling the Ca²⁺ entry gives roughly 16 times the release.",
+    players: ["Voltage-gated <b>Ca²⁺ channels</b> (N- and P/Q-type)", "<b>Synaptotagmin</b>: the Ca²⁺ sensor", "<b>SNARE</b> proteins: zip the vesicle to the membrane (botulinum toxin cuts them)", "<b>Transporters</b>: refill vesicles and clear the gap"],
+    nums: [["Synaptic delay", "≈ 0.5 ms"], ["Ca²⁺ inside, at rest", "≈ 0.1 µM"], ["Ca²⁺ near an open channel", "≈ 10–100 µM"]],
+    lessons: [6],
+    gaps: ["Electrical synapses (gap junctions): fast, two-way, no transmitter.",
+           "Presynaptic inhibition and autoreceptors.",
+           "The neuromuscular junction as its own case: end-plate potential, safety factor, myasthenia gravis, botulinum toxin."],
+    plot: { t: [0, 7], v: [-80, 70], yt: [-65, 0, 40], marks: [[2.3, "Ca²⁺ channels open"], [2.6, "vesicles fuse"]],
+            traces: [["Terminal voltage", t => travelling(t, 1.5)]] }
+  },
+};
+const ORDER = ["post", "dend", "soma", "ais", "axon", "pre"];
+
+// ---------- small trace ----------
+const fmt = v => v < 0 ? "−" + Math.abs(v) : String(v);
+function plotSVG(p){
+  const W = 420, H = 190, l = 40, r = 12, top = 12, b = 28;
+  const x = t => l + (t - p.t[0]) / (p.t[1] - p.t[0]) * (W - l - r);
+  const y = v => top + (p.v[1] - v) / (p.v[1] - p.v[0]) * (H - top - b);
+  let s = "";
+  for (const v of p.yt) s += `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${l - 6}" y="${y(v) + 3.5}" text-anchor="end">${fmt(v)}</text>`;
+  s += `<line class="axis" x1="${l}" x2="${W - r}" y1="${H - b}" y2="${H - b}"/>`;
+  const span = p.t[1] - p.t[0];
+  for (const t of [p.t[0], p.t[0] + span / 2, p.t[1]]) s += `<text class="tick" x="${x(t)}" y="${H - b + 14}" text-anchor="middle">${+t.toFixed(1)}</text>`;
+  s += `<text class="tick" x="${W - r}" y="${H - 2}" text-anchor="end">time (ms)</text><text class="tick" x="2" y="${top - 2}">mV</text>`;
+  if (p.thr) s += `<line class="thr" x1="${l}" x2="${W - r}" y1="${y(p.thr[0])}" y2="${y(p.thr[0])}"/><text class="mtx" x="${W - r}" y="${y(p.thr[0]) - 4}" text-anchor="end">${p.thr[1]}</text>`;
+  (p.marks || []).forEach(([t, txt], i) => {
+    s += `<line class="mk" x1="${x(t)}" x2="${x(t)}" y1="${top}" y2="${H - b}"/><text class="mtx" x="${x(t) + 4}" y="${top + 10 + i * 13}">${txt}</text>`;
+  });
+  p.traces.forEach(([, f], i) => {
+    let d = "";
+    for (let k = 0; k <= 300; k++){
+      const t = p.t[0] + span * k / 300, v = Math.max(p.v[0], Math.min(p.v[1], f(t)));
+      d += (k ? "L" : "M") + x(t).toFixed(1) + " " + y(v).toFixed(1);
+    }
+    s += `<path class="tr tr${i}" d="${d}"/>`;
+  });
+  const legend = p.traces.map(([name], i) => `<span><i class="c${i}"></i>${name}</span>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Voltage over time here">${s}</svg><div class="legend">${legend}</div>`;
+}
+
+// ---------- panel ----------
+const panel = document.getElementById("panel");
+const svg = document.getElementById("cell");
+let current = null;
+
+function intro(){
+  panel.innerHTML = `<div class="intro"><p>Pick a part of the cell above, or start where a signal starts: the post-synapse.</p><div class="tiles">${
+    ORDER.map(k => `<button data-go="${k}"><span class="n">${R[k].n}</span><span class="t">${R[k].name}</span><span class="j">${R[k].job}</span></button>`).join("")
+  }</div></div>`;
+}
+
+function render(k){
+  const r = R[k], i = ORDER.indexOf(k);
+  panel.innerHTML = `
+    <div class="phead"><span class="num">${String(r.n).padStart(2, "0")}</span><h2>${r.name}</h2>
+      <div class="nav"><button data-go="${ORDER[i - 1] || ""}" ${i ? "" : "disabled"}>← Back</button><button data-go="${ORDER[i + 1] || ""}" ${i < ORDER.length - 1 ? "" : "disabled"}>Next part →</button></div></div>
+    <p class="where">${r.where}</p>
+    <p class="job">${r.job}</p>
+    <div class="cols">
+      <div>
+        <h3>What happens here</h3>
+        <ol class="steps">${r.steps.map(s => `<li>${s}</li>`).join("")}</ol>
+        <h3>The rule</h3>
+        <div class="rule"><div class="eq">${r.eq}</div><p>${r.rule}</p></div>
+        <h3>Key players</h3>
+        <div class="chips">${r.players.map(p => `<span class="chip">${p}</span>`).join("")}</div>
+      </div>
+      <div>
+        <h3>What the voltage looks like here</h3>
+        <div class="plot">${plotSVG(r.plot)}</div>
+        <h3>Typical numbers</h3>
+        <div class="nums">${r.nums.map(([a, b]) => `<div><span>${a}</span><span class="v">${b}</span></div>`).join("")}</div>
+        <h3>In the lessons</h3>
+        <div class="lessons">${r.lessons.map(n => `<a href="${L + LESSON[n][0]}"><span class="n">${String(n).padStart(2, "0")}</span>${LESSON[n][1]}</a>`).join("")}</div>
+        <div class="gaps"><h3>Not in the lessons yet</h3><ul>${r.gaps.map(g => `<li>${g}</li>`).join("")}</ul></div>
+      </div>
+    </div>`;
+}
+
+function select(k){
+  current = k || null;
+  svg.classList.toggle("has-sel", !!current);
+  svg.querySelectorAll(".region").forEach(g => g.classList.toggle("on", g.dataset.r === current));
+  svg.querySelectorAll(".lbl[data-r]").forEach(t => t.classList.toggle("on", t.dataset.r === current));
+  seg.querySelectorAll("button[data-go]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.go === current)));
+  current ? render(current) : intro();
+}
+
+// follow-the-signal strip
+const seg = document.getElementById("seg");
+seg.innerHTML = ORDER.map((k, i) => (i ? `<span class="arr">→</span>` : "") +
+  `<button data-go="${k}" aria-pressed="false"><span class="n">${R[k].n}</span>${R[k].short}</button>`).join("") +
+  `<span class="sp"></span><label><input type="checkbox" id="showGaps" checked> Show what the lessons don’t cover yet</label>`;
+
+document.addEventListener("click", e => {
+  const go = e.target.closest("[data-go]");
+  if (go && go.dataset.go) return select(go.dataset.go);
+  const hit = e.target.closest(".region, .lbl[data-r]");
+  if (hit) select(hit.dataset.r === current ? null : hit.dataset.r);
+});
+svg.addEventListener("keydown", e => {
+  const g = e.target.closest(".region");
+  if (g && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); select(g.dataset.r); }
+});
+document.addEventListener("keydown", e => {
+  if (!current || e.target.closest("input")) return;
+  const i = ORDER.indexOf(current);
+  if (e.key === "ArrowRight" && i < ORDER.length - 1) select(ORDER[i + 1]);
+  if (e.key === "ArrowLeft" && i > 0) select(ORDER[i - 1]);
+});
+document.getElementById("showGaps").addEventListener("change", e => document.body.classList.toggle("hide-gaps", !e.target.checked));
+
+select(null);
+</script>
+</body>
+</html>
